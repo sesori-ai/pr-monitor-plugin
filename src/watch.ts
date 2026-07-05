@@ -28,6 +28,9 @@ export class PrWatch {
   private readonly startedAt: number
 
   private snapshot: PrSnapshot | undefined
+  // Last MERGEABLE/CONFLICTING value seen, carried across transient UNKNOWN
+  // polls so a MERGEABLE -> UNKNOWN -> CONFLICTING settle is still detected.
+  private lastDefiniteMergeable: "MERGEABLE" | "CONFLICTING" | undefined
   private dirty = false
   private lastActivityAt = 0
   private lastFlushAt: number
@@ -47,6 +50,11 @@ export class PrWatch {
     this.startedAt = input.deps.now()
     this.lastFlushAt = this.startedAt
     this.snapshot = input.initial
+    this.rememberDefiniteMergeable(input.initial)
+  }
+
+  private rememberDefiniteMergeable(snapshot: PrSnapshot): void {
+    if (snapshot.mergeable !== "UNKNOWN") this.lastDefiniteMergeable = snapshot.mergeable
   }
 
   get isStopped(): boolean {
@@ -76,12 +84,13 @@ export class PrWatch {
       }
       this.consecutiveFailures = 0
       this.snapshotAt = this.fetchStartedAt
-      if (this.snapshot !== undefined && detectActivity(this.snapshot, next)) {
+      if (this.snapshot !== undefined && detectActivity(this.snapshot, next, this.lastDefiniteMergeable)) {
         this.dirty = true
         this.lastActivityAt = this.deps.now()
         this.holdStartedAt = undefined
       }
       this.snapshot = next
+      this.rememberDefiniteMergeable(next)
       this.maybeAutoFlush()
     } catch (error) {
       this.deps.log(`unexpected tick error for ${targetKey(this.target)}: ${error}`)
@@ -110,6 +119,7 @@ export class PrWatch {
     try {
       this.fetchStartedAt = this.deps.now()
       this.snapshot = await this.deps.fetchSnapshot()
+      this.rememberDefiniteMergeable(this.snapshot)
       this.consecutiveFailures = 0
       this.snapshotAt = this.fetchStartedAt
     } catch (error) {

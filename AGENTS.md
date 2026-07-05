@@ -31,7 +31,7 @@ src/
 
 - **agent captured at start time** and passed into `deliver` (the default agent is a subagent, which fails — must be explicit). **model captured per-message** via the `chat.message` hook (`sessionModels` map) so reports use the user's current model.
 - **Debounce + CI-hold** in `maybeAutoFlush` (`src/watch.ts:139`): wait `debounceMinutes` of quiet after activity; if CI is running on an OPEN PR, hold up to `maxCiWaitMinutes` before flushing.
-- **detectActivity** (`src/activity.ts:22`): state, mergeable, reviews, unresolved threads, inline comments, issue comments, and CI **conclusion** count as activity. CI transitions into "running" and per-check progress do **NOT**.
+- **detectActivity** (`src/activity.ts`): state, mergeable, reviews, unresolved threads, inline comments, issue comments, and CI **conclusion** count as activity. CI transitions into "running" and per-check progress do **NOT**. Mergeability is compared against the last *definite* (MERGEABLE/CONFLICTING) value — tracked by `PrWatch.lastDefiniteMergeable` and passed in — not the immediately previous snapshot, so transient `UNKNOWN` churn from base-branch merges stays quiet while a real `MERGEABLE -> UNKNOWN -> CONFLICTING` settle (which spans two polls) is still caught.
 - **Failure handling** — `handlePollFailure` (`src/watch.ts:124`): notFound → stop with notice; 10 consecutive poll failures → stop. 10 consecutive delivery failures → stop. Delivery failures roll back the baseline so the same activity is retried.
 - **Reentrancy guard** — `ticking` flag prevents overlapping polls.
 - **Reload takeover** — `globalThis.__sesoriPrMonitorTakeovers` (`src/index.ts:37`) kills zombie timers from prior plugin instances; old watches send one factual stop notice.
