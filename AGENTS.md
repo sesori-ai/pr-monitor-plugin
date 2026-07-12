@@ -35,7 +35,7 @@ src/
 - **Failure handling** — `handlePollFailure` (`src/watch.ts:124`): notFound → stop with notice; 10 consecutive poll failures → stop. 10 consecutive delivery failures → stop. Delivery failures roll back the baseline so the same activity is retried.
 - **Reentrancy guard** — `ticking` flag prevents overlapping polls.
 - **Reload takeover** — `globalThis.__sesoriPrMonitorTakeovers` (`src/index.ts:37`) kills zombie timers from prior plugin instances; old watches send one factual stop notice.
-- **Lifecycle** — `session.deleted` event and `dispose` hook stop matching watches.
+- **Lifecycle** — `session.deleted` stops matching watches silently. Graceful `dispose` stops timers, delivers a shutdown notice to each owning session, and awaits delivery attempts; abrupt process termination cannot be detected.
 - Reports are **facts only**: counts and authors, never comment bodies or advice.
 
 ## Configuration
@@ -59,3 +59,8 @@ File: `.opencode/pr-monitor.json` (searched in `directory`, then `worktree`). Lo
 - `createGhRunner($)` (`src/github.ts:39`) wraps Bun `$` shell: ``$`gh ${args}`.quiet().nothrow()``, throws `PollError(msg, { notFound })` on non-zero exit.
 - Single GraphQL doc `PR_QUERY` (`src/github.ts:51`) fetches title, url, state, mergeable, head SHA, latest commit's check rollup, review requests/latestReviews, review threads + comments, issue comment count.
 - `normalizeSnapshot` (`src/github.ts:111`) → `PrSnapshot`; `ciPhase` → `none|running|concluded`.
+
+## Releasing
+
+- A release is just an annotated `vX.Y.Z` Git tag pushed to GitHub; there is no build, npm publication, or separate GitHub Release step.
+- Before tagging, update `package.json`, `package-lock.json`, and `CHANGELOG.md`, commit, then run `git tag -a vX.Y.Z -m "vX.Y.Z — summary"` and push both the commit and tag.

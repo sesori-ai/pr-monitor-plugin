@@ -39,7 +39,7 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
   takeovers.get(directory)?.()
   takeovers.set(directory, () => {
     for (const entry of [...watches.values()]) {
-      entry.watch.stopWithNotice(
+      void entry.watch.stopWithNotice(
         "Monitor stopped: the pr-monitor plugin was reloaded. Re-start monitoring if still needed.",
       )
     }
@@ -209,7 +209,13 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
     },
 
     dispose: async () => {
-      for (const entry of [...watches.values()]) entry.watch.stop()
+      await Promise.all(
+        [...watches.values()].map((entry) =>
+          entry.watch.stopWithNotice(
+            "Monitor stopped: opencode is shutting down. Re-start monitoring after opencode starts if still needed.",
+          ),
+        ),
+      )
     },
   }
 }

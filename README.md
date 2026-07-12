@@ -9,7 +9,7 @@ An [opencode](https://opencode.ai) plugin that watches GitHub pull requests in t
 - Aggregates activity with a **rolling debounce**: any new activity resets a quiet timer; a report is delivered only after the PR has been quiet for the configured window.
 - **CI hold**: a due report is held while a check suite is still running (bounded by `maxCiWaitMinutes`), so you get one report with the CI verdict instead of two.
 - Reports are **facts only** — counts, authors, check names. No advice, no comment bodies.
-- Monitors are **per-session and in-memory**: they stop automatically when the PR is merged/closed or the owning session is deleted, and they do not survive an opencode restart.
+- Monitors are **per-session and in-memory**: they stop automatically when the PR is merged/closed or the owning session is deleted, and they do not survive an opencode restart. Graceful opencode shutdowns deliver a stop notice to the owning session.
 
 ### Example report
 
@@ -33,7 +33,7 @@ Add the plugin to your project's `opencode.json` (committed — the whole team g
 
 ```jsonc
 {
-  "plugin": ["github:sesori-ai/opencode-pr-monitor#v0.1.2"]
+  "plugin": ["github:sesori-ai/opencode-pr-monitor#v0.1.6"]
 }
 ```
 
@@ -80,6 +80,7 @@ Optional, per project: `.opencode/pr-monitor.json` (looked up in the project dir
 - **"New since last flush"** counts comments created after the watch's baseline, which advances on every delivered report or manual `flush`.
 - **Failure handling**: 10 consecutive poll failures (or report-delivery failures) stop the monitor with a notice. A deleted/inaccessible PR stops it immediately.
 - **Terminal states**: a report describing a merged/closed PR is delivered with a `Monitor stopped: PR merged|closed` line, then the monitor stops itself. All stop reasons (merge/close, PR deleted, repeated poll failures, plugin reload) use the same `Monitor stopped: <reason>` phrasing.
+- **Shutdowns**: graceful opencode shutdowns deliver a stop notice before disposing the monitor. Abrupt process termination cannot be detected and produces no notice.
 
 ## Development
 
@@ -89,6 +90,16 @@ npm run typecheck
 ```
 
 The entry point is `src/index.ts`; opencode executes TypeScript directly (no build step). The opencode plugin loader invokes every export of the entry module as a plugin, so `PrMonitorPlugin` must remain its sole export.
+
+## Releasing
+
+A release is created by pushing an annotated version tag (`vX.Y.Z`) to a commit on GitHub. There is no build, npm publication, or separate GitHub Release step. Update `package.json`, `package-lock.json`, and `CHANGELOG.md`, commit the changes, then tag and push:
+
+```sh
+git tag -a vX.Y.Z -m "vX.Y.Z — summary"
+git push origin main
+git push origin vX.Y.Z
+```
 
 ## License
 

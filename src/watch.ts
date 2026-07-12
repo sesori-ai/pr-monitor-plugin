@@ -111,7 +111,7 @@ export class PrWatch {
     if (this.stopped || this.snapshot === undefined) return
     const report = buildReport(this.target, this.snapshot, { baselineMs: 0 })
     this.lastFlushAt = this.snapshotAt ?? this.startedAt
-    this.deliverOrLog(report)
+    void this.deliverOrLog(report)
   }
 
   /** Manual flush: always re-fetches and always returns a full report. */
@@ -140,23 +140,23 @@ export class PrWatch {
     this.deps.onStopped()
   }
 
-  stopWithNotice(reason: string): void {
+  async stopWithNotice(reason: string): Promise<void> {
     if (this.stopped) return
-    this.deliverOrLog(`[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) — ${reason}`)
     this.stop()
+    await this.deliverOrLog(`[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) — ${reason}`)
   }
 
   private handlePollFailure(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error)
     if (error instanceof PollError && error.notFound) {
-      this.deliverOrLog(`[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) — Monitor stopped: PR not found (deleted or inaccessible). Last error: ${message}`)
+      void this.deliverOrLog(`[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) — Monitor stopped: PR not found (deleted or inaccessible). Last error: ${message}`)
       this.stop()
       return
     }
     this.consecutiveFailures += 1
     this.deps.log(`poll failed for ${targetKey(this.target)} (${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${message}`)
     if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-      this.deliverOrLog(`[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) — Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive poll failures. Last error: ${message}`)
+      void this.deliverOrLog(`[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) — Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive poll failures. Last error: ${message}`)
       this.stop()
     }
   }
@@ -198,8 +198,12 @@ export class PrWatch {
     )
   }
 
-  private deliverOrLog(message: string): void {
-    void this.deps.deliver(message).catch((error: unknown) => this.deps.log(`report delivery failed for ${targetKey(this.target)}: ${error}`))
+  private async deliverOrLog(message: string): Promise<void> {
+    try {
+      await this.deps.deliver(message)
+    } catch (error) {
+      this.deps.log(`report delivery failed for ${targetKey(this.target)}: ${error}`)
+    }
   }
 
   private flush(forcedHoldMinutes: number | undefined): string {
