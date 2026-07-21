@@ -13,6 +13,7 @@ import { join } from "node:path"
 import { tool, type Plugin } from "@opencode-ai/plugin"
 import { loadConfig, type MonitorConfig } from "./config"
 import { createGhRunner, fetchPrSnapshot, type PrSnapshot } from "./github"
+import { markReadyForHumanReview } from "./label"
 import { parseTarget, targetKey, type Target } from "./target"
 import { PrWatch } from "./watch"
 
@@ -154,6 +155,20 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
     )
   }
 
+  const markReady = async (pr: string): Promise<string> => {
+    const target = parseTarget(pr)
+    if ("error" in target) return target.error
+    const config = await loadConfig(
+      [directory, worktree].map((dir) => join(dir, ".opencode", "pr-monitor.json")),
+      log,
+    )
+    try {
+      return await markReadyForHumanReview(runGh, target, config.readyLabel)
+    } catch (error) {
+      return `Cannot mark ${targetKey(target)} as ready for human review: ${(error as Error).message}`
+    }
+  }
+
   return {
     tool: {
       pr_monitor: tool({
@@ -163,15 +178,19 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
           "as a '[PR Monitor]' message stating facts only. Actions: start (begin watching a PR), stop (end watching), " +
           "flush (on-demand: immediately return a full status report and reset the 'new since' baseline; a delivered " +
           "report already advances the baseline, so a flush after handling one is not needed), status (list this " +
-          "session's monitors). The pr argument must be explicit 'owner/repo#123' or a full " +
+          "session's monitors), mark_ready (add the configured ready-for-human-review label to the PR on GitHub — use " +
+          "once CI is green and review feedback is addressed, to signal a human should review now; does not require an " +
+          "active monitor). The pr argument must be explicit 'owner/repo#123' or a full " +
           "PR URL; 'all' is allowed for stop/flush. Tuning lives in .opencode/pr-monitor.json. Monitors are per-session " +
           "and do not survive opencode restarts.",
         args: {
-          action: tool.schema.enum(["start", "stop", "flush", "status"]).describe("What to do"),
+          action: tool.schema.enum(["start", "stop", "flush", "status", "mark_ready"]).describe("What to do"),
           pr: tool.schema
             .string()
             .optional()
-            .describe("PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush; 'all' allowed for stop/flush."),
+            .describe(
+              "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready; 'all' allowed for stop/flush.",
+            ),
         },
         async execute(args, context) {
           const sessionID = context.sessionID
@@ -200,6 +219,10 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
               const active = sessionWatches(sessionID)
               if (active.length === 0) return "No active monitors in this session."
               return active.map((watch) => watch.statusLine()).join("\n")
+            }
+            case "mark_ready": {
+              if (!args.pr || args.pr === "all") return "action 'mark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL."
+              return await markReady(args.pr)
             }
           }
         },

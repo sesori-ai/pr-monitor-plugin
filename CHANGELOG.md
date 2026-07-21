@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Claude Code plugin.** The repo is now dual-target: alongside the opencode plugin, it ships a Claude Code plugin (`.claude-plugin/` manifest + marketplace, bundled MCP stdio server, hooks, `/pr-monitor:watch` and `/pr-monitor:status` commands) built on the same core (`src/target.ts`, `src/github.ts`, `src/activity.ts`, `src/watch.ts`, `src/report.ts`, `src/config.ts`). Claude Code cannot push messages into a session, so delivery is passive: the MCP server (`claude/mcp-server.ts`, bundled to `dist/mcp-server.mjs`) spools reports to `~/.claude/pr-monitor/spool/<claude pid>/`, and plugin hooks (`hooks/drain-spool.mjs`) inject them into the conversation at the next user prompt, tool call, or turn end (the Stop hook holds an ending turn to deliver pending reports).
 - `desktopNotifications` config option (default `false`, Claude Code shell only): emit an OS notification when a report is spooled, covering the gap where a report lands while the session is idle.
 - The Claude Code shell reads config from `.claude/pr-monitor.json`, falling back to `.opencode/pr-monitor.json`.
+- `mark_ready` tool action (both shells) and `/pr-monitor:ready` command: add the configured `readyLabel` label (default `ready-for-human-review`, created green with a description if missing from the repo) to a PR on GitHub, signalling it is ready for human review. Works without an active monitor; refuses targets that are not open PRs (plain issues, merged/closed PRs).
 
 ### Changed
 

@@ -30970,7 +30970,8 @@ var DEFAULT_CONFIG = {
   pollIntervalSeconds: 60,
   ignoreCommentTag: void 0,
   announceOnStart: true,
-  desktopNotifications: false
+  desktopNotifications: false,
+  readyLabel: "ready-for-human-review"
 };
 var MIN_POLL_INTERVAL_SECONDS = 30;
 function resolveConfig(raw) {
@@ -30991,6 +30992,8 @@ function resolveConfig(raw) {
   if (typeof announce === "boolean") cfg.announceOnStart = announce;
   const notify = record2["desktopNotifications"];
   if (typeof notify === "boolean") cfg.desktopNotifications = notify;
+  const label = record2["readyLabel"];
+  if (typeof label === "string" && label.length > 0) cfg.readyLabel = label;
   return cfg;
 }
 async function loadConfig(paths, log2) {
@@ -31138,6 +31141,41 @@ function targetKey(target) {
 }
 function targetUrl(target) {
   return `https://github.com/${target.owner}/${target.repo}/pull/${target.number}`;
+}
+
+// src/label.ts
+var READY_LABEL_COLOR = "0e8a16";
+var READY_LABEL_DESCRIPTION = "This PR is ready for human review";
+async function markReadyForHumanReview(runGh2, target, label) {
+  const repo = `repos/${target.owner}/${target.repo}`;
+  let raw;
+  try {
+    raw = await runGh2(["api", `${repo}/pulls/${target.number}`]);
+  } catch (error51) {
+    if (error51 instanceof PollError && error51.notFound) {
+      throw new Error(`it is not a pull request, or it does not exist or is not accessible.`);
+    }
+    throw error51;
+  }
+  const pr = JSON.parse(raw);
+  if (pr.merged === true || pr.state !== "open") {
+    throw new Error(`the PR is already ${pr.merged === true ? "MERGED" : "CLOSED"}.`);
+  }
+  try {
+    await runGh2([
+      "api",
+      `${repo}/labels`,
+      "-f",
+      `name=${label}`,
+      "-f",
+      `color=${READY_LABEL_COLOR}`,
+      "-f",
+      `description=${READY_LABEL_DESCRIPTION}`
+    ]);
+  } catch {
+  }
+  await runGh2(["api", `${repo}/issues/${target.number}/labels`, "-f", `labels[]=${label}`]);
+  return `Marked ${targetKey(target)} as ready for human review: label "${label}" added.`;
 }
 
 // src/activity.ts
@@ -31600,6 +31638,19 @@ ${raced.watch.statusLine()}`;
   return `Started monitoring ${key} \u2014 "${initial.title}".
 ` + (config2.announceOnStart ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : "") + `Polling every ${config2.pollIntervalSeconds}s; after activity settles for ${config2.debounceMinutes} quiet minutes, a report is injected into this conversation at your next tool call, user message, or turn end. The monitor stops automatically when the PR is merged or closed, and does not survive this Claude Code session.`;
 };
+var markReady = async (pr) => {
+  const target = parseTarget(pr);
+  if ("error" in target) return target.error;
+  const config2 = await loadConfig(
+    [join2(projectDir, ".claude", "pr-monitor.json"), join2(projectDir, ".opencode", "pr-monitor.json")],
+    log
+  );
+  try {
+    return await markReadyForHumanReview(runGh, target, config2.readyLabel);
+  } catch (error51) {
+    return `Cannot mark ${targetKey(target)} as ready for human review: ${error51.message}`;
+  }
+};
 var handle = async (action, pr) => {
   switch (action) {
     case "start": {
@@ -31625,6 +31676,10 @@ var handle = async (action, pr) => {
     case "status": {
       if (watches.size === 0) return "No active monitors in this session.";
       return [...watches.values()].map((entry) => entry.watch.statusLine()).join("\n");
+    }
+    case "mark_ready": {
+      if (!pr || pr === "all") return "action 'mark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL.";
+      return await markReady(pr);
     }
   }
 };
@@ -31653,10 +31708,12 @@ var server = new McpServer({ name: "pr-monitor", version: "0.2.0" });
 server.registerTool(
   "pr_monitor",
   {
-    description: "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments, mergeability changes, and merge/close. Changes are aggregated (rolling debounce) and injected into THIS session as '[PR Monitor]' messages stating facts only, delivered at your next tool call, user message, or turn end. Actions: start (begin watching a PR), stop (end watching), flush (on-demand: immediately return a full status report and reset the 'new since' baseline; a delivered report already advances the baseline, so a flush after handling one is not needed), status (list this session's monitors). The pr argument must be explicit 'owner/repo#123' or a full PR URL; 'all' is allowed for stop/flush. Tuning lives in .claude/pr-monitor.json. Monitors are per-session and do not survive Claude Code restarts.",
+    description: "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments, mergeability changes, and merge/close. Changes are aggregated (rolling debounce) and injected into THIS session as '[PR Monitor]' messages stating facts only, delivered at your next tool call, user message, or turn end. Actions: start (begin watching a PR), stop (end watching), flush (on-demand: immediately return a full status report and reset the 'new since' baseline; a delivered report already advances the baseline, so a flush after handling one is not needed), status (list this session's monitors), mark_ready (add the configured ready-for-human-review label to the PR on GitHub \u2014 use once CI is green and review feedback is addressed, to signal a human should review now; does not require an active monitor). The pr argument must be explicit 'owner/repo#123' or a full PR URL; 'all' is allowed for stop/flush. Tuning lives in .claude/pr-monitor.json. Monitors are per-session and do not survive Claude Code restarts.",
     inputSchema: {
-      action: external_exports.enum(["start", "stop", "flush", "status"]).describe("What to do"),
-      pr: external_exports.string().optional().describe("PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush; 'all' allowed for stop/flush.")
+      action: external_exports.enum(["start", "stop", "flush", "status", "mark_ready"]).describe("What to do"),
+      pr: external_exports.string().optional().describe(
+        "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready; 'all' allowed for stop/flush."
+      )
     }
   },
   async ({ action, pr }) => ({ content: [{ type: "text", text: await handle(action, pr) }] })

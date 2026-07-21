@@ -41,10 +41,11 @@ For local development, add the marketplace from a checkout instead: `/plugin mar
 
 ### Usage
 
-The plugin registers a `pr_monitor` MCP tool with the same actions as the opencode version (see the table below), plus two convenience commands:
+The plugin registers a `pr_monitor` MCP tool with the same actions as the opencode version (see the table below), plus three convenience commands:
 
 - `/pr-monitor:watch [owner/repo#123 | PR URL]` — start monitoring (with no argument, Claude resolves the current branch's PR via `gh pr view`).
 - `/pr-monitor:status` — list this session's active monitors.
+- `/pr-monitor:ready [owner/repo#123 | PR URL]` — mark the PR as ready for human review (adds the `readyLabel` label on GitHub).
 
 ### How reports arrive (and how that differs from opencode)
 
@@ -87,6 +88,7 @@ Both shells register the same tool:
 | `stop`   | PR identifier or `all`                 | Stop watching. |
 | `flush`  | PR identifier or `all`                 | On demand: immediately return a full status report and reset the "new since" baseline. Delivered reports already advance the baseline, so a flush after handling one isn't needed. |
 | `status` | —                                      | List this session's active monitors. |
+| `mark_ready` | `owner/repo#123` or full PR URL    | Add the configured `readyLabel` label to the PR on GitHub, signalling it is ready for human review. Creates the label in the repo (green, with a description) if it doesn't exist. Works without an active monitor; refuses targets that are not open PRs (plain issues, merged/closed PRs). |
 
 ## Configuration
 
@@ -99,7 +101,8 @@ Optional, per project: `.claude/pr-monitor.json` for Claude Code (with `.opencod
   "pollIntervalSeconds": 60,
   "ignoreCommentTag": "<!-- pr-monitor:ignore -->",
   "announceOnStart": true,
-  "desktopNotifications": false
+  "desktopNotifications": false,
+  "readyLabel": "ready-for-human-review"
 }
 ```
 
@@ -111,6 +114,7 @@ Optional, per project: `.claude/pr-monitor.json` for Claude Code (with `.opencod
 | `ignoreCommentTag`     | unset   | If set, comments authored by the authenticated `gh` user that contain this tag are invisible to the monitor — useful so an agent replying to review threads doesn't trigger its own reports. |
 | `announceOnStart`      | `true`  | Deliver a full status report immediately when a monitor starts, so the session sees its starting point and can address anything already outstanding on the PR. Set `false` to disable. |
 | `desktopNotifications` | `false` | Claude Code only: emit an OS notification (macOS/Linux) when a report is spooled, so an idle session's reports aren't silently waiting. |
+| `readyLabel`           | `ready-for-human-review` | Label the `mark_ready` action applies to the PR on GitHub. |
 
 ## Behavior details
 
