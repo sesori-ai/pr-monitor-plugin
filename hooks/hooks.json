@@ -1,0 +1,38 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -d \"$HOME/.claude/pr-monitor/spool\" ] && node \"${CLAUDE_PLUGIN_ROOT}/hooks/drain-spool.mjs\" || true",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -d \"$HOME/.claude/pr-monitor/spool\" ] && node \"${CLAUDE_PLUGIN_ROOT}/hooks/drain-spool.mjs\" || true",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -d \"$HOME/.claude/pr-monitor/spool\" ] && node \"${CLAUDE_PLUGIN_ROOT}/hooks/drain-spool.mjs\" || true",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

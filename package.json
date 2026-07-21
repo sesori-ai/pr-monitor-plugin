@@ -1,7 +1,7 @@
 {
   "name": "@sesori/opencode-pr-monitor",
-  "version": "0.1.6",
-  "description": "opencode plugin that watches GitHub PRs in the background and delivers factual [PR Monitor] reports into the owning session",
+  "version": "0.2.0",
+  "description": "opencode plugin and Claude Code plugin that watches GitHub PRs in the background and delivers factual [PR Monitor] reports into the owning session",
   "license": "MIT",
   "type": "module",
   "main": "src/index.ts",
@@ -12,6 +12,8 @@
   "keywords": [
     "opencode",
     "opencode-plugin",
+    "claude-code",
+    "claude-code-plugin",
     "github",
     "pull-request",
     "monitor"
@@ -20,13 +22,17 @@
     "opencode": ">=1.17.0"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild claude/mcp-server.ts --bundle --platform=node --format=esm --target=node18 --outfile=dist/mcp-server.mjs --log-level=warning --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\""
   },
   "dependencies": {
     "@opencode-ai/plugin": "^1.4.9"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/node": "^24.0.0",
-    "typescript": "^5.8.0"
+    "esbuild": "^0.28.1",
+    "typescript": "^5.8.0",
+    "zod": "^4.4.3"
   }
 }

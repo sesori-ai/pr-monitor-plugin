@@ -105,13 +105,16 @@ export class PrWatch {
    * outstanding on the PR. Reports against a zero baseline so every existing
    * comment counts as "new", then advances the baseline to the initial
    * snapshot so periodic flushes only surface genuinely newer activity.
-   * Fire-and-forget: a failure here is logged, not fatal to the watch.
+   * A delivery failure here is logged, not fatal to the watch; the returned
+   * promise never rejects. Callers that need the announcement spooled before
+   * they return (the Claude Code shell) can await it; fire-and-forget callers
+   * use `void`.
    */
-  announceInitial(): void {
+  async announceInitial(): Promise<void> {
     if (this.stopped || this.snapshot === undefined) return
     const report = buildReport(this.target, this.snapshot, { baselineMs: 0 })
     this.lastFlushAt = this.snapshotAt ?? this.startedAt
-    void this.deliverOrLog(report)
+    await this.deliverOrLog(report)
   }
 
   /** Manual flush: always re-fetches and always returns a full report. */

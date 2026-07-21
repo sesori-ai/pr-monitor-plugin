@@ -1,8 +1,9 @@
-// Monitor tuning, loaded from `.opencode/pr-monitor.json` in the project
-// directory (then worktree), falling back to defaults.
+// Monitor tuning, loaded from the first readable `pr-monitor.json` among the
+// candidate paths the host shell passes in (opencode: `.opencode/` in the
+// project directory then worktree; Claude Code: `.claude/` then `.opencode/`
+// in the project directory), falling back to defaults.
 
 import { readFile } from "node:fs/promises"
-import { join } from "node:path"
 
 export type MonitorConfig = {
   debounceMinutes: number
@@ -10,9 +11,11 @@ export type MonitorConfig = {
   pollIntervalSeconds: number
   ignoreCommentTag: string | undefined
   announceOnStart: boolean
+  // Claude Code shell only (delivery there is passive — reports are injected at
+  // the next hook event, so an idle session learns nothing until then; an OS
+  // notification closes that gap). The opencode shell ignores it.
+  desktopNotifications: boolean
 }
-
-const CONFIG_FILE = "pr-monitor.json"
 
 const DEFAULT_CONFIG: MonitorConfig = {
   debounceMinutes: 5,
@@ -20,6 +23,7 @@ const DEFAULT_CONFIG: MonitorConfig = {
   pollIntervalSeconds: 60,
   ignoreCommentTag: undefined,
   announceOnStart: true,
+  desktopNotifications: false,
 }
 
 const MIN_POLL_INTERVAL_SECONDS = 30
@@ -40,17 +44,18 @@ function resolveConfig(raw: unknown): MonitorConfig {
   cfg.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : undefined
   const announce = record["announceOnStart"]
   if (typeof announce === "boolean") cfg.announceOnStart = announce
+  const notify = record["desktopNotifications"]
+  if (typeof notify === "boolean") cfg.desktopNotifications = notify
   return cfg
 }
 
-export async function loadConfig(dirs: string[], log: (message: string) => void): Promise<MonitorConfig> {
-  for (const dir of dirs) {
-    const path = join(dir, ".opencode", CONFIG_FILE)
+export async function loadConfig(paths: string[], log: (message: string) => void): Promise<MonitorConfig> {
+  for (const path of paths) {
     let text: string
     try {
       text = await readFile(path, "utf8")
     } catch {
-      continue // missing/unreadable file in this dir -> try next, else defaults
+      continue // missing/unreadable file at this path -> try next, else defaults
     }
     try {
       return resolveConfig(JSON.parse(text))
