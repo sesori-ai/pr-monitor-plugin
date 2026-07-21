@@ -40,7 +40,13 @@ export class PrWatch {
   private fetchStartedAt: number | undefined
   private snapshotAt: number | undefined
   private stopped = false
-  private ticking = false
+  // Serializes tick()/manualFlush(): their fetch -> apply -> flush sequences
+  // share snapshot/baseline state, and interleaved awaits could overwrite a
+  // newer snapshot with an older fetch or restore a stale baseline (duplicate
+  // or stale reports). Ticks skip instead of queueing while an op is pending —
+  // the interval fires again soon anyway; manual flushes queue.
+  private opQueue: Promise<unknown> = Promise.resolve()
+  private pendingOps = 0
 
   constructor(input: { target: Target; sessionID: string; config: MonitorConfig; deps: WatchDeps; initial: PrSnapshot }) {
     this.target = input.target
@@ -69,34 +75,53 @@ export class PrWatch {
     return `${targetKey(this.target)} — ${phase}, ${this.dirty ? "activity buffered" : "quiet"}, baseline ${baselineAge}m ago${failures}`
   }
 
-  /** Periodic poll; never throws. */
+  private runExclusive<T>(task: () => Promise<T>): Promise<T> {
+    this.pendingOps += 1
+    const run = this.opQueue.then(task)
+    this.opQueue = run.then(
+      () => {
+        this.pendingOps -= 1
+      },
+      () => {
+        this.pendingOps -= 1
+      },
+    )
+    return run
+  }
+
+  /** Periodic poll; never throws. Skipped while a poll or flush is in flight. */
   async tick(): Promise<void> {
-    if (this.stopped || this.ticking) return
-    this.ticking = true
+    if (this.stopped || this.pendingOps > 0) return
     try {
-      let next: PrSnapshot
-      try {
-        this.fetchStartedAt = this.deps.now()
-        next = await this.deps.fetchSnapshot()
-      } catch (error) {
-        this.handlePollFailure(error)
-        return
-      }
-      this.consecutiveFailures = 0
-      this.snapshotAt = this.fetchStartedAt
-      if (this.snapshot !== undefined && detectActivity(this.snapshot, next, this.lastDefiniteMergeable)) {
-        this.dirty = true
-        this.lastActivityAt = this.deps.now()
-        this.holdStartedAt = undefined
-      }
-      this.snapshot = next
-      this.rememberDefiniteMergeable(next)
-      this.maybeAutoFlush()
+      await this.runExclusive(() => this.pollOnce())
     } catch (error) {
       this.deps.log(`unexpected tick error for ${targetKey(this.target)}: ${error}`)
-    } finally {
-      this.ticking = false
     }
+  }
+
+  private async pollOnce(): Promise<void> {
+    if (this.stopped) return
+    let next: PrSnapshot
+    try {
+      this.fetchStartedAt = this.deps.now()
+      next = await this.deps.fetchSnapshot()
+    } catch (error) {
+      if (!this.stopped) this.handlePollFailure(error)
+      return
+    }
+    // A stop() that landed during the await must win: a stopped monitor may
+    // not apply the snapshot or deliver anything.
+    if (this.stopped) return
+    this.consecutiveFailures = 0
+    this.snapshotAt = this.fetchStartedAt
+    if (this.snapshot !== undefined && detectActivity(this.snapshot, next, this.lastDefiniteMergeable)) {
+      this.dirty = true
+      this.lastActivityAt = this.deps.now()
+      this.holdStartedAt = undefined
+    }
+    this.snapshot = next
+    this.rememberDefiniteMergeable(next)
+    this.maybeAutoFlush()
   }
 
   /**
@@ -117,8 +142,16 @@ export class PrWatch {
     await this.deliverOrLog(report)
   }
 
-  /** Manual flush: always re-fetches and always returns a full report. */
+  /**
+   * Manual flush: always re-fetches and always returns a full report.
+   * Serialized with polling and concurrent flushes so overlapping fetches
+   * cannot land out of order.
+   */
   async manualFlush(): Promise<string> {
+    return await this.runExclusive(() => this.flushOnce())
+  }
+
+  private async flushOnce(): Promise<string> {
     try {
       this.fetchStartedAt = this.deps.now()
       this.snapshot = await this.deps.fetchSnapshot()
