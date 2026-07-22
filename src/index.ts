@@ -13,7 +13,7 @@ import { join } from "node:path"
 import { tool, type Plugin } from "@opencode-ai/plugin"
 import { loadConfig, type MonitorConfig } from "./config"
 import { createGhRunner, fetchPrSnapshot, type PrSnapshot } from "./github"
-import { markReadyForHumanReview } from "./label"
+import { markReadyForHumanReview, removeReadyForHumanReview } from "./label"
 import { parseTarget, targetKey, type Target } from "./target"
 import { PrWatch } from "./watch"
 
@@ -155,7 +155,7 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
     )
   }
 
-  const markReady = async (pr: string): Promise<string> => {
+  const readyAction = async (pr: string, withdraw: boolean): Promise<string> => {
     const target = parseTarget(pr)
     if ("error" in target) return target.error
     const config = await loadConfig(
@@ -163,9 +163,12 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
       log,
     )
     try {
-      return await markReadyForHumanReview(runGh, target, config.readyLabel)
+      return withdraw
+        ? await removeReadyForHumanReview(runGh, target, config.readyLabel)
+        : await markReadyForHumanReview(runGh, target, config.readyLabel)
     } catch (error) {
-      return `Cannot mark ${targetKey(target)} as ready for human review: ${(error as Error).message}`
+      const what = withdraw ? "withdraw the ready-for-human-review label from" : "mark"
+      return `Cannot ${what} ${targetKey(target)}${withdraw ? "" : " as ready for human review"}: ${(error as Error).message}`
     }
   }
 
@@ -179,17 +182,18 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
           "flush (on-demand: immediately return a full status report and reset the 'new since' baseline; a delivered " +
           "report already advances the baseline, so a flush after handling one is not needed), status (list this " +
           "session's monitors), mark_ready (add the configured ready-for-human-review label to the PR on GitHub — use " +
-          "once CI is green and review feedback is addressed, to signal a human should review now; does not require an " +
-          "active monitor). The pr argument must be explicit 'owner/repo#123' or a full " +
-          "PR URL; 'all' is allowed for stop/flush. Tuning lives in .opencode/pr-monitor.json. Monitors are per-session " +
-          "and do not survive opencode restarts.",
+          "once CI is green and review feedback is addressed, to signal a human should review now), unmark_ready " +
+          "(withdraw that label — use when new feedback arrives on a PR that was already flagged ready, before working " +
+          "on it again). mark_ready/unmark_ready do not require an active monitor. The pr argument must be explicit " +
+          "'owner/repo#123' or a full PR URL; 'all' is allowed for stop/flush. Tuning lives in .opencode/pr-monitor.json. " +
+          "Monitors are per-session and do not survive opencode restarts.",
         args: {
-          action: tool.schema.enum(["start", "stop", "flush", "status", "mark_ready"]).describe("What to do"),
+          action: tool.schema.enum(["start", "stop", "flush", "status", "mark_ready", "unmark_ready"]).describe("What to do"),
           pr: tool.schema
             .string()
             .optional()
             .describe(
-              "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready; 'all' allowed for stop/flush.",
+              "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready; 'all' allowed for stop/flush.",
             ),
         },
         async execute(args, context) {
@@ -222,7 +226,11 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
             }
             case "mark_ready": {
               if (!args.pr || args.pr === "all") return "action 'mark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL."
-              return await markReady(args.pr)
+              return await readyAction(args.pr, false)
+            }
+            case "unmark_ready": {
+              if (!args.pr || args.pr === "all") return "action 'unmark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL."
+              return await readyAction(args.pr, true)
             }
           }
         },

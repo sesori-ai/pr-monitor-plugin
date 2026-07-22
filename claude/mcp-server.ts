@@ -18,19 +18,55 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 import { loadConfig, type MonitorConfig } from "../src/config"
 import { fetchPrSnapshot, type PrSnapshot } from "../src/github"
-import { markReadyForHumanReview } from "../src/label"
+import { markReadyForHumanReview, removeReadyForHumanReview } from "../src/label"
 import { parseTarget, targetKey, targetUrl, type Target } from "../src/target"
 import { PrWatch } from "../src/watch"
 import { createNodeGhRunner } from "./gh"
+import { writeSessionState } from "./session-state"
 import { collectDeadSpools, notifyDesktop, probeSpool, spoolReport } from "./spool"
 
 const claudePid = process.ppid
 const projectDir = process.env["CLAUDE_PROJECT_DIR"] ?? process.cwd()
 
-type Entry = { watch: PrWatch; timer: ReturnType<typeof setInterval> }
+type Entry = { watch: PrWatch; timer: ReturnType<typeof setInterval>; config: MonitorConfig }
 const watches = new Map<string, Entry>() // key: owner/repo#n
 
+// Targets handed off to a human via mark_ready. They keep being monitored, but
+// they no longer hold the keep-alive loop open: the session's job on them is
+// done until someone says otherwise. Any delivered report clears the handoff —
+// new activity on a PR that was flagged ready is precisely the human feedback
+// the loop exists to pick back up.
+const handedOff = new Set<string>()
+
 let selfLogin: string | undefined
+
+// Rolling idle deadline for the keep-alive loop, extended by every delivered
+// report. Bounds how long a session waits with nothing happening; work itself
+// is unbounded, since work produces reports.
+let keepAliveUntilMs = 0
+
+const STATE_LIVENESS_FLOOR_MS = 5 * 60_000
+
+/**
+ * Publish keep-alive state for the hooks. Called on every change to the watch
+ * set or the handoff set, and after every poll tick — the tick refresh is what
+ * proves to the hooks that this server is still alive (see session-state.ts).
+ */
+const refreshSessionState = (): void => {
+  const active = [...watches.entries()].filter(([key]) => !handedOff.has(key))
+  const pollMs = Math.max(...[...watches.values()].map((entry) => entry.config.pollIntervalSeconds * 1000), 0)
+  writeSessionState(claudePid, {
+    version: 1,
+    keepAlive: active.some(([, entry]) => entry.config.keepAlive),
+    expiresAtMs: Date.now() + Math.max(pollMs * 3 + 60_000, STATE_LIVENESS_FLOOR_MS),
+    keepAliveUntilMs,
+    monitors: active.map(([key]) => key),
+  })
+}
+
+const extendKeepAlive = (config: MonitorConfig): void => {
+  keepAliveUntilMs = Math.max(keepAliveUntilMs, Date.now() + config.keepAliveMaxMinutes * 60_000)
+}
 
 const log = (message: string): void => {
   // stderr goes to Claude Code's MCP server logs; stdout is the MCP protocol.
@@ -44,6 +80,11 @@ const fetchSnapshot = (target: Target, config: MonitorConfig): Promise<PrSnapsho
 
 const deliver = (target: Target, config: MonitorConfig) => async (report: string): Promise<void> => {
   spoolReport(claudePid, report)
+  // Activity on a handed-off PR means someone came back to it (a human comment,
+  // a new review, CI on their push): take the PR back and re-arm the loop.
+  handedOff.delete(targetKey(target))
+  extendKeepAlive(config)
+  refreshSessionState()
   if (config.desktopNotifications) {
     notifyDesktop(`PR Monitor — ${targetKey(target)}`, "New report waiting in your Claude Code session")
   }
@@ -114,12 +155,22 @@ const startWatch = async (pr: string): Promise<string> => {
         // it is still ours — never tear down a successor watch under the key.
         clearInterval(timer)
         const entry = watches.get(key)
-        if (entry?.watch === watch) watches.delete(key)
+        if (entry?.watch === watch) {
+          watches.delete(key)
+          handedOff.delete(key)
+          refreshSessionState()
+        }
       },
     },
   })
-  const timer = setInterval(() => void watch.tick(), config.pollIntervalSeconds * 1000)
-  watches.set(key, { watch, timer })
+  // The post-tick refresh is the server's liveness heartbeat for the hooks, so
+  // it must run whether the tick found anything or not.
+  const timer = setInterval(() => {
+    void watch.tick().finally(refreshSessionState)
+  }, config.pollIntervalSeconds * 1000)
+  watches.set(key, { watch, timer, config })
+  extendKeepAlive(config)
+  refreshSessionState()
   // Announce the current state immediately so the session knows its starting
   // point and can address anything already outstanding on the PR. Awaited so
   // the report is spooled before this tool call returns — the PostToolUse hook
@@ -131,25 +182,53 @@ const startWatch = async (pr: string): Promise<string> => {
     (config.announceOnStart ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : "") +
     `Polling every ${config.pollIntervalSeconds}s; after activity settles for ${config.debounceMinutes} quiet minutes, a report is ` +
     `injected into this conversation at your next tool call, user message, or turn end. The monitor stops automatically when the PR ` +
-    `is merged or closed, and does not survive this Claude Code session.`
+    `is merged or closed, and does not survive this Claude Code session.` +
+    (config.keepAlive
+      ? `\nKeep-alive is on: until this PR is handed off with action 'mark_ready', turn-end is refused and you are asked to wait for ` +
+        `the next report rather than going idle. Follow the monitor-pr skill; action 'stop' ends it at any time.`
+      : "")
   )
 }
+
+const loadProjectConfig = (): Promise<MonitorConfig> =>
+  loadConfig([join(projectDir, ".claude", "pr-monitor.json"), join(projectDir, ".opencode", "pr-monitor.json")], log)
 
 const markReady = async (pr: string): Promise<string> => {
   const target = parseTarget(pr)
   if ("error" in target) return target.error
-  const config = await loadConfig(
-    [join(projectDir, ".claude", "pr-monitor.json"), join(projectDir, ".opencode", "pr-monitor.json")],
-    log,
-  )
+  const config = await loadProjectConfig()
   try {
-    return await markReadyForHumanReview(runGh, target, config.readyLabel)
+    const result = await markReadyForHumanReview(runGh, target, config.readyLabel)
+    // The handoff: keep monitoring, but stop holding the session open for this
+    // PR. Any later report on it takes the PR back (see deliver()).
+    handedOff.add(targetKey(target))
+    refreshSessionState()
+    return watches.has(targetKey(target))
+      ? `${result}\nStill monitoring it, but it no longer holds this session open — new activity on it will re-open the work loop.`
+      : result
   } catch (error) {
     return `Cannot mark ${targetKey(target)} as ready for human review: ${(error as Error).message}`
   }
 }
 
-const handle = async (action: "start" | "stop" | "flush" | "status" | "mark_ready", pr: string | undefined): Promise<string> => {
+const unmarkReady = async (pr: string): Promise<string> => {
+  const target = parseTarget(pr)
+  if ("error" in target) return target.error
+  const config = await loadProjectConfig()
+  try {
+    const result = await removeReadyForHumanReview(runGh, target, config.readyLabel)
+    handedOff.delete(targetKey(target))
+    refreshSessionState()
+    return result
+  } catch (error) {
+    return `Cannot withdraw the ready-for-human-review label from ${targetKey(target)}: ${(error as Error).message}`
+  }
+}
+
+const handle = async (
+  action: "start" | "stop" | "flush" | "status" | "mark_ready" | "unmark_ready",
+  pr: string | undefined,
+): Promise<string> => {
   switch (action) {
     case "start": {
       if (!pr || pr === "all") return "action 'start' requires a single explicit pr: 'owner/repo#123' or a PR URL."
@@ -173,11 +252,20 @@ const handle = async (action: "start" | "stop" | "flush" | "status" | "mark_read
     }
     case "status": {
       if (watches.size === 0) return "No active monitors in this session."
-      return [...watches.values()].map((entry) => entry.watch.statusLine()).join("\n")
+      return [...watches.values()]
+        .map((entry) => {
+          const line = entry.watch.statusLine()
+          return handedOff.has(targetKey(entry.watch.target)) ? `${line}, handed off for human review` : line
+        })
+        .join("\n")
     }
     case "mark_ready": {
       if (!pr || pr === "all") return "action 'mark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL."
       return await markReady(pr)
+    }
+    case "unmark_ready": {
+      if (!pr || pr === "all") return "action 'unmark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL."
+      return await unmarkReady(pr)
     }
   }
 }
@@ -203,6 +291,16 @@ const shutdown = (): void => {
     }
     entry.watch.stop()
   }
+  // Disarm keep-alive explicitly rather than leaving the hooks to notice the
+  // expiry: a waiter blocked right now should return immediately, and the Stop
+  // hook must not hold a session open for a server that is gone.
+  writeSessionState(claudePid, {
+    version: 1,
+    keepAlive: false,
+    expiresAtMs: 0,
+    keepAliveUntilMs: 0,
+    monitors: [],
+  })
   process.exit(0)
 }
 process.stdin.on("end", shutdown)
@@ -225,16 +323,20 @@ server.registerTool(
       "report and reset the 'new since' baseline; a delivered report already advances the baseline, so a flush after " +
       "handling one is not needed), status (list this session's monitors), mark_ready (add the configured " +
       "ready-for-human-review label to the PR on GitHub — use once CI is green and review feedback is addressed, to " +
-      "signal a human should review now; does not require an active monitor). The pr argument must be explicit " +
+      "signal a human should review now; this is also the handoff that releases the keep-alive loop), unmark_ready " +
+      "(withdraw that label — use when new feedback arrives on a PR that was already flagged ready, before working on " +
+      "it again). mark_ready/unmark_ready do not require an active monitor. The pr argument must be explicit " +
       "'owner/repo#123' or a full PR URL; 'all' is allowed for stop/flush. Tuning lives in .claude/pr-monitor.json. " +
-      "Monitors are per-session and do not survive Claude Code restarts.",
+      "Monitors are per-session and do not survive Claude Code restarts. While a monitored PR is not handed off, " +
+      "keep-alive (config key 'keepAlive') refuses turn-end so reports arriving during idle time are still acted on — " +
+      "follow the monitor-pr skill.",
     inputSchema: {
-      action: z.enum(["start", "stop", "flush", "status", "mark_ready"]).describe("What to do"),
+      action: z.enum(["start", "stop", "flush", "status", "mark_ready", "unmark_ready"]).describe("What to do"),
       pr: z
         .string()
         .optional()
         .describe(
-          "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready; 'all' allowed for stop/flush.",
+          "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready; 'all' allowed for stop/flush.",
         ),
     },
   },
