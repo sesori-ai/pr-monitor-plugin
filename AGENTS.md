@@ -20,6 +20,7 @@ core/                # Shared core — shell-agnostic.
   activity.ts  # detectActivity(prev, next): what counts as a change.
   watch.ts     # PrWatch — per-PR state machine (tick, debounce, deliver).
   report.ts    # Markdown report rendering.
+  label.ts     # mark_ready action: ensure + add the readyLabel to a PR via gh REST.
 
 opencode/            # opencode shell. Executed from source — opencode runs TypeScript directly.
   index.ts     # Plugin entry. Sole export PrMonitorPlugin (loader invokes EVERY export — keep it the only one).
@@ -32,7 +33,7 @@ claude-code/         # Claude Code shell. THIS DIRECTORY IS THE PLUGIN ROOT (= $
   hooks/
     hooks.json       # wires drain-spool.mjs to UserPromptSubmit / PostToolUse / Stop.
     drain-spool.mjs  # dependency-free: drains this session's spool, injects reports (additionalContext / Stop block).
-  commands/          # /pr-monitor:watch, /pr-monitor:status
+  commands/          # /pr-monitor:watch, /pr-monitor:status, /pr-monitor:ready
   .mcp.json          # declares the MCP server (node ${CLAUDE_PLUGIN_ROOT}/dist/mcp-server.mjs) — plugin-root convention.
   .claude-plugin/
     plugin.json      # plugin metadata only (name/version/description/...); components are discovered by convention
@@ -67,6 +68,7 @@ where the plugin root sits in the repo.
 - **Sessions, Claude Code shell**: one MCP server process per Claude Code process, so the watches map IS the session scope. Monitors survive `/clear` (same process) and die with the process. Spool routing: spool dirs are named by the owning Claude Code pid (= MCP server's ppid); the hook drains dirs named by its parent/grandparent pid (hook ← sh ← claude; deliberately NOT the full ancestry, which would let a nested claude session steal the outer session's reports) and GCs dead-pid dirs. Ancestry is read from `/proc` where it exists, else `ps`; with neither the hook drains **nothing** — the number of live spools is not evidence of ownership (a session with no monitor still fires hooks), so there is no cardinality trick that substitutes for real ancestry. A pid is not an identity either — the OS recycles them — so `claimSpool` records the Claude Code process's start time in `<spool dir>/owner` (tmp+rename; a torn read must not look like a foreign token) at server startup, and it is enforced in three places: the server discards anything it cannot prove it inherited before spooling (a foreign token *and* an untokened dir, since stamping the latter would launder a vanished session's reports); `spoolReport` re-checks the token before every write, so an orphaned server whose parent's pid got recycled cannot write into the newcomer's spool; the hook *skips* — never deletes — a dir whose token mismatches, because deleting would race the newcomer's `claimSpool`. On macOS the token is `ps -o lstart=` (1-second resolution), a deliberate residue: coarser than ideal, but calling macOS unverifiable would restore pid-only routing there, which is strictly worse. Report filenames carry the *server* pid too (`seq` restarts at 0 in each process while the dir outlives them, so an /mcp restart could otherwise collide within a millisecond and lose a report). Drains claim each report via unlink-before-emit so concurrent hook invocations never deliver one twice, and the script must not process.exit after writing (stdout past the 64KB pipe buffer would be truncated). PostToolUse also fires for tool calls inside Task subagents — those hook inputs carry `agent_id`, and drain-spool.mjs skips them so a report is never consumed by a subagent's context (verified empirically on Claude Code 2.1.216). Shutdown (stdin EOF/SIGTERM) spools a `Monitor stopped` notice per watch — delivered if the same process continues (server restart), silently GC'd if the session is gone.
 - **Reload takeover, opencode shell** — `globalThis.__sesoriPrMonitorTakeovers` kills zombie timers from prior plugin instances; old watches send one factual stop notice. (`session.deleted` stops matching watches silently; graceful `dispose` delivers shutdown notices.)
 - Reports are **facts only**: counts and authors, never comment bodies or advice.
+- **mark_ready** (both shells, `core/label.ts`) — adds `config.readyLabel` (default `ready-for-human-review`) to the PR via the gh REST API. Verifies the target via `pulls/{n}` first and refuses non-open targets — the add-labels endpoint operates on the shared issue namespace, so a plain issue number or merged/closed PR would otherwise be labeled with a false success. Pre-creates the label (green, described) because the add-labels endpoint auto-creates missing labels as grey/undescribed; the create call's failure (usually 422 already_exists) is swallowed, the add call fails loudly. Standalone: needs no active monitor.
 
 ## Configuration
 
