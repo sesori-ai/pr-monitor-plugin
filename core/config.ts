@@ -15,6 +15,8 @@ export type MonitorConfig = {
   // the next hook event, so an idle session learns nothing until then; an OS
   // notification closes that gap). The opencode shell ignores it.
   desktopNotifications: boolean
+  // Label the mark_ready action applies to a PR on GitHub.
+  readyLabel: string
 }
 
 const DEFAULT_CONFIG: MonitorConfig = {
@@ -24,6 +26,7 @@ const DEFAULT_CONFIG: MonitorConfig = {
   ignoreCommentTag: undefined,
   announceOnStart: true,
   desktopNotifications: false,
+  readyLabel: "ready-for-human-review",
 }
 
 const MIN_POLL_INTERVAL_SECONDS = 30
@@ -52,6 +55,8 @@ function resolveConfig(raw: unknown): MonitorConfig {
   if (typeof announce === "boolean") cfg.announceOnStart = announce
   const notify = record["desktopNotifications"]
   if (typeof notify === "boolean") cfg.desktopNotifications = notify
+  const label = record["readyLabel"]
+  if (typeof label === "string" && label.length > 0) cfg.readyLabel = label
   return cfg
 }
 
