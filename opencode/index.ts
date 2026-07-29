@@ -10,10 +10,10 @@
 // plugin, so `PrMonitorPlugin` must stay the sole export.
 
 import { tool, type Plugin } from "@opencode-ai/plugin"
-import { loadConfig, type MonitorConfig } from "./config"
-import { createGhRunner, fetchPrSnapshot, type PrSnapshot } from "./github"
-import { parseTarget, targetKey, type Target } from "./target"
-import { PrWatch } from "./watch"
+import { loadConfig, type MonitorConfig } from "../core/config"
+import { createGhRunner, fetchPrSnapshot, type PrSnapshot } from "../core/github"
+import { parseTarget, targetKey, type Target } from "../core/target"
+import { PrWatch } from "../core/watch"
 
 export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }) => {
   type Entry = { watch: PrWatch; timer: ReturnType<typeof setInterval> }
