@@ -17,6 +17,16 @@ export type MonitorConfig = {
   desktopNotifications: boolean
   // Label the mark_ready action applies to a PR on GitHub.
   readyLabel: string
+  // Claude Code shell only. While a monitored PR has not been handed off to a
+  // human (mark_ready), the Stop hook refuses turn-end and points the session
+  // at the waiter script, so a report that lands while the session is idle is
+  // still acted on. Without it delivery is passive: reports wait on disk until
+  // the user types. The opencode shell ignores both keys — there the plugin
+  // pushes a real message into the session instead.
+  keepAlive: boolean
+  // Upper bound on how long the keep-alive loop may hold a session, refreshed
+  // on every delivered report (so it bounds *idle* time, not total work time).
+  keepAliveMaxMinutes: number
 }
 
 const DEFAULT_CONFIG: MonitorConfig = {
@@ -27,6 +37,8 @@ const DEFAULT_CONFIG: MonitorConfig = {
   announceOnStart: true,
   desktopNotifications: false,
   readyLabel: "ready-for-human-review",
+  keepAlive: true,
+  keepAliveMaxMinutes: 120,
 }
 
 const MIN_POLL_INTERVAL_SECONDS = 30
@@ -57,6 +69,9 @@ function resolveConfig(raw: unknown): MonitorConfig {
   if (typeof notify === "boolean") cfg.desktopNotifications = notify
   const label = record["readyLabel"]
   if (typeof label === "string" && label.length > 0) cfg.readyLabel = label
+  const keepAlive = record["keepAlive"]
+  if (typeof keepAlive === "boolean") cfg.keepAlive = keepAlive
+  cfg.keepAliveMaxMinutes = num("keepAliveMaxMinutes") ?? cfg.keepAliveMaxMinutes
   return cfg
 }
 

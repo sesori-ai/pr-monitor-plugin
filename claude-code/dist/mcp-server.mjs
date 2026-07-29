@@ -6896,7 +6896,7 @@ var require_dist = __commonJS({
 });
 
 // claude-code/src/mcp-server.ts
-import { join as join2 } from "node:path";
+import { join as join3 } from "node:path";
 import process4 from "node:process";
 
 // node_modules/zod/v3/helpers/util.js
@@ -30971,7 +30971,9 @@ var DEFAULT_CONFIG = {
   ignoreCommentTag: void 0,
   announceOnStart: true,
   desktopNotifications: false,
-  readyLabel: "ready-for-human-review"
+  readyLabel: "ready-for-human-review",
+  keepAlive: true,
+  keepAliveMaxMinutes: 120
 };
 var MIN_POLL_INTERVAL_SECONDS = 30;
 var MAX_POLL_INTERVAL_SECONDS = 86400;
@@ -30995,6 +30997,9 @@ function resolveConfig(raw) {
   if (typeof notify === "boolean") cfg.desktopNotifications = notify;
   const label = record2["readyLabel"];
   if (typeof label === "string" && label.length > 0) cfg.readyLabel = label;
+  const keepAlive = record2["keepAlive"];
+  if (typeof keepAlive === "boolean") cfg.keepAlive = keepAlive;
+  cfg.keepAliveMaxMinutes = num("keepAliveMaxMinutes") ?? cfg.keepAliveMaxMinutes;
   return cfg;
 }
 async function loadConfig(paths, log2) {
@@ -31046,6 +31051,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
         comments(last: 100) { nodes { author { login __typename } body createdAt } }
       } }
       comments(last: 100) { totalCount nodes { author { login __typename } body createdAt } }
+      labels(first: 50) { nodes { name } }
     }
   }
 }`;
@@ -31116,7 +31122,8 @@ function normalizeSnapshot(payload, opts) {
     unresolvedThreads: threads.filter((thread) => !thread.isResolved).length,
     inlineComments,
     issueCommentsTotal: Math.max((pr.comments?.totalCount ?? issueNodes.length) - ignoredCount, 0),
-    issueComments: issueVisible.map(toMeta)
+    issueComments: issueVisible.map(toMeta),
+    labels: (pr.labels?.nodes ?? []).map((node) => node?.name).filter((name) => typeof name === "string")
   };
 }
 function ciPhase(snapshot) {
@@ -31147,11 +31154,10 @@ function targetUrl(target) {
 // core/label.ts
 var READY_LABEL_COLOR = "0e8a16";
 var READY_LABEL_DESCRIPTION = "This PR is ready for human review";
-async function markReadyForHumanReview(runGh2, target, label) {
-  const repo = `repos/${target.owner}/${target.repo}`;
+async function assertOpenPullRequest(runGh2, repo, number4) {
   let raw;
   try {
-    raw = await runGh2(["api", `${repo}/pulls/${target.number}`]);
+    raw = await runGh2(["api", `${repo}/pulls/${number4}`]);
   } catch (error51) {
     if (error51 instanceof PollError && error51.notFound) {
       throw new Error(`it is not a pull request, or it does not exist or is not accessible.`);
@@ -31162,6 +31168,10 @@ async function markReadyForHumanReview(runGh2, target, label) {
   if (pr.merged === true || pr.state !== "open") {
     throw new Error(`the PR is already ${pr.merged === true ? "MERGED" : "CLOSED"}.`);
   }
+}
+async function markReadyForHumanReview(runGh2, target, label) {
+  const repo = `repos/${target.owner}/${target.repo}`;
+  await assertOpenPullRequest(runGh2, repo, target.number);
   try {
     await runGh2([
       "api",
@@ -31177,6 +31187,19 @@ async function markReadyForHumanReview(runGh2, target, label) {
   }
   await runGh2(["api", `${repo}/issues/${target.number}/labels`, "-f", `labels[]=${label}`]);
   return `Marked ${targetKey(target)} as ready for human review: label "${label}" added.`;
+}
+async function removeReadyForHumanReview(runGh2, target, label) {
+  const repo = `repos/${target.owner}/${target.repo}`;
+  await assertOpenPullRequest(runGh2, repo, target.number);
+  try {
+    await runGh2(["api", "--method", "DELETE", `${repo}/issues/${target.number}/labels/${encodeURIComponent(label)}`]);
+  } catch (error51) {
+    if (error51 instanceof PollError && error51.notFound) {
+      return `${targetKey(target)} did not carry the "${label}" label; nothing to remove.`;
+    }
+    throw error51;
+  }
+  return `Removed the "${label}" label from ${targetKey(target)}: it is no longer flagged for human review.`;
 }
 
 // core/activity.ts
@@ -31263,6 +31286,7 @@ function buildReport(target, snapshot, opts) {
     `- [comment:inline] ${snapshot.unresolvedThreads} unresolved threads (${newPart(newInline)})`,
     `- [comment:issue] ${snapshot.issueCommentsTotal} total (${newPart(newIssue)})`
   ];
+  if (snapshot.labels.length > 0) lines.push(`- Labels: ${snapshot.labels.join(", ")}`);
   if (snapshot.state !== "OPEN") lines.push(`- Monitor stopped: PR ${snapshot.state === "MERGED" ? "merged" : "closed"}`);
   return lines.join("\n");
 }
@@ -31496,6 +31520,10 @@ function createNodeGhRunner() {
   });
 }
 
+// claude-code/src/session-state.ts
+import { mkdirSync as mkdirSync2, readFileSync as readFileSync2, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { join as join2 } from "node:path";
+
 // claude-code/src/spool.ts
 import { execFile as execFile2, execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -31616,11 +31644,42 @@ function notifyDesktop(title, body) {
   }
 }
 
+// claude-code/src/session-state.ts
+var SESSION_STATE_FILE = "session.json";
+function writeSessionState(claudePid2, state) {
+  const dir = spoolDirFor(claudePid2);
+  const path = join2(dir, SESSION_STATE_FILE);
+  try {
+    mkdirSync2(dir, { recursive: true });
+    const tmp = `${path}.${process.pid}.tmp`;
+    writeFileSync2(tmp, JSON.stringify(state), "utf8");
+    renameSync2(tmp, path);
+  } catch {
+  }
+}
+
 // claude-code/src/mcp-server.ts
 var claudePid = process4.ppid;
 var projectDir = process4.env["CLAUDE_PROJECT_DIR"] ?? process4.cwd();
 var watches = /* @__PURE__ */ new Map();
+var handedOff = /* @__PURE__ */ new Set();
 var selfLogin;
+var keepAliveUntilMs = 0;
+var STATE_LIVENESS_FLOOR_MS = 5 * 6e4;
+var refreshSessionState = () => {
+  const active = [...watches.entries()].filter(([key]) => !handedOff.has(key));
+  const pollMs = Math.max(...[...watches.values()].map((entry) => entry.config.pollIntervalSeconds * 1e3), 0);
+  writeSessionState(claudePid, {
+    version: 1,
+    keepAlive: active.some(([, entry]) => entry.config.keepAlive),
+    expiresAtMs: Date.now() + Math.max(pollMs * 3 + 6e4, STATE_LIVENESS_FLOOR_MS),
+    keepAliveUntilMs,
+    monitors: active.map(([key]) => key)
+  });
+};
+var extendKeepAlive = (config2) => {
+  keepAliveUntilMs = Math.max(keepAliveUntilMs, Date.now() + config2.keepAliveMaxMinutes * 6e4);
+};
 var log = (message) => {
   console.error(`[pr-monitor] ${message}`);
 };
@@ -31628,6 +31687,9 @@ var runGh = createNodeGhRunner();
 var fetchSnapshot = (target, config2) => fetchPrSnapshot({ runGh, target, ignoreTag: config2.ignoreCommentTag, selfLogin });
 var deliver = (target, config2) => async (report) => {
   spoolReport(claudePid, report);
+  handedOff.delete(targetKey(target));
+  extendKeepAlive(config2);
+  refreshSessionState();
   if (config2.desktopNotifications) {
     notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, "New report waiting in your Claude Code session");
   }
@@ -31653,7 +31715,7 @@ ${existing.watch.statusLine()}`;
     return `Cannot start monitor: the report spool is not writable (${error51.message}). Reports could not be delivered. Check permissions on ~/.claude/pr-monitor.`;
   }
   const config2 = await loadConfig(
-    [join2(projectDir, ".claude", "pr-monitor.json"), join2(projectDir, ".opencode", "pr-monitor.json")],
+    [join3(projectDir, ".claude", "pr-monitor.json"), join3(projectDir, ".opencode", "pr-monitor.json")],
     log
   );
   if (config2.ignoreCommentTag !== void 0 && selfLogin === void 0) {
@@ -31686,28 +31748,52 @@ ${raced.watch.statusLine()}`;
       onStopped: () => {
         clearInterval(timer);
         const entry = watches.get(key);
-        if (entry?.watch === watch) watches.delete(key);
+        if (entry?.watch === watch) {
+          watches.delete(key);
+          handedOff.delete(key);
+          refreshSessionState();
+        }
       }
     }
   });
-  const timer = setInterval(() => void watch.tick(), config2.pollIntervalSeconds * 1e3);
-  watches.set(key, { watch, timer });
+  const timer = setInterval(() => {
+    void watch.tick().finally(refreshSessionState);
+  }, config2.pollIntervalSeconds * 1e3);
+  watches.set(key, { watch, timer, config: config2 });
+  extendKeepAlive(config2);
+  refreshSessionState();
   if (config2.announceOnStart) await watch.announceInitial();
   log(`started monitoring ${key} for Claude Code pid ${claudePid}`);
   return `Started monitoring ${key} \u2014 "${initial.title}".
-` + (config2.announceOnStart ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : "") + `Polling every ${config2.pollIntervalSeconds}s; after activity settles for ${config2.debounceMinutes} quiet minutes, a report is injected into this conversation at your next tool call, user message, or turn end. The monitor stops automatically when the PR is merged or closed, and does not survive this Claude Code session.`;
+` + (config2.announceOnStart ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : "") + `Polling every ${config2.pollIntervalSeconds}s; after activity settles for ${config2.debounceMinutes} quiet minutes, a report is injected into this conversation at your next tool call, user message, or turn end. The monitor stops automatically when the PR is merged or closed, and does not survive this Claude Code session.` + (config2.keepAlive ? `
+Keep-alive is on: until this PR is handed off with action 'mark_ready', turn-end is refused and you are asked to wait for the next report rather than going idle. Follow the monitor-pr skill; action 'stop' ends it at any time.` : "");
 };
+var loadProjectConfig = () => loadConfig([join3(projectDir, ".claude", "pr-monitor.json"), join3(projectDir, ".opencode", "pr-monitor.json")], log);
 var markReady = async (pr) => {
   const target = parseTarget(pr);
   if ("error" in target) return target.error;
-  const config2 = await loadConfig(
-    [join2(projectDir, ".claude", "pr-monitor.json"), join2(projectDir, ".opencode", "pr-monitor.json")],
-    log
-  );
+  const config2 = await loadProjectConfig();
   try {
-    return await markReadyForHumanReview(runGh, target, config2.readyLabel);
+    const result = await markReadyForHumanReview(runGh, target, config2.readyLabel);
+    handedOff.add(targetKey(target));
+    refreshSessionState();
+    return watches.has(targetKey(target)) ? `${result}
+Still monitoring it, but it no longer holds this session open \u2014 new activity on it will re-open the work loop.` : result;
   } catch (error51) {
     return `Cannot mark ${targetKey(target)} as ready for human review: ${error51.message}`;
+  }
+};
+var unmarkReady = async (pr) => {
+  const target = parseTarget(pr);
+  if ("error" in target) return target.error;
+  const config2 = await loadProjectConfig();
+  try {
+    const result = await removeReadyForHumanReview(runGh, target, config2.readyLabel);
+    handedOff.delete(targetKey(target));
+    refreshSessionState();
+    return result;
+  } catch (error51) {
+    return `Cannot withdraw the ready-for-human-review label from ${targetKey(target)}: ${error51.message}`;
   }
 };
 var handle = async (action, pr) => {
@@ -31734,11 +31820,18 @@ var handle = async (action, pr) => {
     }
     case "status": {
       if (watches.size === 0) return "No active monitors in this session.";
-      return [...watches.values()].map((entry) => entry.watch.statusLine()).join("\n");
+      return [...watches.values()].map((entry) => {
+        const line = entry.watch.statusLine();
+        return handedOff.has(targetKey(entry.watch.target)) ? `${line}, handed off for human review` : line;
+      }).join("\n");
     }
     case "mark_ready": {
       if (!pr || pr === "all") return "action 'mark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL.";
       return await markReady(pr);
+    }
+    case "unmark_ready": {
+      if (!pr || pr === "all") return "action 'unmark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL.";
+      return await unmarkReady(pr);
     }
   }
 };
@@ -31756,6 +31849,13 @@ var shutdown = () => {
     }
     entry.watch.stop();
   }
+  writeSessionState(claudePid, {
+    version: 1,
+    keepAlive: false,
+    expiresAtMs: 0,
+    keepAliveUntilMs: 0,
+    monitors: []
+  });
   process4.exit(0);
 };
 process4.stdin.on("end", shutdown);
@@ -31768,11 +31868,11 @@ var server = new McpServer({ name: "pr-monitor", version: "0.2.0" });
 server.registerTool(
   "pr_monitor",
   {
-    description: "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments, mergeability changes, and merge/close. Changes are aggregated (rolling debounce) and injected into THIS session as '[PR Monitor]' messages stating facts only, delivered at your next tool call, user message, or turn end. Actions: start (begin watching a PR), stop (end watching), flush (on-demand: immediately return a full status report and reset the 'new since' baseline; a delivered report already advances the baseline, so a flush after handling one is not needed), status (list this session's monitors), mark_ready (add the configured ready-for-human-review label to the PR on GitHub \u2014 use once CI is green and review feedback is addressed, to signal a human should review now; does not require an active monitor). The pr argument must be explicit 'owner/repo#123' or a full PR URL; 'all' is allowed for stop/flush. Tuning lives in .claude/pr-monitor.json. Monitors are per-session and do not survive Claude Code restarts.",
+    description: "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments, mergeability changes, and merge/close. Changes are aggregated (rolling debounce) and injected into THIS session as '[PR Monitor]' messages stating facts only, delivered at your next tool call, user message, or turn end. Actions: start (begin watching a PR), stop (end watching), flush (on-demand: immediately return a full status report and reset the 'new since' baseline; a delivered report already advances the baseline, so a flush after handling one is not needed), status (list this session's monitors), mark_ready (add the configured ready-for-human-review label to the PR on GitHub \u2014 use once CI is green and review feedback is addressed, to signal a human should review now; this is also the handoff that releases the keep-alive loop), unmark_ready (withdraw that label \u2014 use when new feedback arrives on a PR that was already flagged ready, before working on it again). mark_ready/unmark_ready do not require an active monitor. The pr argument must be explicit 'owner/repo#123' or a full PR URL; 'all' is allowed for stop/flush. Tuning lives in .claude/pr-monitor.json. Monitors are per-session and do not survive Claude Code restarts. While a monitored PR is not handed off, keep-alive (config key 'keepAlive') refuses turn-end so reports arriving during idle time are still acted on \u2014 follow the monitor-pr skill.",
     inputSchema: {
-      action: external_exports.enum(["start", "stop", "flush", "status", "mark_ready"]).describe("What to do"),
+      action: external_exports.enum(["start", "stop", "flush", "status", "mark_ready", "unmark_ready"]).describe("What to do"),
       pr: external_exports.string().optional().describe(
-        "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready; 'all' allowed for stop/flush."
+        "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready; 'all' allowed for stop/flush."
       )
     }
   },
