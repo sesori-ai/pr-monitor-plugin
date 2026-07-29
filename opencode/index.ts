@@ -9,6 +9,7 @@
 // The opencode plugin loader invokes EVERY export of this entry module as a
 // plugin, so `PrMonitorPlugin` must stay the sole export.
 
+import { join } from "node:path"
 import { tool, type Plugin } from "@opencode-ai/plugin"
 import { loadConfig, type MonitorConfig } from "../core/config"
 import { createGhRunner, fetchPrSnapshot, type PrSnapshot } from "../core/github"
@@ -91,7 +92,10 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
     const existing = watches.get(key)
     if (existing) return `Already monitoring ${targetKey(target)} in this session.\n${existing.watch.statusLine()}`
 
-    const config = await loadConfig([directory, worktree], log)
+    const config = await loadConfig(
+      [directory, worktree].map((dir) => join(dir, ".opencode", "pr-monitor.json")),
+      log,
+    )
     if (config.ignoreCommentTag !== undefined && selfLogin === undefined) {
       try {
         selfLogin = (await runGh(["api", "user", "--jq", ".login"])).trim()
@@ -108,6 +112,12 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
     }
     if (initial.state !== "OPEN") return `Cannot start monitor: ${targetKey(target)} is already ${initial.state}.`
 
+    // Re-check after the awaits above: a concurrent start for the same PR may
+    // have won the race while this call was waiting on gh. From here to
+    // watches.set is synchronous — no new race.
+    const raced = watches.get(key)
+    if (raced) return `Already monitoring ${targetKey(target)} in this session.\n${raced.watch.statusLine()}`
+
     const watch = new PrWatch({
       target,
       sessionID,
@@ -119,9 +129,11 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
         deliver: deliver(sessionID, agent),
         log,
         onStopped: () => {
+          // Clear only this watch's own timer, and only remove the map entry
+          // if it is still ours — never tear down a successor under the key.
+          clearInterval(timer)
           const entry = watches.get(key)
-          if (entry) clearInterval(entry.timer)
-          watches.delete(key)
+          if (entry?.watch === watch) watches.delete(key)
         },
       },
     })
@@ -131,7 +143,7 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
     // point and can address anything already outstanding on the PR (comments
     // added before — or during — startup that periodic polling would otherwise
     // treat as pre-existing and never report). Toggleable via announceOnStart.
-    if (config.announceOnStart) watch.announceInitial()
+    if (config.announceOnStart) void watch.announceInitial()
     log(`started monitoring ${targetKey(target)} for session ${sessionID}`)
     return (
       `Started monitoring ${targetKey(target)} — "${initial.title}".\n` +
