@@ -89,7 +89,9 @@ npm install
 npm run typecheck
 ```
 
-The entry point is `src/index.ts`; opencode executes TypeScript directly (no build step). The opencode plugin loader invokes every export of the entry module as a plugin, so `PrMonitorPlugin` must remain its sole export.
+Layout: `core/` is the shell-agnostic core (config, polling, activity detection, the `PrWatch` state machine, report rendering) and never imports from a shell; `opencode/` is the opencode shell.
+
+The entry point is `opencode/index.ts`; opencode executes TypeScript directly (no build step). The opencode plugin loader invokes every export of the entry module as a plugin, so `PrMonitorPlugin` must remain its sole export.
 
 ## Releasing
 

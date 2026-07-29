@@ -4,7 +4,7 @@
   "description": "opencode plugin that watches GitHub PRs in the background and delivers factual [PR Monitor] reports into the owning session",
   "license": "MIT",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "opencode/index.ts",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sesori-ai/opencode-pr-monitor.git"

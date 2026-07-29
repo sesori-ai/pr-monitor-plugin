@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Repository layout split by dependency direction: `src/` became `core/` (shell-agnostic polling, activity detection, `PrWatch`, report rendering) plus `opencode/` (the opencode shell). No behavior change; the install spec is unchanged because `package.json` `main` now points at `opencode/index.ts`.
+
 ## [0.1.6]
 
 ### Fixed
