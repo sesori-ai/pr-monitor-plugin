@@ -30973,6 +30973,7 @@ var DEFAULT_CONFIG = {
   desktopNotifications: false
 };
 var MIN_POLL_INTERVAL_SECONDS = 30;
+var MAX_POLL_INTERVAL_SECONDS = 86400;
 function resolveConfig(raw) {
   const cfg = { ...DEFAULT_CONFIG };
   if (typeof raw !== "object" || raw === null) return cfg;
@@ -30984,7 +30985,7 @@ function resolveConfig(raw) {
   cfg.debounceMinutes = num("debounceMinutes") ?? cfg.debounceMinutes;
   cfg.maxCiWaitMinutes = num("maxCiWaitMinutes") ?? cfg.maxCiWaitMinutes;
   const poll = num("pollIntervalSeconds") ?? cfg.pollIntervalSeconds;
-  cfg.pollIntervalSeconds = Math.max(poll, MIN_POLL_INTERVAL_SECONDS);
+  cfg.pollIntervalSeconds = Math.min(Math.max(poll, MIN_POLL_INTERVAL_SECONDS), MAX_POLL_INTERVAL_SECONDS);
   const tag = record2["ignoreCommentTag"];
   cfg.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : void 0;
   const announce = record2["announceOnStart"];
@@ -31458,15 +31459,49 @@ function createNodeGhRunner() {
 }
 
 // claude-code/src/spool.ts
-import { execFile as execFile2 } from "node:child_process";
-import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { execFile as execFile2, execFileSync } from "node:child_process";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 var SPOOL_ROOT = join(homedir(), ".claude", "pr-monitor", "spool");
+var OWNER_FILE = "owner";
 function spoolDirFor(claudePid2) {
   return join(SPOOL_ROOT, String(claudePid2));
 }
 var seq = 0;
+function startToken(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const after = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    const starttime = after[19];
+    if (starttime !== void 0 && /^\d+$/.test(starttime)) return `p${starttime}`;
+  } catch {
+  }
+  try {
+    const out = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+    if (out.length > 0) return `s${out}`;
+  } catch {
+  }
+  return void 0;
+}
+function claimSpool(claudePid2) {
+  const dir = spoolDirFor(claudePid2);
+  const token = startToken(claudePid2);
+  if (token === void 0) return;
+  try {
+    const previous = readFileSync(join(dir, OWNER_FILE), "utf8");
+    if (previous !== token) rmSync(dir, { recursive: true, force: true });
+  } catch {
+  }
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, OWNER_FILE), token, "utf8");
+  } catch {
+  }
+}
 function probeSpool(claudePid2) {
   const dir = spoolDirFor(claudePid2);
   mkdirSync(dir, { recursive: true });
@@ -31478,7 +31513,7 @@ function spoolReport(claudePid2, report) {
   const dir = spoolDirFor(claudePid2);
   mkdirSync(dir, { recursive: true });
   seq += 1;
-  const name = `${Date.now()}-${String(seq).padStart(4, "0")}`;
+  const name = `${Date.now()}-${process.pid}-${String(seq).padStart(4, "0")}`;
   const tmp = join(dir, `${name}.tmp`);
   writeFileSync(tmp, report, "utf8");
   renameSync(tmp, join(dir, `${name}.md`));
@@ -31648,6 +31683,7 @@ process4.stdin.on("end", shutdown);
 process4.stdin.on("close", shutdown);
 process4.on("SIGTERM", shutdown);
 process4.on("SIGINT", shutdown);
+claimSpool(claudePid);
 collectDeadSpools(claudePid);
 var server = new McpServer({ name: "pr-monitor", version: "0.2.0" });
 server.registerTool(

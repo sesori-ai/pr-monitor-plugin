@@ -13,12 +13,15 @@
 // owns them (the MCP server's parent). Claude Code runs hook commands via
 // `sh -c`, so this process's parent is that sh and its grandparent is the
 // Claude Code process: "my spool" = the dir named by my parent or grandparent
-// pid. The walk deliberately stops there — a full ancestry walk would reach an
-// OUTER Claude Code session when sessions nest (session A's Bash tool runs
-// `claude -p ...` → session B), letting B's hooks steal A's reports. If `ps`
-// is unusable (e.g. no procps in slim containers), fall back to draining every
-// live-pid spool — correct whenever a single Claude Code session is using
-// pr-monitor at a time.
+// pid, and matching the `owner` token the server wrote there (a pid alone is
+// not an identity — the OS recycles them). The walk deliberately stops at the
+// grandparent — a full ancestry walk would reach an OUTER Claude Code session
+// when sessions nest (session A's Bash tool runs `claude -p ...` → session B),
+// letting B's hooks steal A's reports. Ancestry comes from /proc where it
+// exists and `ps` otherwise; with neither, a single live spool is still
+// unambiguously ours, but two or more are not attributable and are left alone
+// — an undelivered report is recoverable, one delivered to the wrong session
+// is not.
 
 import { execFileSync } from "node:child_process"
 import { readdirSync, readFileSync, rmSync, unlinkSync } from "node:fs"
@@ -26,6 +29,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 const SPOOL_ROOT = join(homedir(), ".claude", "pr-monitor", "spool")
+const OWNER_FILE = "owner"
 
 function readStdinJson() {
   try {
@@ -45,35 +49,97 @@ function isAlive(pid) {
 }
 
 /**
+ * The parent of `pid`, or undefined when it cannot be determined. /proc is
+ * tried first: it needs no subprocess, so on Linux the hook stays exec-free,
+ * and it still answers in slim containers that ship no `ps`.
+ */
+function parentOf(pid) {
+  try {
+    // Field 4 of /proc/<pid>/stat, read from the last ')' because field 2 is
+    // the executable name and may itself contain spaces and parens.
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8")
+    const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1])
+    if (Number.isInteger(ppid)) return ppid
+  } catch {
+    // not Linux, or the process is gone -> try ps
+  }
+  try {
+    const out = execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+    const ppid = Number(out.trim())
+    if (Number.isInteger(ppid)) return ppid
+  } catch {
+    // no usable ps either
+  }
+  return undefined
+}
+
+/**
+ * Identity of the process holding `pid` — its start time, mirroring
+ * `startToken` in claude-code/src/spool.ts, which must stay in sync. Returns
+ * undefined where the platform offers neither source.
+ */
+function startToken(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8")
+    const starttime = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] // field 22
+    if (starttime !== undefined && /^\d+$/.test(starttime)) return `p${starttime}`
+  } catch {}
+  try {
+    const out = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim()
+    if (out.length > 0) return `s${out}`
+  } catch {}
+  return undefined
+}
+
+/**
+ * Whether `dir` was written by the process that holds `pid` *now*, rather than
+ * by a dead predecessor whose pid the OS has since recycled — which would
+ * otherwise inject a vanished session's undrained reports into an unrelated
+ * conversation. Compares the `owner` token claimSpool wrote (spool.ts).
+ * Unverifiable cases answer true: the token guards a rare collision and must
+ * not become a precondition for delivering reports at all.
+ */
+function ownerMatches(pid, dir) {
+  let recorded
+  try {
+    recorded = readFileSync(join(dir, OWNER_FILE), "utf8")
+  } catch {
+    return true // unclaimed dir: older server, or one that could not write it
+  }
+  const token = startToken(pid)
+  return token === undefined || token === recorded
+}
+
+/**
  * Pids that may own this session's spool: this process, its parent (the sh
  * running the hook command), and its grandparent (the Claude Code process —
  * or, should a future version spawn hooks without a shell, the parent). See
  * the header comment for why the walk is capped at the grandparent. Returns
- * undefined if `ps` is unusable, engaging the drain-all-live-spools fallback.
+ * undefined when the ancestry is unavailable, engaging the lone-spool fallback.
  */
 function candidatePids() {
+  const gpid = parentOf(process.ppid)
+  if (gpid === undefined) return undefined
   const pids = new Set([process.pid, process.ppid])
-  try {
-    const out = execFileSync("ps", ["-o", "ppid=", "-p", String(process.ppid)], { encoding: "utf8" })
-    const gpid = Number(out.trim())
-    if (Number.isInteger(gpid) && gpid > 1) pids.add(gpid)
-    return pids
-  } catch {
-    return undefined
-  }
+  if (gpid > 1) pids.add(gpid)
+  return pids
 }
 
-function drainReports() {
+/** Spool dirs this session may drain, as `[{ pid, dir }]`. */
+function ownedSpools() {
   let entries
   try {
     entries = readdirSync(SPOOL_ROOT)
   } catch {
     return [] // no spool -> pr-monitor has never delivered anything
   }
-  if (entries.length === 0) return []
-
-  const candidates = candidatePids()
-  const reports = []
+  const live = []
   for (const entry of entries) {
     const pid = Number(entry)
     if (!Number.isInteger(pid) || pid <= 0) continue
@@ -84,8 +150,30 @@ function drainReports() {
       } catch {}
       continue
     }
-    if (candidates !== undefined && !candidates.has(pid)) continue // another session's spool
-    const dir = join(SPOOL_ROOT, entry)
+    live.push({ pid, dir: join(SPOOL_ROOT, entry) })
+  }
+
+  const candidates = candidatePids()
+  // Without ancestry, one live spool is unambiguously this session's; several
+  // are not attributable, and draining the wrong one deletes reports from the
+  // conversation that owns them.
+  const mine =
+    candidates === undefined ? (live.length === 1 ? live : []) : live.filter(({ pid }) => candidates.has(pid))
+
+  return mine.filter(({ pid, dir }) => {
+    if (ownerMatches(pid, dir)) return true
+    // Live pid, but the spool predates the process holding it: written by a
+    // predecessor that is gone, so no session will ever legitimately drain it.
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {}
+    return false
+  })
+}
+
+function drainReports(spools) {
+  const reports = []
+  for (const { dir } of spools) {
     let files
     try {
       files = readdirSync(dir)
@@ -119,7 +207,7 @@ function main() {
   // (verified empirically on 2.1.216); leave the spool for a main-context event.
   if (input.agent_id) return
 
-  const reports = drainReports()
+  const reports = drainReports(ownedSpools())
   if (reports.length === 0) return
   const text = reports.join("\n\n")
 

@@ -27,6 +27,12 @@ const DEFAULT_CONFIG: MonitorConfig = {
 }
 
 const MIN_POLL_INTERVAL_SECONDS = 30
+// The interval is handed to setInterval as milliseconds, and Node silently
+// coerces any delay past 2^31-1 ms to *1 ms* — so a value meant to slow polling
+// down (a milliseconds-style `3000000`, say) would instead spawn `gh` in a
+// tight loop. Cap it well short of that overflow; a day is longer than any
+// plausible poll interval for a PR that is actively being worked on.
+const MAX_POLL_INTERVAL_SECONDS = 86_400
 
 function resolveConfig(raw: unknown): MonitorConfig {
   const cfg = { ...DEFAULT_CONFIG }
@@ -39,7 +45,7 @@ function resolveConfig(raw: unknown): MonitorConfig {
   cfg.debounceMinutes = num("debounceMinutes") ?? cfg.debounceMinutes
   cfg.maxCiWaitMinutes = num("maxCiWaitMinutes") ?? cfg.maxCiWaitMinutes
   const poll = num("pollIntervalSeconds") ?? cfg.pollIntervalSeconds
-  cfg.pollIntervalSeconds = Math.max(poll, MIN_POLL_INTERVAL_SECONDS)
+  cfg.pollIntervalSeconds = Math.min(Math.max(poll, MIN_POLL_INTERVAL_SECONDS), MAX_POLL_INTERVAL_SECONDS)
   const tag = record["ignoreCommentTag"]
   cfg.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : undefined
   const announce = record["announceOnStart"]

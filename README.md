@@ -107,7 +107,7 @@ Optional, per project: `.claude/pr-monitor.json` for Claude Code (with `.opencod
 | ---------------------- | ------- | ------- |
 | `debounceMinutes`      | `5`     | Quiet window after the last detected activity before a report is delivered. Rolling — new activity resets it. |
 | `maxCiWaitMinutes`     | `30`    | Upper bound on holding a due report while CI is still running. After this, the report is force-flushed naming unfinished checks. |
-| `pollIntervalSeconds`  | `60`    | GitHub poll interval per watched PR (minimum 30). |
+| `pollIntervalSeconds`  | `60`    | GitHub poll interval per watched PR (clamped to 30 seconds … 24 hours). |
 | `ignoreCommentTag`     | unset   | If set, comments authored by the authenticated `gh` user that contain this tag are invisible to the monitor — useful so an agent replying to review threads doesn't trigger its own reports. |
 | `announceOnStart`      | `true`  | Deliver a full status report immediately when a monitor starts, so the session sees its starting point and can address anything already outstanding on the PR. Set `false` to disable. |
 | `desktopNotifications` | `false` | Claude Code only: emit an OS notification (macOS/Linux) when a report is spooled, so an idle session's reports aren't silently waiting. |

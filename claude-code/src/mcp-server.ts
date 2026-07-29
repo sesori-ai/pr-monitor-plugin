@@ -21,7 +21,7 @@ import { fetchPrSnapshot, type PrSnapshot } from "../../core/github"
 import { parseTarget, targetKey, targetUrl, type Target } from "../../core/target"
 import { PrWatch } from "../../core/watch"
 import { createNodeGhRunner } from "./gh"
-import { collectDeadSpools, notifyDesktop, probeSpool, spoolReport } from "./spool"
+import { claimSpool, collectDeadSpools, notifyDesktop, probeSpool, spoolReport } from "./spool"
 
 const claudePid = process.ppid
 const projectDir = process.env["CLAUDE_PROJECT_DIR"] ?? process.cwd()
@@ -191,6 +191,11 @@ process.stdin.on("close", shutdown)
 process.on("SIGTERM", shutdown)
 process.on("SIGINT", shutdown)
 
+// Both run before the server accepts a call, so the first hook event of this
+// session can never read a spool that is not ours: claimSpool discards a dir
+// inherited from a dead process that held this same pid, collectDeadSpools
+// sweeps the dirs of other processes that are gone.
+claimSpool(claudePid)
 collectDeadSpools(claudePid)
 
 const server = new McpServer({ name: "pr-monitor", version: "0.2.0" })
