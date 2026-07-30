@@ -1,0 +1,18 @@
+{
+  "name": "pr-monitor",
+  "version": "0.2.0",
+  "description": "Watch GitHub PRs in the background and get factual [PR Monitor] reports injected into your session: CI verdicts, new reviews and comments, mergeability changes, merge/close.",
+  "author": {
+    "name": "Sesori",
+    "url": "https://github.com/sesori-ai"
+  },
+  "homepage": "https://github.com/sesori-ai/opencode-pr-monitor",
+  "repository": "https://github.com/sesori-ai/opencode-pr-monitor",
+  "license": "MIT",
+  "keywords": [
+    "github",
+    "pull-request",
+    "monitor",
+    "ci"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "sesori",
+  "description": "Sesori's Claude Code plugins: background GitHub PR monitoring.",
+  "owner": {
+    "name": "Sesori"
+  },
+  "plugins": [
+    {
+      "name": "pr-monitor",
+      "source": "./claude-code",
+      "description": "Watch GitHub PRs in the background and get factual [PR Monitor] reports injected into your session: CI verdicts, new reviews and comments, mergeability changes, merge/close.",
+      "category": "productivity"
+    }
+  ]
+}
