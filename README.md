@@ -7,6 +7,7 @@ A GitHub PR monitor for coding agents, available as both an [opencode](https://o
 - Polls GitHub via `gh api graphql` (one query per watched PR per tick).
 - Detects: CI suite conclusions, new reviews, new inline/issue comments, unresolved-thread count changes, mergeability changes, merge/close.
 - Aggregates activity with a **rolling debounce**: any new activity resets a quiet timer; a report is delivered only after the PR has been quiet for the configured window.
+- **Instant CI failures**: a check going red skips the debounce and the CI hold — the report goes out at the next poll, carrying whatever else was buffered, so the agent starts fixing CI instead of waiting out a timer that PR comments keep resetting.
 - **CI hold**: a due report is held while a check suite is still running (bounded by `maxCiWaitMinutes`), so you get one report with the CI verdict instead of two.
 - Reports are **facts only** — counts, authors, check names. No advice, no comment bodies.
 - Monitors are **per-session and in-memory**: they stop automatically when the PR is merged/closed, and they do not survive a host restart.
@@ -121,6 +122,7 @@ Optional, per project: `.claude/pr-monitor.json` for Claude Code (with `.opencod
   "pollIntervalSeconds": 60,
   "ignoreCommentTag": "<!-- pr-monitor:ignore -->",
   "announceOnStart": true,
+  "flushOnCiFailure": true,
   "desktopNotifications": false,
   "readyLabel": "ready-for-human-review",
   "keepAlive": true,
@@ -135,6 +137,7 @@ Optional, per project: `.claude/pr-monitor.json` for Claude Code (with `.opencod
 | `pollIntervalSeconds`  | `60`    | GitHub poll interval per watched PR (clamped to 30 seconds … 24 hours). |
 | `ignoreCommentTag`     | unset   | If set, comments authored by the authenticated `gh` user that contain this tag are invisible to the monitor — useful so an agent replying to review threads doesn't trigger its own reports. |
 | `announceOnStart`      | `true`  | Deliver a full status report immediately when a monitor starts, so the session sees its starting point and can address anything already outstanding on the PR. Set `false` to disable. |
+| `flushOnCiFailure`     | `true`  | Report a newly failing check at the next poll instead of waiting out `debounceMinutes` (and any CI hold), so CI fixes start sooner. Counts failures found while the suite is still running. At most one instant report per head commit — later failures on the same commit ride along with the debounced suite-conclusion report. Set `false` for debounce-only delivery. |
 | `desktopNotifications` | `false` | Claude Code only: emit an OS notification (macOS/Linux) when a report is spooled, so an idle session's reports aren't silently waiting. |
 | `readyLabel`           | `ready-for-human-review` | Label the `mark_ready` action applies to the PR on GitHub. |
 | `keepAlive`            | `true`  | Claude Code only: while a monitored PR has not been handed off with `mark_ready`, refuse turn-end and have Claude wait for the next report instead of going idle. Set `false` for purely passive delivery. |
@@ -143,6 +146,7 @@ Optional, per project: `.claude/pr-monitor.json` for Claude Code (with `.opencod
 ## Behavior details
 
 - **Activity** = state/mergeability changes, review changes, unresolved-thread count changes, new comments, and CI *suite conclusions*. Transitions into "running" (a new push) and per-check progress are intentionally not activity.
+- **CI failures bypass the timers** (`flushOnCiFailure`, default on). A check whose outcome is newly `failure` — including one found while the suite is still running, which is otherwise not activity — flushes on the spot: no quiet window, no CI hold. The report reads the suite honestly (`- CI: running (3/8 done, 1 failed so far: lint)`). The instant path fires at most once per head commit, so a matrix going red job by job cannot wake the session once per job; the suite's eventual conclusion still delivers the full verdict through the normal debounce, and the next push re-arms the instant path.
 - **"New since last flush"** counts comments created after the watch's baseline, which advances on every delivered report or manual `flush`.
 - **Failure handling**: 10 consecutive poll failures (or report-delivery failures) stop the monitor with a notice. A deleted/inaccessible PR stops it immediately.
 - **Terminal states**: a report describing a merged/closed PR is delivered with a `Monitor stopped: PR merged|closed` line, then the monitor stops itself. All stop reasons use the same `Monitor stopped: <reason>` phrasing.

@@ -30970,6 +30970,7 @@ var DEFAULT_CONFIG = {
   pollIntervalSeconds: 60,
   ignoreCommentTag: void 0,
   announceOnStart: true,
+  flushOnCiFailure: true,
   desktopNotifications: false,
   readyLabel: "ready-for-human-review",
   keepAlive: true,
@@ -30993,6 +30994,8 @@ function resolveConfig(raw) {
   cfg.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : void 0;
   const announce = record2["announceOnStart"];
   if (typeof announce === "boolean") cfg.announceOnStart = announce;
+  const flushOnCiFailure = record2["flushOnCiFailure"];
+  if (typeof flushOnCiFailure === "boolean") cfg.flushOnCiFailure = flushOnCiFailure;
   const notify = record2["desktopNotifications"];
   if (typeof notify === "boolean") cfg.desktopNotifications = notify;
   const label = record2["readyLabel"];
@@ -31221,6 +31224,13 @@ function mergeableChanged(lastDefinite, next) {
   if (lastDefinite === void 0) return false;
   return lastDefinite !== next.mergeable;
 }
+function hasNewCiFailure(prev, next) {
+  const failing = next.checks.filter((check2) => check2.outcome === "failure");
+  if (failing.length === 0) return false;
+  if (prev.headSha !== next.headSha) return true;
+  const before = new Set(prev.checks.filter((check2) => check2.outcome === "failure").map((check2) => check2.name));
+  return failing.some((check2) => !before.has(check2.name));
+}
 function detectActivity(prev, next, lastDefiniteMergeable) {
   if (prev.state !== next.state) return true;
   if (mergeableChanged(lastDefiniteMergeable, next)) return true;
@@ -31307,6 +31317,14 @@ var PrWatch = class {
   lastActivityAt = 0;
   lastFlushAt;
   holdStartedAt;
+  // Set when a check went red: the next flush check ignores the debounce window
+  // and the CI hold.
+  urgent = false;
+  // Head SHA whose CI failure already triggered an instant flush. Caps the
+  // instant path at one report per commit, so a matrix whose jobs go red one by
+  // one cannot wake the session once per job; the stragglers ride along with the
+  // debounced suite-conclusion report instead.
+  urgentFlushedSha;
   consecutiveFailures = 0;
   deliveryFailures = 0;
   fetchStartedAt;
@@ -31377,10 +31395,18 @@ var PrWatch = class {
     if (this.stopped) return;
     this.consecutiveFailures = 0;
     this.snapshotAt = this.fetchStartedAt;
-    if (this.snapshot !== void 0 && detectActivity(this.snapshot, next, this.lastDefiniteMergeable)) {
-      this.dirty = true;
-      this.lastActivityAt = this.deps.now();
-      this.holdStartedAt = void 0;
+    if (this.snapshot !== void 0) {
+      if (detectActivity(this.snapshot, next, this.lastDefiniteMergeable)) {
+        this.dirty = true;
+        this.lastActivityAt = this.deps.now();
+        this.holdStartedAt = void 0;
+      }
+      if (this.config.flushOnCiFailure && next.state === "OPEN" && this.urgentFlushedSha !== next.headSha && hasNewCiFailure(this.snapshot, next)) {
+        this.dirty = true;
+        this.urgent = true;
+        this.urgentFlushedSha = next.headSha;
+        this.holdStartedAt = void 0;
+      }
     }
     this.snapshot = next;
     this.rememberDefiniteMergeable(next);
@@ -31455,16 +31481,19 @@ var PrWatch = class {
   maybeAutoFlush() {
     if (!this.dirty || this.snapshot === void 0) return;
     const now = this.deps.now();
-    if (now - this.lastActivityAt < this.config.debounceMinutes * 6e4) return;
     let forcedHoldMinutes;
-    if (ciPhase(this.snapshot) === "running" && this.snapshot.state === "OPEN") {
-      if (this.holdStartedAt === void 0) this.holdStartedAt = now;
-      const heldMs = now - this.holdStartedAt;
-      if (heldMs < this.config.maxCiWaitMinutes * 6e4) return;
-      forcedHoldMinutes = Math.round(heldMs / 6e4);
+    if (!this.urgent) {
+      if (now - this.lastActivityAt < this.config.debounceMinutes * 6e4) return;
+      if (ciPhase(this.snapshot) === "running" && this.snapshot.state === "OPEN") {
+        if (this.holdStartedAt === void 0) this.holdStartedAt = now;
+        const heldMs = now - this.holdStartedAt;
+        if (heldMs < this.config.maxCiWaitMinutes * 6e4) return;
+        forcedHoldMinutes = Math.round(heldMs / 6e4);
+      }
     }
     const previousFlushAt = this.lastFlushAt;
     const previousHoldStartedAt = this.holdStartedAt;
+    const previousUrgent = this.urgent;
     const report = this.flush(forcedHoldMinutes);
     void this.deps.deliver(report).then(
       () => {
@@ -31475,6 +31504,7 @@ var PrWatch = class {
         this.lastFlushAt = previousFlushAt;
         this.dirty = true;
         this.holdStartedAt = previousHoldStartedAt;
+        this.urgent = previousUrgent;
         this.deliveryFailures += 1;
         this.deps.log(`report delivery failed for ${targetKey(this.target)} (${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error51}`);
         if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
@@ -31497,6 +31527,7 @@ var PrWatch = class {
     this.lastFlushAt = this.snapshotAt ?? this.deps.now();
     this.dirty = false;
     this.holdStartedAt = void 0;
+    this.urgent = false;
     return report;
   }
   stopIfTerminal() {
@@ -31774,7 +31805,7 @@ ${raced.watch.statusLine()}`;
   if (config2.announceOnStart) await watch.announceInitial();
   log(`started monitoring ${key} for Claude Code pid ${claudePid}`);
   return `Started monitoring ${key} \u2014 "${initial.title}".
-` + (config2.announceOnStart ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : "") + `Polling every ${config2.pollIntervalSeconds}s; after activity settles for ${config2.debounceMinutes} quiet minutes, a report is injected into this conversation at your next tool call, user message, or turn end. The monitor stops automatically when the PR is merged or closed, and does not survive this Claude Code session.` + (config2.keepAlive ? `
+` + (config2.announceOnStart ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : "") + `Polling every ${config2.pollIntervalSeconds}s; after activity settles for ${config2.debounceMinutes} quiet minutes, a report is injected into this conversation at your next tool call, user message, or turn end. ` + (config2.flushOnCiFailure ? `A failing check does not wait for that quiet window \u2014 it is reported at the next poll, even while the rest of the suite runs, so you can start fixing CI right away. ` : "") + `The monitor stops automatically when the PR is merged or closed, and does not survive this Claude Code session.` + (config2.keepAlive ? `
 Keep-alive is on: until this PR is handed off with action 'mark_ready', turn-end is refused and you are asked to wait for the next report rather than going idle. Follow the monitor-pr skill; action 'stop' ends it at any time.` : "");
 };
 var loadProjectConfig = () => loadConfig([join3(projectDir, ".claude", "pr-monitor.json"), join3(projectDir, ".opencode", "pr-monitor.json")], log);
@@ -31879,7 +31910,7 @@ var server = new McpServer({ name: "pr-monitor", version: "0.2.0" });
 server.registerTool(
   "pr_monitor",
   {
-    description: "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments, mergeability changes, and merge/close. Changes are aggregated (rolling debounce) and injected into THIS session as '[PR Monitor]' messages stating facts only, delivered at your next tool call, user message, or turn end. Actions: start (begin watching a PR), stop (end watching), flush (on-demand: immediately return a full status report and reset the 'new since' baseline; a delivered report already advances the baseline, so a flush after handling one is not needed), status (list this session's monitors), mark_ready (add the configured ready-for-human-review label to the PR on GitHub \u2014 use once CI is green and review feedback is addressed, to signal a human should review now; this is also the handoff that releases the keep-alive loop), unmark_ready (withdraw that label \u2014 use when new feedback arrives on a PR that was already flagged ready, before working on it again). mark_ready/unmark_ready do not require an active monitor. The pr argument must be explicit 'owner/repo#123' or a full PR URL; 'all' is allowed for stop/flush. Tuning lives in .claude/pr-monitor.json. Monitors are per-session and do not survive Claude Code restarts. While a monitored PR is not handed off, keep-alive (config key 'keepAlive') refuses turn-end so reports arriving during idle time are still acted on \u2014 follow the monitor-pr skill.",
+    description: "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments, mergeability changes, and merge/close. Changes are aggregated (rolling debounce) and injected into THIS session as '[PR Monitor]' messages stating facts only, delivered at your next tool call, user message, or turn end. A check going red skips the debounce and is reported at the next poll, so CI fixes can start straight away. Actions: start (begin watching a PR), stop (end watching), flush (on-demand: immediately return a full status report and reset the 'new since' baseline; a delivered report already advances the baseline, so a flush after handling one is not needed), status (list this session's monitors), mark_ready (add the configured ready-for-human-review label to the PR on GitHub \u2014 use once CI is green and review feedback is addressed, to signal a human should review now; this is also the handoff that releases the keep-alive loop), unmark_ready (withdraw that label \u2014 use when new feedback arrives on a PR that was already flagged ready, before working on it again). mark_ready/unmark_ready do not require an active monitor. The pr argument must be explicit 'owner/repo#123' or a full PR URL; 'all' is allowed for stop/flush. Tuning lives in .claude/pr-monitor.json. Monitors are per-session and do not survive Claude Code restarts. While a monitored PR is not handed off, keep-alive (config key 'keepAlive') refuses turn-end so reports arriving during idle time are still acted on \u2014 follow the monitor-pr skill.",
     inputSchema: {
       action: external_exports.enum(["start", "stop", "flush", "status", "mark_ready", "unmark_ready"]).describe("What to do"),
       pr: external_exports.string().optional().describe(

@@ -181,8 +181,11 @@ const startWatch = async (pr: string): Promise<string> => {
     `Started monitoring ${key} — "${initial.title}".\n` +
     (config.announceOnStart ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : "") +
     `Polling every ${config.pollIntervalSeconds}s; after activity settles for ${config.debounceMinutes} quiet minutes, a report is ` +
-    `injected into this conversation at your next tool call, user message, or turn end. The monitor stops automatically when the PR ` +
-    `is merged or closed, and does not survive this Claude Code session.` +
+    `injected into this conversation at your next tool call, user message, or turn end. ` +
+    (config.flushOnCiFailure
+      ? `A failing check does not wait for that quiet window — it is reported at the next poll, even while the rest of the suite runs, so you can start fixing CI right away. `
+      : "") +
+    `The monitor stops automatically when the PR is merged or closed, and does not survive this Claude Code session.` +
     (config.keepAlive
       ? `\nKeep-alive is on: until this PR is handed off with action 'mark_ready', turn-end is refused and you are asked to wait for ` +
         `the next report rather than going idle. Follow the monitor-pr skill; action 'stop' ends it at any time.`
@@ -331,6 +334,7 @@ server.registerTool(
       "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments, " +
       "mergeability changes, and merge/close. Changes are aggregated (rolling debounce) and injected into THIS session " +
       "as '[PR Monitor]' messages stating facts only, delivered at your next tool call, user message, or turn end. " +
+      "A check going red skips the debounce and is reported at the next poll, so CI fixes can start straight away. " +
       "Actions: start (begin watching a PR), stop (end watching), flush (on-demand: immediately return a full status " +
       "report and reset the 'new since' baseline; a delivered report already advances the baseline, so a flush after " +
       "handling one is not needed), status (list this session's monitors), mark_ready (add the configured " +
