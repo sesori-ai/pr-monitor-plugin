@@ -90,11 +90,12 @@ Add the plugin to your project's `opencode.json` (committed — the whole team g
 
 ```jsonc
 {
-  "plugin": ["github:sesori-ai/opencode-pr-monitor#v0.2.0"]
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@sesori/pr-monitor-opencode"]
 }
 ```
 
-opencode installs git-spec plugins into its package cache on startup. Pin a tag and bump it explicitly to pick up new versions.
+opencode installs npm plugins and their dependencies into its package cache on startup. To make upgrades explicit, pin a version such as `@sesori/pr-monitor-opencode@0.3.0` and bump it deliberately. Quit and restart opencode after changing the plugin configuration.
 
 Reports arrive in the owning session as messages starting with `[PR Monitor]`. Monitors stop when the owning session is deleted; graceful opencode shutdowns deliver a stop notice to the owning session.
 
@@ -157,6 +158,7 @@ Optional, per project: `.claude/pr-monitor.json` for Claude Code (with `.opencod
 npm install
 npm run typecheck   # core + both shells
 npm run build       # bundle the Claude Code MCP server to claude-code/dist/mcp-server.mjs
+npm run pack:check  # inspect the OpenCode npm package without creating a tarball
 ```
 
 Layout — one directory per target, plus the shared core:
@@ -168,17 +170,30 @@ claude-code/     Claude Code shell — this directory is the plugin root (${CLAU
 .claude-plugin/  marketplace.json, which stays at the repo root and points at ./claude-code
 ```
 
-`core/` never imports from a shell, so a shell is only wiring: transport, delivery, and config paths. opencode executes TypeScript directly (no build step), and the loader invokes every export of the entry module as a plugin, so `PrMonitorPlugin` must remain the sole export of `opencode/index.ts`. The Claude Code shell is bundled with esbuild into the committed `claude-code/dist/mcp-server.mjs`, since plugin installs run no build step; `claude-code/hooks/drain-spool.mjs` is the dependency-free hook that injects spooled reports and runs the keep-alive loop, and `claude-code/hooks/await-activity.mjs` is the blocking waiter it hands to the session; `claude-code/skills/monitor-pr/` is the behavior — when to start a monitor, what to do with each report, when to hand off; `claude-code/.mcp.json` declares the MCP server (plugin-root convention — an inline `mcpServers` field in plugin.json is not picked up).
+`core/` never imports from a shell, so a shell is only wiring: transport, delivery, and config paths. opencode executes TypeScript directly (no build step), and the loader invokes every export of the entry module as a plugin, so `PrMonitorPlugin` must remain the sole export of `opencode/index.ts`. The `@sesori/pr-monitor-opencode` npm artifact is allowlisted to `core/` and `opencode/`; it does not contain the Claude Code distribution. The Claude Code shell is bundled with esbuild into the committed `claude-code/dist/mcp-server.mjs`, since plugin installs run no build step; `claude-code/hooks/drain-spool.mjs` is the dependency-free hook that injects spooled reports and runs the keep-alive loop, and `claude-code/hooks/await-activity.mjs` is the blocking waiter it hands to the session; `claude-code/skills/monitor-pr/` is the behavior — when to start a monitor, what to do with each report, when to hand off; `claude-code/.mcp.json` declares the MCP server (plugin-root convention — an inline `mcpServers` field in plugin.json is not picked up).
 
 ## Releasing
 
-A release is created by pushing an annotated version tag (`vX.Y.Z`) to a commit on GitHub. There is no npm publication or separate GitHub Release step, but `claude-code/dist/` must be rebuilt and committed when the Claude Code shell or the shared core changes. Update `package.json`, `package-lock.json`, `claude-code/.claude-plugin/plugin.json`, and `CHANGELOG.md`, run `npm run build`, commit, then tag and push:
+A release uses one version for both targets: the annotated `vX.Y.Z` Git tag releases the Claude Code plugin, and the root package publishes the OpenCode target as `@sesori/pr-monitor-opencode`. There is no separate GitHub Release step. Update `package.json`, `package-lock.json`, `claude-code/.claude-plugin/plugin.json`, and `CHANGELOG.md`, then run:
 
 ```sh
-git tag -a vX.Y.Z -m "vX.Y.Z — summary"
+npm ci
+npm run typecheck
+npm run build
+npm run pack:check
+git diff --exit-code -- claude-code/dist/mcp-server.mjs
+```
+
+Commit any rebuilt bundle and the release metadata. From the clean release commit on `main`, publish before creating and pushing the tag; if npm rejects the package, there is no stale tag to announce a partial release:
+
+```sh
 git push origin main
+npm publish
+git tag -a vX.Y.Z -m "vX.Y.Z — summary"
 git push origin vX.Y.Z
 ```
+
+The first publication requires an npm account with permission to create public packages in the `@sesori` scope (`npm login`). `publishConfig` already fixes the registry to npmjs.org and the access level to public. npm versions are immutable, so verify the package name, version, and `npm run pack:check` output before publishing.
 
 ## License
 
