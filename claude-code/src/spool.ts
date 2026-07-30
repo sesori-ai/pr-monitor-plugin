@@ -30,10 +30,18 @@ let seq = 0
  * conversation. The start time pins it: pid + start time is unique for as long
  * as the machine is up.
  *
- * Linux answers from `/proc` with no subprocess; macOS needs `ps` (1-second
- * resolution, which is ample — a recycled pid re-appearing in the same second
- * is not a thing). Returns undefined where neither works, and every caller
- * treats that as "cannot verify" and falls back to pid-only behaviour.
+ * Linux answers from `/proc` in clock ticks since boot, with no subprocess.
+ * macOS has no finer-grained source reachable without native code, so `ps
+ * -o lstart=` it is — 1-second resolution, which bounds the guarantee: a pid
+ * recycled *and* re-started inside the same second as its predecessor still
+ * compares equal. That residue is accepted deliberately. It is orders of
+ * magnitude smaller than the hole it closes (which needs no timing
+ * coincidence at all, only a dir outliving its owner), and the alternative —
+ * calling macOS unverifiable — would restore pid-only routing there, which is
+ * strictly worse than a token that is merely coarse.
+ *
+ * Returns undefined where neither source works, and every caller treats that
+ * as "cannot verify" and falls back to pid-only behaviour.
  */
 export function startToken(pid: number): string | undefined {
   try {
@@ -59,11 +67,26 @@ export function startToken(pid: number): string | undefined {
 }
 
 /**
- * Take ownership of this session's spool dir at server startup, discarding one
- * left behind by a *different* process that held the same pid (see
- * `startToken`). Must run before anything is spooled or drained, so that a dir
- * carrying `.md` files always carries the owner token of the process that
- * wrote them.
+ * The token this server successfully claimed, and the pid it claimed it for.
+ * Set only once the `owner` file is on disk, so a failed claim leaves the
+ * write guard disabled rather than blocking every report.
+ */
+let claimed: { pid: number; token: string } | undefined
+
+/**
+ * Take ownership of this session's spool dir at server startup. Must run
+ * before anything is spooled or drained, so that a dir carrying `.md` files
+ * always carries the token of the process those reports belong to.
+ *
+ * Anything already in the dir that this process cannot prove it inherited is
+ * discarded — both a token from a *different* process that held the same pid,
+ * and (just as important) a dir with no token at all, which is unverifiable by
+ * definition: leaving those reports in place and then stamping them with this
+ * process's token would launder a vanished session's reports into looking like
+ * ours. Nothing of ours can be lost here, because at startup this session has
+ * not spooled anything yet. An /mcp restart is unaffected: the token is the
+ * *Claude Code* process's start time, so a new server under the same live
+ * session re-claims its own dir and its undrained reports survive.
  *
  * Never throws: an unwritable spool is diagnosed by `probeSpool` when a
  * monitor actually starts, where the error can be reported to the caller.
@@ -72,20 +95,56 @@ export function claimSpool(claudePid: number): void {
   const dir = spoolDirFor(claudePid)
   const token = startToken(claudePid)
   if (token === undefined) return // cannot verify -> leave the dir as it is
+  let previous: string | undefined
   try {
-    const previous = readFileSync(join(dir, OWNER_FILE), "utf8")
-    // A different token means the dir outlived its owner and the pid has since
-    // been recycled: its reports belong to a session that no longer exists.
-    if (previous !== token) rmSync(dir, { recursive: true, force: true })
+    previous = readFileSync(join(dir, OWNER_FILE), "utf8")
   } catch {
-    // no owner file -> unclaimed dir (fresh, or written by an older version)
+    // absent (fresh dir, or one left unclaimed) -> `previous` stays undefined
+  }
+  if (previous !== token) {
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      // best-effort; the hook independently refuses dirs it cannot verify
+    }
   }
   try {
     mkdirSync(dir, { recursive: true })
-    writeFileSync(join(dir, OWNER_FILE), token, "utf8")
+    // tmp + rename: the hook reads this path concurrently, and a truncated
+    // read must never be mistaken for a foreign token.
+    const tmp = join(dir, `.${OWNER_FILE}.${process.pid}.tmp`)
+    writeFileSync(tmp, token, "utf8")
+    renameSync(tmp, join(dir, OWNER_FILE))
+    claimed = { pid: claudePid, token }
   } catch {
     // best-effort: without the token the hook falls back to pid-only routing
   }
+}
+
+/**
+ * Refuse to write into a spool this server no longer owns.
+ *
+ * `claimSpool` proves ownership once, at startup, but the pid in the path is
+ * still just a number: if this server outlives its Claude Code parent (a
+ * shutdown notice queued while the process is exiting) and the OS hands that
+ * pid to a *new* Claude Code process, the path would resolve to the newcomer's
+ * spool — and its fresh owner token would make the hook accept our stale
+ * report as the new session's own. Re-reading the token before each write
+ * keeps "a server writes only into the dir it claimed" true for the whole
+ * process lifetime, not just at startup.
+ */
+function assertOwned(claudePid: number, dir: string): void {
+  if (claimed === undefined || claimed.pid !== claudePid) return // unverifiable -> pid-only, as before
+  let current: string | undefined
+  try {
+    current = readFileSync(join(dir, OWNER_FILE), "utf8")
+  } catch {
+    current = undefined
+  }
+  if (current === claimed.token) return
+  throw new Error(
+    `spool ${dir} is no longer owned by this server (the Claude Code process it belonged to is gone); refusing to write`,
+  )
 }
 
 /**
@@ -117,6 +176,7 @@ export function probeSpool(claudePid: number): void {
 export function spoolReport(claudePid: number, report: string): void {
   const dir = spoolDirFor(claudePid)
   mkdirSync(dir, { recursive: true })
+  assertOwned(claudePid, dir)
   seq += 1
   const name = `${Date.now()}-${process.pid}-${String(seq).padStart(4, "0")}`
   const tmp = join(dir, `${name}.tmp`)

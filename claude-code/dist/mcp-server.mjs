@@ -31487,20 +31487,43 @@ function startToken(pid) {
   }
   return void 0;
 }
+var claimed;
 function claimSpool(claudePid2) {
   const dir = spoolDirFor(claudePid2);
   const token = startToken(claudePid2);
   if (token === void 0) return;
+  let previous;
   try {
-    const previous = readFileSync(join(dir, OWNER_FILE), "utf8");
-    if (previous !== token) rmSync(dir, { recursive: true, force: true });
+    previous = readFileSync(join(dir, OWNER_FILE), "utf8");
   } catch {
+  }
+  if (previous !== token) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+    }
   }
   try {
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, OWNER_FILE), token, "utf8");
+    const tmp = join(dir, `.${OWNER_FILE}.${process.pid}.tmp`);
+    writeFileSync(tmp, token, "utf8");
+    renameSync(tmp, join(dir, OWNER_FILE));
+    claimed = { pid: claudePid2, token };
   } catch {
   }
+}
+function assertOwned(claudePid2, dir) {
+  if (claimed === void 0 || claimed.pid !== claudePid2) return;
+  let current;
+  try {
+    current = readFileSync(join(dir, OWNER_FILE), "utf8");
+  } catch {
+    current = void 0;
+  }
+  if (current === claimed.token) return;
+  throw new Error(
+    `spool ${dir} is no longer owned by this server (the Claude Code process it belonged to is gone); refusing to write`
+  );
 }
 function probeSpool(claudePid2) {
   const dir = spoolDirFor(claudePid2);
@@ -31512,6 +31535,7 @@ function probeSpool(claudePid2) {
 function spoolReport(claudePid2, report) {
   const dir = spoolDirFor(claudePid2);
   mkdirSync(dir, { recursive: true });
+  assertOwned(claudePid2, dir);
   seq += 1;
   const name = `${Date.now()}-${process.pid}-${String(seq).padStart(4, "0")}`;
   const tmp = join(dir, `${name}.tmp`);

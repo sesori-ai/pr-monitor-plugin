@@ -18,10 +18,10 @@
 // grandparent — a full ancestry walk would reach an OUTER Claude Code session
 // when sessions nest (session A's Bash tool runs `claude -p ...` → session B),
 // letting B's hooks steal A's reports. Ancestry comes from /proc where it
-// exists and `ps` otherwise; with neither, a single live spool is still
-// unambiguously ours, but two or more are not attributable and are left alone
-// — an undelivered report is recoverable, one delivered to the wrong session
-// is not.
+// exists and `ps` otherwise; with neither it is unknown, and this hook then
+// drains nothing rather than guess — an undelivered report waits on disk and
+// arrives later, while one delivered to the wrong session is unlinked and gone
+// from the conversation that owned it.
 
 import { execFileSync } from "node:child_process"
 import { readdirSync, readFileSync, rmSync, unlinkSync } from "node:fs"
@@ -120,14 +120,19 @@ function ownerMatches(pid, dir) {
  * Pids that may own this session's spool: this process, its parent (the sh
  * running the hook command), and its grandparent (the Claude Code process —
  * or, should a future version spawn hooks without a shell, the parent). See
- * the header comment for why the walk is capped at the grandparent. Returns
- * undefined when the ancestry is unavailable, engaging the lone-spool fallback.
+ * the header comment for why the walk is capped at the grandparent.
+ *
+ * When the grandparent cannot be resolved the set simply lacks it, and since
+ * spool dirs are named by the Claude Code pid, nothing matches and nothing is
+ * drained. That is the intended outcome: the number of live spools on the
+ * machine says nothing about which of them belongs to the session running this
+ * hook — a session with no monitor at all can fire hooks — so there is no
+ * cardinality trick that could stand in for real ancestry.
  */
 function candidatePids() {
-  const gpid = parentOf(process.ppid)
-  if (gpid === undefined) return undefined
   const pids = new Set([process.pid, process.ppid])
-  if (gpid > 1) pids.add(gpid)
+  const gpid = parentOf(process.ppid)
+  if (gpid !== undefined && gpid > 1) pids.add(gpid)
   return pids
 }
 
@@ -154,21 +159,13 @@ function ownedSpools() {
   }
 
   const candidates = candidatePids()
-  // Without ancestry, one live spool is unambiguously this session's; several
-  // are not attributable, and draining the wrong one deletes reports from the
-  // conversation that owns them.
-  const mine =
-    candidates === undefined ? (live.length === 1 ? live : []) : live.filter(({ pid }) => candidates.has(pid))
-
-  return mine.filter(({ pid, dir }) => {
-    if (ownerMatches(pid, dir)) return true
-    // Live pid, but the spool predates the process holding it: written by a
-    // predecessor that is gone, so no session will ever legitimately drain it.
-    try {
-      rmSync(dir, { recursive: true, force: true })
-    } catch {}
-    return false
-  })
+  // Skipped, never deleted: a mismatch here means the pid was recycled, and the
+  // server now holding it is concurrently claiming this dir (claimSpool wipes
+  // and recreates it at startup). Deleting would race that claim and could take
+  // the new session's first reports with it. Refusing to read is all this hook
+  // needs; cleanup belongs to the claim, which runs before the server accepts
+  // work, and to the dead-pid sweep above.
+  return live.filter(({ pid, dir }) => candidates.has(pid) && ownerMatches(pid, dir))
 }
 
 function drainReports(spools) {
