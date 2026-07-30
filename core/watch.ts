@@ -49,11 +49,11 @@ export class PrWatch {
   private fetchStartedAt: number | undefined
   private snapshotAt: number | undefined
   private stopped = false
-  // Serializes tick()/manualFlush(): their fetch -> apply -> flush sequences
-  // share snapshot/baseline state, and interleaved awaits could overwrite a
-  // newer snapshot with an older fetch or restore a stale baseline (duplicate
-  // or stale reports). Ticks skip instead of queueing while an op is pending —
-  // the interval fires again soon anyway; manual flushes queue.
+  // Serializes tick()/manualFlush(): their fetch -> apply -> flush -> deliver
+  // sequences share snapshot/baseline state, and interleaved awaits could
+  // overwrite a newer snapshot with an older fetch or restore a stale baseline
+  // (duplicate or stale reports). Ticks skip instead of queueing while an op is
+  // pending — the interval fires again soon anyway; manual flushes queue.
   private opQueue: Promise<unknown> = Promise.resolve()
   private pendingOps = 0
 
@@ -147,7 +147,7 @@ export class PrWatch {
     }
     this.snapshot = next
     this.rememberDefiniteMergeable(next)
-    this.maybeAutoFlush()
+    await this.maybeAutoFlush()
   }
 
   /**
@@ -223,7 +223,17 @@ export class PrWatch {
     }
   }
 
-  private maybeAutoFlush(): void {
+  /**
+   * Delivery is awaited here rather than fire-and-forget, which keeps it inside
+   * the caller's `runExclusive` op. The rollback below restores exactly the
+   * state a *later* flush would have advanced, so an overlapping delivery that
+   * rejected late could roll a newer report's baseline back and — with `urgent`
+   * restored — fire a duplicate report immediately. Serializing keeps every
+   * rollback about the flush it belongs to. The cost is that ticks skip while a
+   * report is in flight, which is the right behavior anyway: there is nothing
+   * useful to do with a fresher snapshot while the previous report is stuck.
+   */
+  private async maybeAutoFlush(): Promise<void> {
     if (!this.dirty || this.snapshot === undefined) return
     const now = this.deps.now()
     let forcedHoldMinutes: number | undefined
@@ -244,28 +254,26 @@ export class PrWatch {
     const previousHoldStartedAt = this.holdStartedAt
     const previousUrgent = this.urgent
     const report = this.flush(forcedHoldMinutes)
-    void this.deps.deliver(report).then(
-      () => {
-        this.deliveryFailures = 0
-        this.stopIfTerminal()
-      },
-      (error: unknown) => {
-        // Delivery failed: restore the baseline, dirty flag, CI-hold timer and
-        // urgency so the same activity is re-reported on a later tick without
-        // restarting the maxCiWaitMinutes window — and so a failed instant CI
-        // report retries instantly rather than falling back to the debounce.
-        this.lastFlushAt = previousFlushAt
-        this.dirty = true
-        this.holdStartedAt = previousHoldStartedAt
-        this.urgent = previousUrgent
-        this.deliveryFailures += 1
-        this.deps.log(`report delivery failed for ${targetKey(this.target)} (${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error}`)
-        if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
-          this.deps.log(`monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`)
-          this.stop()
-        }
-      },
-    )
+    try {
+      await this.deps.deliver(report)
+      this.deliveryFailures = 0
+      this.stopIfTerminal()
+    } catch (error) {
+      // Delivery failed: restore the baseline, dirty flag, CI-hold timer and
+      // urgency so the same activity is re-reported on a later tick without
+      // restarting the maxCiWaitMinutes window — and so a failed instant CI
+      // report retries instantly rather than falling back to the debounce.
+      this.lastFlushAt = previousFlushAt
+      this.dirty = true
+      this.holdStartedAt = previousHoldStartedAt
+      this.urgent = previousUrgent
+      this.deliveryFailures += 1
+      this.deps.log(`report delivery failed for ${targetKey(this.target)} (${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error}`)
+      if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
+        this.deps.log(`monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`)
+        this.stop()
+      }
+    }
   }
 
   private async deliverOrLog(message: string): Promise<void> {

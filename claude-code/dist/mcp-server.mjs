@@ -31330,11 +31330,11 @@ var PrWatch = class {
   fetchStartedAt;
   snapshotAt;
   stopped = false;
-  // Serializes tick()/manualFlush(): their fetch -> apply -> flush sequences
-  // share snapshot/baseline state, and interleaved awaits could overwrite a
-  // newer snapshot with an older fetch or restore a stale baseline (duplicate
-  // or stale reports). Ticks skip instead of queueing while an op is pending —
-  // the interval fires again soon anyway; manual flushes queue.
+  // Serializes tick()/manualFlush(): their fetch -> apply -> flush -> deliver
+  // sequences share snapshot/baseline state, and interleaved awaits could
+  // overwrite a newer snapshot with an older fetch or restore a stale baseline
+  // (duplicate or stale reports). Ticks skip instead of queueing while an op is
+  // pending — the interval fires again soon anyway; manual flushes queue.
   opQueue = Promise.resolve();
   pendingOps = 0;
   constructor(input) {
@@ -31410,7 +31410,7 @@ var PrWatch = class {
     }
     this.snapshot = next;
     this.rememberDefiniteMergeable(next);
-    this.maybeAutoFlush();
+    await this.maybeAutoFlush();
   }
   /**
    * Initial status delivered right after the watch starts, so the owning
@@ -31478,7 +31478,17 @@ var PrWatch = class {
       this.stop();
     }
   }
-  maybeAutoFlush() {
+  /**
+   * Delivery is awaited here rather than fire-and-forget, which keeps it inside
+   * the caller's `runExclusive` op. The rollback below restores exactly the
+   * state a *later* flush would have advanced, so an overlapping delivery that
+   * rejected late could roll a newer report's baseline back and — with `urgent`
+   * restored — fire a duplicate report immediately. Serializing keeps every
+   * rollback about the flush it belongs to. The cost is that ticks skip while a
+   * report is in flight, which is the right behavior anyway: there is nothing
+   * useful to do with a fresher snapshot while the previous report is stuck.
+   */
+  async maybeAutoFlush() {
     if (!this.dirty || this.snapshot === void 0) return;
     const now = this.deps.now();
     let forcedHoldMinutes;
@@ -31495,24 +31505,22 @@ var PrWatch = class {
     const previousHoldStartedAt = this.holdStartedAt;
     const previousUrgent = this.urgent;
     const report = this.flush(forcedHoldMinutes);
-    void this.deps.deliver(report).then(
-      () => {
-        this.deliveryFailures = 0;
-        this.stopIfTerminal();
-      },
-      (error51) => {
-        this.lastFlushAt = previousFlushAt;
-        this.dirty = true;
-        this.holdStartedAt = previousHoldStartedAt;
-        this.urgent = previousUrgent;
-        this.deliveryFailures += 1;
-        this.deps.log(`report delivery failed for ${targetKey(this.target)} (${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error51}`);
-        if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
-          this.deps.log(`monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`);
-          this.stop();
-        }
+    try {
+      await this.deps.deliver(report);
+      this.deliveryFailures = 0;
+      this.stopIfTerminal();
+    } catch (error51) {
+      this.lastFlushAt = previousFlushAt;
+      this.dirty = true;
+      this.holdStartedAt = previousHoldStartedAt;
+      this.urgent = previousUrgent;
+      this.deliveryFailures += 1;
+      this.deps.log(`report delivery failed for ${targetKey(this.target)} (${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error51}`);
+      if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
+        this.deps.log(`monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`);
+        this.stop();
       }
-    );
+    }
   }
   async deliverOrLog(message) {
     try {
