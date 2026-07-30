@@ -69,6 +69,11 @@ export function buildReport(
     `- [comment:inline] ${snapshot.unresolvedThreads} unresolved threads (${newPart(newInline)})`,
     `- [comment:issue] ${snapshot.issueCommentsTotal} total (${newPart(newIssue)})`,
   ]
+  // Reported so a session can see whether the PR is already handed off to a
+  // human (ready label present). Deliberately NOT part of detectActivity: the
+  // agent applies and removes that label itself, and treating it as activity
+  // would make every mark_ready trigger a report that re-opens the work loop.
+  if (snapshot.labels.length > 0) lines.push(`- Labels: ${snapshot.labels.join(", ")}`)
   if (snapshot.state !== "OPEN") lines.push(`- Monitor stopped: PR ${snapshot.state === "MERGED" ? "merged" : "closed"}`)
   return lines.join("\n")
 }

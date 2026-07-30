@@ -24,6 +24,7 @@ export type PrSnapshot = {
   inlineComments: CommentMeta[] // ignore-filtered
   issueCommentsTotal: number // totalCount minus ignored among fetched window
   issueComments: CommentMeta[] // ignore-filtered (last 100 fetched)
+  labels: string[] // label names currently on the PR
 }
 
 export class PollError extends Error {
@@ -72,6 +73,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
         comments(last: 100) { nodes { author { login __typename } body createdAt } }
       } }
       comments(last: 100) { totalCount nodes { author { login __typename } body createdAt } }
+      labels(first: 100) { nodes { name } }
     }
   }
 }`
@@ -171,6 +173,9 @@ export function normalizeSnapshot(
     inlineComments,
     issueCommentsTotal: Math.max((pr.comments?.totalCount ?? issueNodes.length) - ignoredCount, 0),
     issueComments: issueVisible.map(toMeta),
+    labels: (pr.labels?.nodes ?? [])
+      .map((node: any) => node?.name)
+      .filter((name: unknown): name is string => typeof name === "string"),
   }
 }
 

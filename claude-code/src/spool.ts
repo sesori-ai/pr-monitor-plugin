@@ -133,6 +133,19 @@ export function claimSpool(claudePid: number): void {
  * keeps "a server writes only into the dir it claimed" true for the whole
  * process lifetime, not just at startup.
  */
+/**
+ * The non-throwing form of the check `spoolReport` makes, for writers that
+ * should simply go quiet rather than surface an error (session-state.ts).
+ */
+export function ownsSpool(claudePid: number): boolean {
+  try {
+    assertOwned(claudePid, spoolDirFor(claudePid))
+    return true
+  } catch {
+    return false
+  }
+}
+
 function assertOwned(claudePid: number, dir: string): void {
   if (claimed === undefined || claimed.pid !== claudePid) return // unverifiable -> pid-only, as before
   let current: string | undefined

@@ -1,7 +1,7 @@
-// Marking a PR as ready for human review: apply a label via the GitHub REST
-// API. The label is ensured to exist first so it gets a deliberate color and
-// description — the add-labels endpoint auto-creates missing labels, but as
-// default grey with no description.
+// Marking a PR as ready for human review: apply (or withdraw) a label via the
+// GitHub REST API. The label is ensured to exist first so it gets a deliberate
+// color and description — the add-labels endpoint auto-creates missing labels,
+// but as default grey with no description.
 
 import { PollError, type GhRunner } from "./github"
 import { targetKey, type Target } from "./target"
@@ -16,15 +16,16 @@ const READY_LABEL_DESCRIPTION = "This PR is ready for human review"
  * factual result line; throws when the target is not an open PR or the add
  * fails.
  */
-export async function markReadyForHumanReview(runGh: GhRunner, target: Target, label: string): Promise<string> {
-  const repo = `repos/${target.owner}/${target.repo}`
-  // Verify the target is an actual OPEN pull request first. The labels
-  // endpoint below operates on the shared issue namespace, so without this
-  // check a plain issue number — or a merged/closed PR — would be silently
-  // labeled and reported as success.
+/**
+ * Verify the target is an actual OPEN pull request. The labels endpoints
+ * operate on the shared issue namespace, so without this check a plain issue
+ * number — or a merged/closed PR — would be silently (un)labeled and reported
+ * as success.
+ */
+async function assertOpenPullRequest(runGh: GhRunner, repo: string, number: number): Promise<void> {
   let raw: string
   try {
-    raw = await runGh(["api", `${repo}/pulls/${target.number}`])
+    raw = await runGh(["api", `${repo}/pulls/${number}`])
   } catch (error) {
     if (error instanceof PollError && error.notFound) {
       // The caller prefixes the target key; do not repeat it here.
@@ -36,6 +37,11 @@ export async function markReadyForHumanReview(runGh: GhRunner, target: Target, l
   if (pr.merged === true || pr.state !== "open") {
     throw new Error(`the PR is already ${pr.merged === true ? "MERGED" : "CLOSED"}.`)
   }
+}
+
+export async function markReadyForHumanReview(runGh: GhRunner, target: Target, label: string): Promise<string> {
+  const repo = `repos/${target.owner}/${target.repo}`
+  await assertOpenPullRequest(runGh, repo, target.number)
   try {
     await runGh([
       "api",
@@ -53,4 +59,27 @@ export async function markReadyForHumanReview(runGh: GhRunner, target: Target, l
   }
   await runGh(["api", `${repo}/issues/${target.number}/labels`, "-f", `labels[]=${label}`])
   return `Marked ${targetKey(target)} as ready for human review: label "${label}" added.`
+}
+
+/**
+ * Removes `label` from the PR — the withdraw side of the handoff, used when a
+ * human leaves new feedback on a PR that was already marked ready, so the PR
+ * stops advertising itself as awaiting review while the agent works on it.
+ * Idempotent: a PR that does not carry the label is reported as such rather
+ * than failing (the endpoint 404s in that case, and so does a missing label).
+ */
+export async function removeReadyForHumanReview(runGh: GhRunner, target: Target, label: string): Promise<string> {
+  const repo = `repos/${target.owner}/${target.repo}`
+  await assertOpenPullRequest(runGh, repo, target.number)
+  try {
+    await runGh(["api", "--method", "DELETE", `${repo}/issues/${target.number}/labels/${encodeURIComponent(label)}`])
+  } catch (error) {
+    // 404 here means the PR does not carry the label (or the label does not
+    // exist in the repo at all) — the requested end state either way.
+    if (error instanceof PollError && error.notFound) {
+      return `${targetKey(target)} did not carry the "${label}" label; nothing to remove.`
+    }
+    throw error
+  }
+  return `Removed the "${label}" label from ${targetKey(target)}: it is no longer flagged for human review.`
 }
