@@ -201,8 +201,15 @@ const markReady = async (pr: string): Promise<string> => {
     const result = await markReadyForHumanReview(runGh, target, config.readyLabel)
     // The handoff: keep monitoring, but stop holding the session open for this
     // PR. Any later report on it takes the PR back (see deliver()).
-    handedOff.add(targetKey(target))
-    refreshSessionState()
+    //
+    // Only meaningful for a PR this session is actually watching. Recording it
+    // for an unwatched one would leave a stale entry that silently disables
+    // keep-alive for a monitor started later under the same key — the label is
+    // applied either way, but the handoff is watch state, not label state.
+    if (watches.has(targetKey(target))) {
+      handedOff.add(targetKey(target))
+      refreshSessionState()
+    }
     return watches.has(targetKey(target))
       ? `${result}\nStill monitoring it, but it no longer holds this session open — new activity on it will re-open the work loop.`
       : result

@@ -54,7 +54,7 @@ The bundled `monitor-pr` skill turns reports into work, so the normal path needs
 
 1. Claude opens a PR and starts a monitor for it straight away.
 2. Every report is acted on — review comments via the repo's `address-pr-comments` skill, failing CI by fixing the cause, conflicts by merging the base branch in.
-3. When CI is green, no review threads are unresolved, no requested reviewer is still pending and nothing is left unanswered, Claude calls `mark_ready` — the PR gets the `ready-for-human-review` label and it is your turn.
+3. When CI is green, no review threads are unresolved, no requested reviewer is still pending and nothing is left unanswered, Claude calls `mark_ready` — the PR gets the configured `readyLabel` (default `ready-for-human-review`) and it is your turn.
 4. If a human then comments, the next report takes the PR back: Claude withdraws the label, works the feedback, and hands off again.
 
 ### How reports arrive (and how that differs from opencode)

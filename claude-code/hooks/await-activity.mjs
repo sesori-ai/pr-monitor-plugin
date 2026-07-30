@@ -18,7 +18,7 @@
 // must stay in sync with them; dependency-free (node builtins only) because
 // plugin installs run no npm install.
 
-import { readdirSync, readFileSync } from "node:fs"
+import { readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -115,4 +115,18 @@ try {
   await main()
 } catch (error) {
   console.log(`pr-monitor: wait ended early (${error?.message ?? error}).`)
+} finally {
+  // Proof for drain-spool.mjs that the waiter really ran. Its Stop-block guard
+  // gives up only on blocks that produced no wait at all — a broken waiter
+  // (node missing, script unreadable) leaves this untouched, while a session
+  // that is genuinely looping keeps refreshing it. Written last so it records
+  // a completed wait, not merely a start.
+  const { session } = parseArgs(process.argv.slice(2))
+  if (session !== undefined) {
+    try {
+      writeFileSync(join(SPOOL_ROOT, String(session), ".waiter"), String(Date.now()), "utf8")
+    } catch {
+      // best-effort: the guard degrades to giving up after a few blocks
+    }
+  }
 }

@@ -11,4 +11,4 @@ If no PR was given above, resolve the current branch's open PR with `gh pr view 
 
 After starting, briefly confirm what is being watched and keep working on whatever you were doing; `[PR Monitor]` reports will be injected into this conversation when something happens on the PR.
 
-Then follow the **monitor-pr** skill: act on every report, and — unless `keepAlive` is disabled in `pr-monitor.json` — keep the session on the PR until it is handed off with `mark_ready`, waiting between events rather than ending the turn.
+Then follow the **monitor-pr** skill: act on every report, and — unless `keepAlive` is disabled in `.claude/pr-monitor.json` — keep the session on the PR until it is handed off with `mark_ready`, waiting between events rather than ending the turn.

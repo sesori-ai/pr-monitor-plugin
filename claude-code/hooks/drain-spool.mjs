@@ -43,8 +43,17 @@ const OWNER_FILE = "owner"
 // invoked.
 const WAITER = join(dirname(fileURLToPath(import.meta.url)), "await-activity.mjs")
 const WAIT_SECONDS = 540
-const MIN_KEEPALIVE_BLOCK_GAP_MS = 30_000
+const MAX_BLOCKS_WITHOUT_WAIT = 5
 const KEEPALIVE_MARKER = ".keepalive"
+const WAITER_MARKER = ".waiter" // written by await-activity.mjs when a wait completes
+
+/**
+ * Single-quote a path for a shell command line. The waiter path is interpolated
+ * into a Bash command the model runs, and a plugin can be installed under any
+ * path the user chooses — inside double quotes a `$(...)`, backtick or `$VAR`
+ * in that path would be expanded by the shell before node ever starts.
+ */
+const shellQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`
 
 function readStdinJson() {
   try {
@@ -248,23 +257,44 @@ function armedKeepAlive(spools) {
 }
 
 /**
- * Rate-limit guard against a tight Stop loop. The normal cycle is paced by the
- * waiter blocking for minutes, so consecutive report-less keep-alive blocks
- * seconds apart mean the waiter is not actually running (node missing, script
- * unreadable, model ignoring the instruction). Let the turn end instead of
- * spinning; the marker lives in the spool dir and dies with it.
+ * Guard against a tight Stop loop, counted in *blocks that produced no wait*
+ * rather than elapsed time.
+ *
+ * A wall-clock gap cannot tell the two failure modes apart: a session that runs
+ * a quick tool and then ends its turn again looks exactly like one spinning
+ * because the waiter never starts (node missing, script unreadable, model
+ * ignoring the instruction) — and treating the first as the second abandons a
+ * PR that is still being worked. So the waiter itself reports in (`.waiter`),
+ * and any block it ran through resets the streak. Only a run of blocks with no
+ * wait at all between them gives up, bounding a genuine spin at a handful of
+ * round trips instead of never letting go. Both markers live in the spool dir
+ * and die with it.
  */
 function keepAliveBlockAllowed(pid) {
-  const marker = join(SPOOL_ROOT, String(pid), KEEPALIVE_MARKER)
-  const now = Date.now()
+  const dir = join(SPOOL_ROOT, String(pid))
+  const readStamp = (path) => {
+    try {
+      const value = Number(readFileSync(path, "utf8"))
+      return Number.isFinite(value) ? value : undefined
+    } catch {
+      return undefined
+    }
+  }
+  let previous
   try {
-    const previous = Number(readFileSync(marker, "utf8"))
-    if (Number.isFinite(previous) && now - previous < MIN_KEEPALIVE_BLOCK_GAP_MS) return false
+    previous = JSON.parse(readFileSync(join(dir, KEEPALIVE_MARKER), "utf8"))
   } catch {
     // no marker yet -> first block of this loop
   }
+  const lastBlockAt = Number(previous?.at)
+  const waitedAt = readStamp(join(dir, WAITER_MARKER))
+  // The waiter having finished since the last block is proof the loop is doing
+  // what it was told, however briefly.
+  const streak =
+    waitedAt !== undefined && Number.isFinite(lastBlockAt) && waitedAt > lastBlockAt ? 0 : Number(previous?.streak) || 0
+  if (streak >= MAX_BLOCKS_WITHOUT_WAIT) return false
   try {
-    writeFileSync(marker, String(now), "utf8")
+    writeFileSync(join(dir, KEEPALIVE_MARKER), JSON.stringify({ at: Date.now(), streak: streak + 1 }), "utf8")
   } catch {
     // If the marker cannot be written the guard degrades to "always allow";
     // the state-file deadlines still bound the loop.
@@ -336,7 +366,7 @@ function keepAliveReason({ pid, monitors }) {
     "2. The PR is finished — CI passing, no unresolved review threads, no pending/requested reviewers left, no outstanding changes_requested, and mergeable: call `pr_monitor` with action `mark_ready`. That is the handoff and it ends this loop.",
     "3. Nothing to do right now: wait for the next report by running this with the Bash tool, passing `timeout: 600000`:",
     "",
-    `   node ${JSON.stringify(WAITER)} --session ${pid} --timeout ${WAIT_SECONDS}`,
+    `   node ${shellQuote(WAITER)} --session ${pid} --timeout ${WAIT_SECONDS}`,
     "",
     "   It blocks until a [PR Monitor] report lands (the report is then injected automatically), until monitoring finishes, or until it times out — then reassess. Waiting is the expected state; a quiet PR is not a reason to finish.",
     "",

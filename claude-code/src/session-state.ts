@@ -20,7 +20,7 @@
 //                     bounds how long the loop waits with NOTHING happening —
 //                     an active PR keeps extending it, a dead one lets go.
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { mkdirSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { ownsSpool, spoolDirFor } from "./spool"
 
@@ -36,10 +36,6 @@ export type SessionState = {
   keepAliveUntilMs: number
   /** Target keys still awaiting handoff, for the Stop hook's block message. */
   monitors: string[]
-}
-
-export function sessionStatePath(claudePid: number): string {
-  return join(spoolDirFor(claudePid), SESSION_STATE_FILE)
 }
 
 /**
@@ -66,15 +62,5 @@ export function writeSessionState(claudePid: number, state: SessionState): void 
   } catch {
     // Best-effort: a session that cannot record keep-alive state degrades to
     // the passive delivery model, which is the pre-keep-alive behaviour.
-  }
-}
-
-/** Read the state back, or undefined when absent/unreadable/corrupt. */
-export function readSessionState(claudePid: number): SessionState | undefined {
-  try {
-    const parsed = JSON.parse(readFileSync(sessionStatePath(claudePid), "utf8")) as SessionState
-    return parsed?.version === 1 ? parsed : undefined
-  } catch {
-    return undefined
   }
 }

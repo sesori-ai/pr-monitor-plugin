@@ -73,7 +73,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
         comments(last: 100) { nodes { author { login __typename } body createdAt } }
       } }
       comments(last: 100) { totalCount nodes { author { login __typename } body createdAt } }
-      labels(first: 50) { nodes { name } }
+      labels(first: 100) { nodes { name } }
     }
   }
 }`

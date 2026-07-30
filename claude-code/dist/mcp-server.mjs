@@ -31051,7 +31051,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
         comments(last: 100) { nodes { author { login __typename } body createdAt } }
       } }
       comments(last: 100) { totalCount nodes { author { login __typename } body createdAt } }
-      labels(first: 50) { nodes { name } }
+      labels(first: 100) { nodes { name } }
     }
   }
 }`;
@@ -31521,7 +31521,7 @@ function createNodeGhRunner() {
 }
 
 // claude-code/src/session-state.ts
-import { mkdirSync as mkdirSync2, readFileSync as readFileSync2, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { mkdirSync as mkdirSync2, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
 
 // claude-code/src/spool.ts
@@ -31784,8 +31784,10 @@ var markReady = async (pr) => {
   const config2 = await loadProjectConfig();
   try {
     const result = await markReadyForHumanReview(runGh, target, config2.readyLabel);
-    handedOff.add(targetKey(target));
-    refreshSessionState();
+    if (watches.has(targetKey(target))) {
+      handedOff.add(targetKey(target));
+      refreshSessionState();
+    }
     return watches.has(targetKey(target)) ? `${result}
 Still monitoring it, but it no longer holds this session open \u2014 new activity on it will re-open the work loop.` : result;
   } catch (error51) {
