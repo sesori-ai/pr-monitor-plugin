@@ -41,6 +41,24 @@ function mergeableChanged(lastDefinite: PrSnapshot["mergeable"] | undefined, nex
 }
 
 /**
+ * True when `next` shows a failing check that `prev` did not — including the
+ * case where CI is still running, which `detectActivity` deliberately ignores.
+ * A new head SHA makes every failure on it new (the previous SHA's outcomes say
+ * nothing about this commit).
+ *
+ * Used for the instant CI-failure flush, which is the one case where a report
+ * should not wait for the debounce window: the failure is actionable on its own
+ * and the session can start fixing it while the rest of the suite runs.
+ */
+export function hasNewCiFailure(prev: PrSnapshot, next: PrSnapshot): boolean {
+  const failing = next.checks.filter((check) => check.outcome === "failure")
+  if (failing.length === 0) return false
+  if (prev.headSha !== next.headSha) return true
+  const before = new Set(prev.checks.filter((check) => check.outcome === "failure").map((check) => check.name))
+  return failing.some((check) => !before.has(check.name))
+}
+
+/**
  * True when something report-worthy changed between consecutive polls.
  *
  * `lastDefiniteMergeable` is the caller-tracked last MERGEABLE/CONFLICTING value

@@ -54,7 +54,8 @@ Reports state facts only. Address **everything** in a report in one batch:
 | `Mergeable: CONFLICTING` | Merge the base branch INTO the PR branch. Resolve the real base first: `gh pr view <n> --repo owner/repo --json baseRefName -q .baseRefName`, then `git fetch origin && git merge origin/<baseRefName>`. **Never rebase, never force push.** Resolve conservatively so both sides' functionality survives, run the relevant tests, push the merge commit. |
 | New inline comments / `changes_requested` | Follow the repo's `address-pr-comments` skill: fetch unresolved threads, assess validity, fix, reply to every thread, resolve what you fixed. If the repo has no such skill, do the same by hand via `gh api`. |
 | New issue comments | Read them (`gh pr view <n> --repo owner/repo --comments`) and act only if they ask for something. |
-| `CI: running` | Nothing to do yet — wait (step 4). The monitor holds reports while CI runs. |
+| `CI: running (… 1 failed so far: …)` | A check has already gone red — the monitor sends this straight away instead of waiting for the suite. Start on the named check now exactly as for `CI: failing`; do not wait for the rest of the suite to finish. |
+| `CI: running` with nothing failed | Nothing to do yet — wait (step 4). The monitor holds reports while CI runs. |
 | `— MERGED` / `— CLOSED` | The monitor stopped itself. Done. |
 
 A delivered report has **already advanced** the "new since last flush" baseline,

@@ -11,6 +11,11 @@ export type MonitorConfig = {
   pollIntervalSeconds: number
   ignoreCommentTag: string | undefined
   announceOnStart: boolean
+  // Deliver immediately when a check goes red, skipping the debounce window and
+  // any CI hold, so the session starts fixing CI without waiting out a timer
+  // that unrelated comment activity keeps resetting. At most one instant report
+  // per head commit; the next push re-arms it.
+  flushOnCiFailure: boolean
   // Claude Code shell only (delivery there is passive — reports are injected at
   // the next hook event, so an idle session learns nothing until then; an OS
   // notification closes that gap). The opencode shell ignores it.
@@ -35,6 +40,7 @@ const DEFAULT_CONFIG: MonitorConfig = {
   pollIntervalSeconds: 60,
   ignoreCommentTag: undefined,
   announceOnStart: true,
+  flushOnCiFailure: true,
   desktopNotifications: false,
   readyLabel: "ready-for-human-review",
   keepAlive: true,
@@ -65,6 +71,8 @@ function resolveConfig(raw: unknown): MonitorConfig {
   cfg.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : undefined
   const announce = record["announceOnStart"]
   if (typeof announce === "boolean") cfg.announceOnStart = announce
+  const flushOnCiFailure = record["flushOnCiFailure"]
+  if (typeof flushOnCiFailure === "boolean") cfg.flushOnCiFailure = flushOnCiFailure
   const notify = record["desktopNotifications"]
   if (typeof notify === "boolean") cfg.desktopNotifications = notify
   const label = record["readyLabel"]

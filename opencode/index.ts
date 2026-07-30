@@ -150,8 +150,11 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
       `Started monitoring ${targetKey(target)} — "${initial.title}".\n` +
       (config.announceOnStart ? `An initial [PR Monitor] status report is being delivered to this session now. ` : "") +
       `Polling every ${config.pollIntervalSeconds}s; reports arrive in this session as [PR Monitor] messages after ` +
-      `${config.debounceMinutes} quiet minutes following detected activity. The monitor stops automatically when the PR ` +
-      `is merged or closed, and does not survive an opencode restart.`
+      `${config.debounceMinutes} quiet minutes following detected activity. ` +
+      (config.flushOnCiFailure
+        ? `A failing check does not wait for that quiet window — it is reported at the next poll, even while the rest of the suite runs, so you can start fixing CI right away. `
+        : "") +
+      `The monitor stops automatically when the PR is merged or closed, and does not survive an opencode restart.`
     )
   }
 
@@ -178,7 +181,8 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
         description:
           "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments, " +
           "mergeability changes, and merge/close. Changes are aggregated (rolling debounce) and delivered to THIS session " +
-          "as a '[PR Monitor]' message stating facts only. Actions: start (begin watching a PR), stop (end watching), " +
+          "as a '[PR Monitor]' message stating facts only. A check going red skips the debounce and is reported at the " +
+          "next poll, so CI fixes can start straight away. Actions: start (begin watching a PR), stop (end watching), " +
           "flush (on-demand: immediately return a full status report and reset the 'new since' baseline; a delivered " +
           "report already advances the baseline, so a flush after handling one is not needed), status (list this " +
           "session's monitors), mark_ready (add the configured ready-for-human-review label to the PR on GitHub — use " +
