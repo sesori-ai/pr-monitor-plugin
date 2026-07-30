@@ -18,6 +18,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 import { loadConfig, type MonitorConfig } from "../../core/config"
 import { fetchPrSnapshot, type PrSnapshot } from "../../core/github"
+import { markReadyForHumanReview } from "../../core/label"
 import { parseTarget, targetKey, targetUrl, type Target } from "../../core/target"
 import { PrWatch } from "../../core/watch"
 import { createNodeGhRunner } from "./gh"
@@ -134,7 +135,21 @@ const startWatch = async (pr: string): Promise<string> => {
   )
 }
 
-const handle = async (action: "start" | "stop" | "flush" | "status", pr: string | undefined): Promise<string> => {
+const markReady = async (pr: string): Promise<string> => {
+  const target = parseTarget(pr)
+  if ("error" in target) return target.error
+  const config = await loadConfig(
+    [join(projectDir, ".claude", "pr-monitor.json"), join(projectDir, ".opencode", "pr-monitor.json")],
+    log,
+  )
+  try {
+    return await markReadyForHumanReview(runGh, target, config.readyLabel)
+  } catch (error) {
+    return `Cannot mark ${targetKey(target)} as ready for human review: ${(error as Error).message}`
+  }
+}
+
+const handle = async (action: "start" | "stop" | "flush" | "status" | "mark_ready", pr: string | undefined): Promise<string> => {
   switch (action) {
     case "start": {
       if (!pr || pr === "all") return "action 'start' requires a single explicit pr: 'owner/repo#123' or a PR URL."
@@ -159,6 +174,10 @@ const handle = async (action: "start" | "stop" | "flush" | "status", pr: string 
     case "status": {
       if (watches.size === 0) return "No active monitors in this session."
       return [...watches.values()].map((entry) => entry.watch.statusLine()).join("\n")
+    }
+    case "mark_ready": {
+      if (!pr || pr === "all") return "action 'mark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL."
+      return await markReady(pr)
     }
   }
 }
@@ -209,15 +228,19 @@ server.registerTool(
       "as '[PR Monitor]' messages stating facts only, delivered at your next tool call, user message, or turn end. " +
       "Actions: start (begin watching a PR), stop (end watching), flush (on-demand: immediately return a full status " +
       "report and reset the 'new since' baseline; a delivered report already advances the baseline, so a flush after " +
-      "handling one is not needed), status (list this session's monitors). The pr argument must be explicit " +
+      "handling one is not needed), status (list this session's monitors), mark_ready (add the configured " +
+      "ready-for-human-review label to the PR on GitHub — use once CI is green and review feedback is addressed, to " +
+      "signal a human should review now; does not require an active monitor). The pr argument must be explicit " +
       "'owner/repo#123' or a full PR URL; 'all' is allowed for stop/flush. Tuning lives in .claude/pr-monitor.json. " +
       "Monitors are per-session and do not survive Claude Code restarts.",
     inputSchema: {
-      action: z.enum(["start", "stop", "flush", "status"]).describe("What to do"),
+      action: z.enum(["start", "stop", "flush", "status", "mark_ready"]).describe("What to do"),
       pr: z
         .string()
         .optional()
-        .describe("PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush; 'all' allowed for stop/flush."),
+        .describe(
+          "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready; 'all' allowed for stop/flush.",
+        ),
     },
   },
   async ({ action, pr }) => ({ content: [{ type: "text", text: await handle(action, pr) }] }),
