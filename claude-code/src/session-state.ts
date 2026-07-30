@@ -22,7 +22,7 @@
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { spoolDirFor } from "./spool"
+import { ownsSpool, spoolDirFor } from "./spool"
 
 export const SESSION_STATE_FILE = "session.json"
 
@@ -42,10 +42,22 @@ export function sessionStatePath(claudePid: number): string {
   return join(spoolDirFor(claudePid), SESSION_STATE_FILE)
 }
 
-/** Write the state atomically (tmp + rename) so a reader never sees a partial file. */
+/**
+ * Write the state atomically (tmp + rename) so a reader never sees a partial
+ * file.
+ *
+ * Skipped entirely once this server no longer owns the spool. This is written
+ * on every poll tick, so it is the *most* frequent writer, and an orphaned
+ * server whose Claude Code pid had been recycled would otherwise keep stamping
+ * keep-alive state into the newcomer's dir — holding a session open, on behalf
+ * of monitors it never started. Same invariant `spoolReport` enforces (see
+ * `ownsSpool`); here it goes quiet rather than throwing, because there is no
+ * caller to report to.
+ */
 export function writeSessionState(claudePid: number, state: SessionState): void {
   const dir = spoolDirFor(claudePid)
   const path = join(dir, SESSION_STATE_FILE)
+  if (!ownsSpool(claudePid)) return
   try {
     mkdirSync(dir, { recursive: true })
     const tmp = `${path}.${process.pid}.tmp`

@@ -31578,6 +31578,14 @@ function claimSpool(claudePid2) {
   } catch {
   }
 }
+function ownsSpool(claudePid2) {
+  try {
+    assertOwned(claudePid2, spoolDirFor(claudePid2));
+    return true;
+  } catch {
+    return false;
+  }
+}
 function assertOwned(claudePid2, dir) {
   if (claimed === void 0 || claimed.pid !== claudePid2) return;
   let current;
@@ -31649,6 +31657,7 @@ var SESSION_STATE_FILE = "session.json";
 function writeSessionState(claudePid2, state) {
   const dir = spoolDirFor(claudePid2);
   const path = join2(dir, SESSION_STATE_FILE);
+  if (!ownsSpool(claudePid2)) return;
   try {
     mkdirSync2(dir, { recursive: true });
     const tmp = `${path}.${process.pid}.tmp`;
