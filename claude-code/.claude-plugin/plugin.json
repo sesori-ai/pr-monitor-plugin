@@ -1,6 +1,6 @@
 {
   "name": "pr-monitor",
-  "version": "0.3.0",
+  "version": "0.2.0",
   "description": "Watch GitHub PRs in the background and get factual [PR Monitor] reports injected into your session: CI verdicts, new reviews and comments, mergeability changes, merge/close.",
   "author": {
     "name": "Sesori",

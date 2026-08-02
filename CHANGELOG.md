@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0]
-
 ### Added
 
 - The OpenCode plugin is now prepared for npm distribution as the public scoped package `@sesori/pr-monitor-opencode`. Its package entry points support both standard package imports and OpenCode's `./server` lookup, and the published artifact is restricted to the OpenCode shell plus the shared core.
