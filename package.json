@@ -1,19 +1,33 @@
 {
-  "name": "@sesori/opencode-pr-monitor",
+  "name": "@sesori/pr-monitor-opencode",
   "version": "0.2.0",
-  "description": "opencode plugin and Claude Code plugin that watches GitHub PRs in the background and delivers factual [PR Monitor] reports into the owning session",
+  "description": "OpenCode plugin that watches GitHub PRs in the background and delivers factual [PR Monitor] reports into the owning session",
   "license": "MIT",
   "type": "module",
-  "main": "opencode/index.ts",
+  "main": "./opencode/index.ts",
+  "exports": {
+    ".": "./opencode/index.ts",
+    "./server": "./opencode/index.ts"
+  },
+  "files": [
+    "core",
+    "opencode"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sesori-ai/opencode-pr-monitor.git"
   },
+  "homepage": "https://github.com/sesori-ai/opencode-pr-monitor#readme",
+  "bugs": {
+    "url": "https://github.com/sesori-ai/opencode-pr-monitor/issues"
+  },
+  "author": {
+    "name": "Sesori",
+    "url": "https://github.com/sesori-ai"
+  },
   "keywords": [
     "opencode",
     "opencode-plugin",
-    "claude-code",
-    "claude-code-plugin",
     "github",
     "pull-request",
     "monitor"
@@ -23,7 +37,13 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "esbuild claude-code/src/mcp-server.ts --bundle --platform=node --format=esm --target=node18 --outfile=claude-code/dist/mcp-server.mjs --log-level=warning --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\""
+    "build": "esbuild claude-code/src/mcp-server.ts --bundle --platform=node --format=esm --target=node18 --outfile=claude-code/dist/mcp-server.mjs --log-level=warning --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "pack:check": "npm pack --dry-run --ignore-scripts",
+    "prepublishOnly": "npm run typecheck && npm run pack:check"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "dependencies": {
     "@opencode-ai/plugin": "^1.4.9"
