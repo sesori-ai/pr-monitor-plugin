@@ -176,6 +176,7 @@ const startWatch = async (pr: string): Promise<string> => {
   // the report is spooled before this tool call returns — the PostToolUse hook
   // that fires right after it then injects the report immediately.
   const initialAnnounced = config.announceOnStart ? await watch.announceInitial() : false
+  if (watch.isStopped) return `Monitor for ${key} stopped before startup completed; no active monitor remains.`
   log(`started monitoring ${key} for Claude Code pid ${claudePid}`)
   return (
     `Started monitoring ${key} — "${initial.title}".\n` +

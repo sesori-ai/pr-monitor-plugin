@@ -31529,13 +31529,19 @@ var PrWatch = class {
     if (this.stopped || this.snapshot === void 0) return false;
     const report = buildReport(this.target, this.snapshot, { baselineMs: 0 });
     if (await this.deliverOrLog(report)) {
+      this.deliveryFailures = 0;
       this.lastFlushAt = this.snapshotAt ?? this.startedAt;
       this.lastFlushedSnapshot = this.snapshot;
       this.initialAnnouncementPending = false;
       return true;
     }
+    this.deliveryFailures += 1;
     this.dirty = true;
     this.urgent = true;
+    if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
+      this.deps.log(`monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`);
+      this.stop();
+    }
     return false;
   }
   /**
@@ -31935,6 +31941,7 @@ ${raced.watch.statusLine()}`;
   extendKeepAlive(config2);
   refreshSessionState();
   const initialAnnounced = config2.announceOnStart ? await watch.announceInitial() : false;
+  if (watch.isStopped) return `Monitor for ${key} stopped before startup completed; no active monitor remains.`;
   log(`started monitoring ${key} for Claude Code pid ${claudePid}`);
   return `Started monitoring ${key} \u2014 "${initial.title}".
 ` + (config2.announceOnStart ? initialAnnounced ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : `The initial status report could not be spooled; it will retry at the next poll without losing its comment baseline. ` : "") + `Polling every ${config2.pollIntervalSeconds}s; after activity settles for ${config2.debounceMinutes} quiet minutes, a report is injected into this conversation at your next tool call, user message, or turn end. ` + (config2.flushOnCiFailure ? `A failing check does not wait for that quiet window \u2014 it is reported at the next poll, even while the rest of the suite runs, so you can start fixing CI right away. ` : "") + `A newly detected merge conflict or terminal PR state is also reported at the next poll without waiting. The monitor stops automatically when the PR is merged or closed, and does not survive this Claude Code session.` + (config2.keepAlive ? `

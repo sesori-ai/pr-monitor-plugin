@@ -184,13 +184,19 @@ export class PrWatch {
     if (this.stopped || this.snapshot === undefined) return false
     const report = buildReport(this.target, this.snapshot, { baselineMs: 0 })
     if (await this.deliverOrLog(report)) {
+      this.deliveryFailures = 0
       this.lastFlushAt = this.snapshotAt ?? this.startedAt
       this.lastFlushedSnapshot = this.snapshot
       this.initialAnnouncementPending = false
       return true
     }
+    this.deliveryFailures += 1
     this.dirty = true
     this.urgent = true
+    if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
+      this.deps.log(`monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`)
+      this.stop()
+    }
     return false
   }
 

@@ -106,7 +106,17 @@ test("the default debounce is two minutes", async () => {
 
 test("a failed initial announcement retries all startup comments", async () => {
   const initial = snapshot({
-    reviewThreads: [thread("thread-1", false, [{ author: "reviewer", createdAt: "2026-08-03T11:00:00Z" }])],
+    reviewThreads: [
+      thread("thread-1", false, [
+        { author: "reviewer", createdAt: "2026-08-03T11:00:00Z" },
+        { author: "reviewer", createdAt: "2026-08-03T11:01:00Z" },
+      ]),
+      thread("thread-2", true, [{ author: "alice", createdAt: "2026-08-03T11:02:00Z" }]),
+    ],
+    issueCommentsTotal: 1,
+    issueComments: [
+      { id: "issue-1", author: "owner", isBot: false, createdAt: "2026-08-03T11:03:00Z" },
+    ],
   })
   const harness = watchHarness(initial, [initial], config(), { deliveryFailures: 1 })
 
@@ -117,7 +127,24 @@ test("a failed initial announcement retries all startup comments", async () => {
   await harness.watch.tick()
   assert.equal(harness.deliveryAttempts, 2)
   assert.equal(harness.reports.length, 1)
-  assert.match(harness.reports[0]!, /1 thread received 1 new comment since last flush/)
+  assert.match(
+    harness.reports[0]!,
+    /2 threads received 3 new comments since last flush \(1 currently unresolved, 1 currently resolved; 2 reviewer, 1 alice\)/,
+  )
+  assert.match(harness.reports[0]!, /\[comment:issue\] 1 total \(1 new since last flush: 1 owner\)/)
+})
+
+test("the initial announcement counts toward the delivery-failure limit", async () => {
+  const initial = snapshot()
+  const harness = watchHarness(initial, Array.from({ length: 9 }, () => initial), config(), {
+    deliveryFailures: 10,
+  })
+
+  await harness.watch.announceInitial()
+  for (let attempt = 1; attempt < 10; attempt += 1) await harness.watch.tick()
+
+  assert.equal(harness.deliveryAttempts, 10)
+  assert.equal(harness.watch.isStopped, true)
 })
 
 test("normalization preserves review-thread state and filters tagged self replies", () => {
