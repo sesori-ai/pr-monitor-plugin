@@ -52,7 +52,7 @@ Reports state facts only. Address **everything** in a report in one batch:
 | --- | --- |
 | `CI: failing (…)` | Inspect (`gh pr checks <pr> --repo owner/repo`, `gh run view <run-id> --log-failed --repo owner/repo`), fix the root cause, commit and push. Never delete or weaken tests to go green. |
 | `Mergeable: CONFLICTING` | Merge the base branch INTO the PR branch. Resolve the real base first: `gh pr view <n> --repo owner/repo --json baseRefName -q .baseRefName`, then `git fetch origin && git merge origin/<baseRefName>`. **Never rebase, never force push.** Resolve conservatively so both sides' functionality survives, run the relevant tests, push the merge commit. |
-| New inline comments / `changes_requested` | Follow the repo's `address-pr-comments` skill: fetch unresolved threads, assess validity, fix, reply to every thread, resolve what you fixed. If the repo has no such skill, do the same by hand via `gh api`. |
+| Threads received new inline comments / `changes_requested` | Follow the repo's `address-pr-comments` skill, but fetch recent comments across **all** review threads, not only unresolved ones. A follow-up can land on a thread that was already answered or resolved. Reassess the new comment, fix when valid, reply, and resolve what you fixed. If the repo has no such skill, do the same by hand via `gh api`. |
 | New issue comments | Read them (`gh pr view <n> --repo owner/repo --comments`) and act only if they ask for something. |
 | `CI: running (… 1 failed so far: …)` | A check has already gone red — the monitor sends this straight away instead of waiting for the suite. Start on the named check now exactly as for `CI: failing`; do not wait for the rest of the suite to finish. |
 | `CI: running` with nothing failed | Nothing to do yet — wait (step 4). The monitor holds reports while CI runs. |
@@ -68,6 +68,12 @@ step after handling a report.
 > `[Sesori reply]`) and are filtered out of reports entirely. So any
 > owner-account comment that reaches you **is a human instruction** — fetch it
 > and act on it, including when it overrides a decision you already made.
+
+The unresolved-thread total is not a proxy for new feedback. If the report says
+that one or more threads received new comments, inspect those recent comments
+even when the total did not change or the report says the affected thread is
+currently resolved. Do not treat your earlier reply or resolution as handling a
+later comment.
 
 ## 3. Hand off when — and only when — it is genuinely clean
 
