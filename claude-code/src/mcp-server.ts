@@ -175,11 +175,15 @@ const startWatch = async (pr: string): Promise<string> => {
   // point and can address anything already outstanding on the PR. Awaited so
   // the report is spooled before this tool call returns — the PostToolUse hook
   // that fires right after it then injects the report immediately.
-  if (config.announceOnStart) await watch.announceInitial()
+  const initialAnnounced = config.announceOnStart ? await watch.announceInitial() : false
   log(`started monitoring ${key} for Claude Code pid ${claudePid}`)
   return (
     `Started monitoring ${key} — "${initial.title}".\n` +
-    (config.announceOnStart ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : "") +
+    (config.announceOnStart
+      ? initialAnnounced
+        ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. `
+        : `The initial status report could not be spooled; it will retry at the next poll without losing its comment baseline. `
+      : "") +
     `Polling every ${config.pollIntervalSeconds}s; after activity settles for ${config.debounceMinutes} quiet minutes, a report is ` +
     `injected into this conversation at your next tool call, user message, or turn end. ` +
     (config.flushOnCiFailure

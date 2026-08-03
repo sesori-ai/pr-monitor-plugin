@@ -36,6 +36,11 @@ export class PrWatch {
   private lastActivityAt = 0
   private lastFlushAt: number
   private lastFlushedSnapshot: PrSnapshot
+  // True until the configured startup report is successfully delivered or a
+  // manual/automatic flush returns it. While true, reports use a zero baseline
+  // so comments already present when the watch started cannot be hidden by a
+  // failed initial delivery.
+  private initialAnnouncementPending: boolean
   private holdStartedAt: number | undefined
   // Set for actionable or terminal changes that must skip both timers.
   private urgent = false
@@ -66,6 +71,7 @@ export class PrWatch {
     this.lastFlushAt = this.startedAt
     this.snapshot = input.initial
     this.lastFlushedSnapshot = input.initial
+    this.initialAnnouncementPending = input.config.announceOnStart
     this.rememberDefiniteMergeable(input.initial)
   }
 
@@ -164,17 +170,28 @@ export class PrWatch {
    * outstanding on the PR. Reports against a zero baseline so every existing
    * comment counts as "new", then advances the baseline to the initial
    * snapshot so periodic flushes only surface genuinely newer activity.
-   * A delivery failure here is logged, not fatal to the watch; the returned
-   * promise never rejects. Callers that need the announcement spooled before
-   * they return (the Claude Code shell) can await it; fire-and-forget callers
-   * use `void`.
+   * A delivery failure here is logged and re-armed for an immediate retry at
+   * the next poll without advancing the baseline. The returned promise never
+   * rejects; its boolean says whether this attempt was delivered. Callers that
+   * need the announcement spooled before they return (the Claude Code shell)
+   * can await it; fire-and-forget callers use `void`.
    */
-  async announceInitial(): Promise<void> {
-    if (this.stopped || this.snapshot === undefined) return
+  async announceInitial(): Promise<boolean> {
+    return await this.runExclusive(() => this.announceInitialOnce())
+  }
+
+  private async announceInitialOnce(): Promise<boolean> {
+    if (this.stopped || this.snapshot === undefined) return false
     const report = buildReport(this.target, this.snapshot, { baselineMs: 0 })
-    this.lastFlushAt = this.snapshotAt ?? this.startedAt
-    this.lastFlushedSnapshot = this.snapshot
-    await this.deliverOrLog(report)
+    if (await this.deliverOrLog(report)) {
+      this.lastFlushAt = this.snapshotAt ?? this.startedAt
+      this.lastFlushedSnapshot = this.snapshot
+      this.initialAnnouncementPending = false
+      return true
+    }
+    this.dirty = true
+    this.urgent = true
+    return false
   }
 
   /**
@@ -198,8 +215,8 @@ export class PrWatch {
       // Refresh failed: report from the stale snapshot WITHOUT advancing the
       // baseline, so activity newer than that snapshot is not silently skipped.
       const report = buildReport(this.target, this.snapshot, {
-        baselineMs: this.lastFlushAt,
-        baselineSnapshot: this.lastFlushedSnapshot,
+        baselineMs: this.initialAnnouncementPending ? 0 : this.lastFlushAt,
+        baselineSnapshot: this.initialAnnouncementPending ? undefined : this.lastFlushedSnapshot,
       })
       return `${report}\n(note: refresh failed — ${(error as Error).message}; data is from the previous poll; baseline NOT reset)`
     }
@@ -262,6 +279,7 @@ export class PrWatch {
     }
     const previousFlushAt = this.lastFlushAt
     const previousFlushedSnapshot = this.lastFlushedSnapshot
+    const previousInitialAnnouncementPending = this.initialAnnouncementPending
     const previousHoldStartedAt = this.holdStartedAt
     const previousUrgent = this.urgent
     const report = this.flush(forcedHoldMinutes)
@@ -276,6 +294,7 @@ export class PrWatch {
       // report retries instantly rather than falling back to the debounce.
       this.lastFlushAt = previousFlushAt
       this.lastFlushedSnapshot = previousFlushedSnapshot
+      this.initialAnnouncementPending = previousInitialAnnouncementPending
       this.dirty = true
       this.holdStartedAt = previousHoldStartedAt
       this.urgent = previousUrgent
@@ -288,23 +307,26 @@ export class PrWatch {
     }
   }
 
-  private async deliverOrLog(message: string): Promise<void> {
+  private async deliverOrLog(message: string): Promise<boolean> {
     try {
       await this.deps.deliver(message)
+      return true
     } catch (error) {
       this.deps.log(`report delivery failed for ${targetKey(this.target)}: ${error}`)
+      return false
     }
   }
 
   private flush(forcedHoldMinutes: number | undefined): string {
     const snapshot = this.snapshot!
     const report = buildReport(this.target, snapshot, {
-      baselineMs: this.lastFlushAt,
-      baselineSnapshot: this.lastFlushedSnapshot,
+      baselineMs: this.initialAnnouncementPending ? 0 : this.lastFlushAt,
+      baselineSnapshot: this.initialAnnouncementPending ? undefined : this.lastFlushedSnapshot,
       forcedHoldMinutes,
     })
     this.lastFlushAt = this.snapshotAt ?? this.deps.now()
     this.lastFlushedSnapshot = snapshot
+    this.initialAnnouncementPending = false
     this.dirty = false
     this.holdStartedAt = undefined
     this.urgent = false

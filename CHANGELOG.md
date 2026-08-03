@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Auto-flush report delivery is awaited inside the watch's exclusive op instead of being fire-and-forget. Its failure path restores exactly the state a later flush advances (`lastFlushAt`, `lastFlushedSnapshot`, `dirty`, `holdStartedAt`), so a delivery that rejected after a newer report had already flushed could rewind that newer report's "new since" baseline — and, with the instant CI path above, re-fire a duplicate report immediately. Ticks now skip while a report is in flight, which is the intended trade-off: there is nothing useful to do with a fresher snapshot while the previous report is stuck.
 - "New since last flush" now compares comment IDs with the last flushed snapshot instead of relying only on second-granularity GitHub timestamps, which could render a newly detected follow-up as `0 new` when it landed in the same second as the prior flush.
+- Failed initial status delivery no longer advances the comment or timestamp baseline. The complete startup report is retained as urgent and retried at the next poll, preventing comments present when monitoring began from being permanently hidden.
 - OpenCode shutdown notices now use synchronous `session.prompt` with `noReply: true`. The previous `promptAsync` call returned before its background task persisted the message, and instance disposal then cancelled that task, so the advertised shutdown notice was usually lost.
 
 ## [0.2.0]

@@ -152,7 +152,7 @@ Optional, per project: `.claude/pr-monitor.json` for Claude Code (with `.opencod
 - **Conflicts and terminal states bypass the timers.** A newly observed `CONFLICTING` state (including an `UNKNOWN -> CONFLICTING` settle), merge, or close reports at the next poll and is never held behind running CI.
 - **Review-thread follow-ups stay visible.** Inline comments retain their thread identity and current resolved/unresolved state. Reports state how many threads received visible comments since the last flush and split those threads by current state, so a follow-up on a previously handled or resolved thread cannot be mistaken for an unchanged unresolved-thread count. Comments filtered by `ignoreCommentTag` remain invisible.
 - **"New since last flush"** compares stable GitHub comment IDs with the last delivered report or manual `flush`, so comments created within the same timestamp second are not lost.
-- **Failure handling**: 10 consecutive poll failures (or report-delivery failures) stop the monitor with a notice. A deleted/inaccessible PR stops it immediately.
+- **Failure handling**: 10 consecutive poll failures (or report-delivery failures) stop the monitor with a notice. A failed initial status report retains its zero comment baseline and retries at the next poll. A deleted/inaccessible PR stops immediately.
 - **Terminal states**: an immediate report describing a merged/closed PR is delivered with a `Monitor stopped: PR merged|closed` line, then the monitor stops itself. All stop reasons use the same `Monitor stopped: <reason>` phrasing.
 
 ## Development

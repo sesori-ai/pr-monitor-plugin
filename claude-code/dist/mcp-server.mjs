@@ -31401,6 +31401,11 @@ var PrWatch = class {
   lastActivityAt = 0;
   lastFlushAt;
   lastFlushedSnapshot;
+  // True until the configured startup report is successfully delivered or a
+  // manual/automatic flush returns it. While true, reports use a zero baseline
+  // so comments already present when the watch started cannot be hidden by a
+  // failed initial delivery.
+  initialAnnouncementPending;
   holdStartedAt;
   // Set for actionable or terminal changes that must skip both timers.
   urgent = false;
@@ -31430,6 +31435,7 @@ var PrWatch = class {
     this.lastFlushAt = this.startedAt;
     this.snapshot = input.initial;
     this.lastFlushedSnapshot = input.initial;
+    this.initialAnnouncementPending = input.config.announceOnStart;
     this.rememberDefiniteMergeable(input.initial);
   }
   rememberDefiniteMergeable(snapshot) {
@@ -31510,17 +31516,27 @@ var PrWatch = class {
    * outstanding on the PR. Reports against a zero baseline so every existing
    * comment counts as "new", then advances the baseline to the initial
    * snapshot so periodic flushes only surface genuinely newer activity.
-   * A delivery failure here is logged, not fatal to the watch; the returned
-   * promise never rejects. Callers that need the announcement spooled before
-   * they return (the Claude Code shell) can await it; fire-and-forget callers
-   * use `void`.
+   * A delivery failure here is logged and re-armed for an immediate retry at
+   * the next poll without advancing the baseline. The returned promise never
+   * rejects; its boolean says whether this attempt was delivered. Callers that
+   * need the announcement spooled before they return (the Claude Code shell)
+   * can await it; fire-and-forget callers use `void`.
    */
   async announceInitial() {
-    if (this.stopped || this.snapshot === void 0) return;
+    return await this.runExclusive(() => this.announceInitialOnce());
+  }
+  async announceInitialOnce() {
+    if (this.stopped || this.snapshot === void 0) return false;
     const report = buildReport(this.target, this.snapshot, { baselineMs: 0 });
-    this.lastFlushAt = this.snapshotAt ?? this.startedAt;
-    this.lastFlushedSnapshot = this.snapshot;
-    await this.deliverOrLog(report);
+    if (await this.deliverOrLog(report)) {
+      this.lastFlushAt = this.snapshotAt ?? this.startedAt;
+      this.lastFlushedSnapshot = this.snapshot;
+      this.initialAnnouncementPending = false;
+      return true;
+    }
+    this.dirty = true;
+    this.urgent = true;
+    return false;
   }
   /**
    * Manual flush: always re-fetches and always returns a full report.
@@ -31540,8 +31556,8 @@ var PrWatch = class {
     } catch (error51) {
       if (this.snapshot === void 0) return `${targetKey(this.target)}: flush failed \u2014 ${error51.message}`;
       const report2 = buildReport(this.target, this.snapshot, {
-        baselineMs: this.lastFlushAt,
-        baselineSnapshot: this.lastFlushedSnapshot
+        baselineMs: this.initialAnnouncementPending ? 0 : this.lastFlushAt,
+        baselineSnapshot: this.initialAnnouncementPending ? void 0 : this.lastFlushedSnapshot
       });
       return `${report2}
 (note: refresh failed \u2014 ${error51.message}; data is from the previous poll; baseline NOT reset)`;
@@ -31599,6 +31615,7 @@ var PrWatch = class {
     }
     const previousFlushAt = this.lastFlushAt;
     const previousFlushedSnapshot = this.lastFlushedSnapshot;
+    const previousInitialAnnouncementPending = this.initialAnnouncementPending;
     const previousHoldStartedAt = this.holdStartedAt;
     const previousUrgent = this.urgent;
     const report = this.flush(forcedHoldMinutes);
@@ -31609,6 +31626,7 @@ var PrWatch = class {
     } catch (error51) {
       this.lastFlushAt = previousFlushAt;
       this.lastFlushedSnapshot = previousFlushedSnapshot;
+      this.initialAnnouncementPending = previousInitialAnnouncementPending;
       this.dirty = true;
       this.holdStartedAt = previousHoldStartedAt;
       this.urgent = previousUrgent;
@@ -31623,19 +31641,22 @@ var PrWatch = class {
   async deliverOrLog(message) {
     try {
       await this.deps.deliver(message);
+      return true;
     } catch (error51) {
       this.deps.log(`report delivery failed for ${targetKey(this.target)}: ${error51}`);
+      return false;
     }
   }
   flush(forcedHoldMinutes) {
     const snapshot = this.snapshot;
     const report = buildReport(this.target, snapshot, {
-      baselineMs: this.lastFlushAt,
-      baselineSnapshot: this.lastFlushedSnapshot,
+      baselineMs: this.initialAnnouncementPending ? 0 : this.lastFlushAt,
+      baselineSnapshot: this.initialAnnouncementPending ? void 0 : this.lastFlushedSnapshot,
       forcedHoldMinutes
     });
     this.lastFlushAt = this.snapshotAt ?? this.deps.now();
     this.lastFlushedSnapshot = snapshot;
+    this.initialAnnouncementPending = false;
     this.dirty = false;
     this.holdStartedAt = void 0;
     this.urgent = false;
@@ -31913,10 +31934,10 @@ ${raced.watch.statusLine()}`;
   watches.set(key, { watch, timer, config: config2 });
   extendKeepAlive(config2);
   refreshSessionState();
-  if (config2.announceOnStart) await watch.announceInitial();
+  const initialAnnounced = config2.announceOnStart ? await watch.announceInitial() : false;
   log(`started monitoring ${key} for Claude Code pid ${claudePid}`);
   return `Started monitoring ${key} \u2014 "${initial.title}".
-` + (config2.announceOnStart ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : "") + `Polling every ${config2.pollIntervalSeconds}s; after activity settles for ${config2.debounceMinutes} quiet minutes, a report is injected into this conversation at your next tool call, user message, or turn end. ` + (config2.flushOnCiFailure ? `A failing check does not wait for that quiet window \u2014 it is reported at the next poll, even while the rest of the suite runs, so you can start fixing CI right away. ` : "") + `A newly detected merge conflict or terminal PR state is also reported at the next poll without waiting. The monitor stops automatically when the PR is merged or closed, and does not survive this Claude Code session.` + (config2.keepAlive ? `
+` + (config2.announceOnStart ? initialAnnounced ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : `The initial status report could not be spooled; it will retry at the next poll without losing its comment baseline. ` : "") + `Polling every ${config2.pollIntervalSeconds}s; after activity settles for ${config2.debounceMinutes} quiet minutes, a report is injected into this conversation at your next tool call, user message, or turn end. ` + (config2.flushOnCiFailure ? `A failing check does not wait for that quiet window \u2014 it is reported at the next poll, even while the rest of the suite runs, so you can start fixing CI right away. ` : "") + `A newly detected merge conflict or terminal PR state is also reported at the next poll without waiting. The monitor stops automatically when the PR is merged or closed, and does not survive this Claude Code session.` + (config2.keepAlive ? `
 Keep-alive is on: until this PR is handed off with action 'mark_ready', turn-end is refused and you are asked to wait for the next report rather than going idle. Follow the monitor-pr skill; action 'stop' ends it at any time.` : "");
 };
 var loadProjectConfig = () => loadConfig([join3(projectDir, ".claude", "pr-monitor.json"), join3(projectDir, ".opencode", "pr-monitor.json")], log);

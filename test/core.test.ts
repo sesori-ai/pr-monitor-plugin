@@ -59,7 +59,7 @@ function config(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
 function watchHarness(
   initial: PrSnapshot,
   polled: PrSnapshot[],
-  cfg: MonitorConfig = config(),
+  cfg: MonitorConfig = config({ announceOnStart: false }),
   opts: { deliveryFailures?: number } = {},
 ) {
   let now = Date.parse("2026-08-03T12:00:00Z")
@@ -102,6 +102,22 @@ function watchHarness(
 test("the default debounce is two minutes", async () => {
   const loaded = await loadConfig([], () => {})
   assert.equal(loaded.debounceMinutes, 2)
+})
+
+test("a failed initial announcement retries all startup comments", async () => {
+  const initial = snapshot({
+    reviewThreads: [thread("thread-1", false, [{ author: "reviewer", createdAt: "2026-08-03T11:00:00Z" }])],
+  })
+  const harness = watchHarness(initial, [initial], config(), { deliveryFailures: 1 })
+
+  assert.equal(await harness.watch.announceInitial(), false)
+  assert.equal(harness.deliveryAttempts, 1)
+  assert.equal(harness.reports.length, 0)
+
+  await harness.watch.tick()
+  assert.equal(harness.deliveryAttempts, 2)
+  assert.equal(harness.reports.length, 1)
+  assert.match(harness.reports[0]!, /1 thread received 1 new comment since last flush/)
 })
 
 test("normalization preserves review-thread state and filters tagged self replies", () => {
@@ -419,7 +435,9 @@ test("failed urgent delivery retries immediately", async () => {
       ]),
     ],
   })
-  const harness = watchHarness(initial, [conflicting, conflicting], config(), { deliveryFailures: 1 })
+  const harness = watchHarness(initial, [conflicting, conflicting], config({ announceOnStart: false }), {
+    deliveryFailures: 1,
+  })
 
   await harness.watch.tick()
   assert.equal(harness.deliveryAttempts, 1)
