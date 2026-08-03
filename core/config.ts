@@ -35,7 +35,7 @@ export type MonitorConfig = {
 }
 
 const DEFAULT_CONFIG: MonitorConfig = {
-  debounceMinutes: 5,
+  debounceMinutes: 2,
   maxCiWaitMinutes: 30,
   pollIntervalSeconds: 60,
   ignoreCommentTag: undefined,

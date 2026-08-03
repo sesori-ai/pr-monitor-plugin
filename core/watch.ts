@@ -2,10 +2,10 @@
 // the quiet timer; when the quiet window elapses, a report is generated fresh
 // from the latest snapshot and delivered to the owning session. A due report
 // is held while the CI suite is running, bounded by maxCiWaitMinutes, then
-// force-flushed naming unfinished checks. One event overrides both timers: a
-// newly failing check flushes on the spot (see maybeAutoFlush).
+// force-flushed naming unfinished checks. Actionable or terminal events — a
+// new CI failure, merge conflict, merge, or close — flush on the spot.
 
-import { detectActivity, hasNewCiFailure } from "./activity"
+import { detectActivity, hasNewCiFailure, hasNewMergeConflict } from "./activity"
 import type { MonitorConfig } from "./config"
 import { ciPhase, PollError, type PrSnapshot } from "./github"
 import { buildReport } from "./report"
@@ -35,15 +35,15 @@ export class PrWatch {
   private dirty = false
   private lastActivityAt = 0
   private lastFlushAt: number
+  private lastFlushedSnapshot: PrSnapshot
   private holdStartedAt: number | undefined
-  // Set when a check went red: the next flush check ignores the debounce window
-  // and the CI hold.
+  // Set for actionable or terminal changes that must skip both timers.
   private urgent = false
   // Head SHA whose CI failure already triggered an instant flush. Caps the
   // instant path at one report per commit, so a matrix whose jobs go red one by
   // one cannot wake the session once per job; the stragglers ride along with the
   // debounced suite-conclusion report instead.
-  private urgentFlushedSha: string | undefined
+  private ciFailureFlushedSha: string | undefined
   private consecutiveFailures = 0
   private deliveryFailures = 0
   private fetchStartedAt: number | undefined
@@ -65,6 +65,7 @@ export class PrWatch {
     this.startedAt = input.deps.now()
     this.lastFlushAt = this.startedAt
     this.snapshot = input.initial
+    this.lastFlushedSnapshot = input.initial
     this.rememberDefiniteMergeable(input.initial)
   }
 
@@ -124,6 +125,8 @@ export class PrWatch {
     this.consecutiveFailures = 0
     this.snapshotAt = this.fetchStartedAt
     if (this.snapshot !== undefined) {
+      const becameTerminal = this.snapshot.state === "OPEN" && next.state !== "OPEN"
+      const becameConflicting = hasNewMergeConflict(this.lastDefiniteMergeable, next)
       if (detectActivity(this.snapshot, next, this.lastDefiniteMergeable)) {
         this.dirty = true
         this.lastActivityAt = this.deps.now()
@@ -136,12 +139,17 @@ export class PrWatch {
       if (
         this.config.flushOnCiFailure &&
         next.state === "OPEN" &&
-        this.urgentFlushedSha !== next.headSha &&
+        this.ciFailureFlushedSha !== next.headSha &&
         hasNewCiFailure(this.snapshot, next)
       ) {
         this.dirty = true
         this.urgent = true
-        this.urgentFlushedSha = next.headSha
+        this.ciFailureFlushedSha = next.headSha
+        this.holdStartedAt = undefined
+      }
+      if (becameConflicting || becameTerminal) {
+        this.dirty = true
+        this.urgent = true
         this.holdStartedAt = undefined
       }
     }
@@ -165,6 +173,7 @@ export class PrWatch {
     if (this.stopped || this.snapshot === undefined) return
     const report = buildReport(this.target, this.snapshot, { baselineMs: 0 })
     this.lastFlushAt = this.snapshotAt ?? this.startedAt
+    this.lastFlushedSnapshot = this.snapshot
     await this.deliverOrLog(report)
   }
 
@@ -188,7 +197,10 @@ export class PrWatch {
       if (this.snapshot === undefined) return `${targetKey(this.target)}: flush failed — ${(error as Error).message}`
       // Refresh failed: report from the stale snapshot WITHOUT advancing the
       // baseline, so activity newer than that snapshot is not silently skipped.
-      const report = buildReport(this.target, this.snapshot, { baselineMs: this.lastFlushAt })
+      const report = buildReport(this.target, this.snapshot, {
+        baselineMs: this.lastFlushAt,
+        baselineSnapshot: this.lastFlushedSnapshot,
+      })
       return `${report}\n(note: refresh failed — ${(error as Error).message}; data is from the previous poll; baseline NOT reset)`
     }
     const report = this.flush(undefined)
@@ -237,10 +249,8 @@ export class PrWatch {
     if (!this.dirty || this.snapshot === undefined) return
     const now = this.deps.now()
     let forcedHoldMinutes: number | undefined
-    // Urgent (a check just went red) skips both timers: the report goes out now,
-    // carrying whatever else was buffered. The CI line renders the still-running
-    // suite honestly ("running (3/8 done, 1 failed so far: lint)"), so no
-    // forcedHoldMinutes annotation is wanted here — nothing was held.
+    // Urgent changes skip both timers and carry whatever else was buffered. No
+    // forced-hold annotation is wanted because this report was not held.
     if (!this.urgent) {
       if (now - this.lastActivityAt < this.config.debounceMinutes * 60_000) return
       if (ciPhase(this.snapshot) === "running" && this.snapshot.state === "OPEN") {
@@ -251,6 +261,7 @@ export class PrWatch {
       }
     }
     const previousFlushAt = this.lastFlushAt
+    const previousFlushedSnapshot = this.lastFlushedSnapshot
     const previousHoldStartedAt = this.holdStartedAt
     const previousUrgent = this.urgent
     const report = this.flush(forcedHoldMinutes)
@@ -264,6 +275,7 @@ export class PrWatch {
       // restarting the maxCiWaitMinutes window — and so a failed instant CI
       // report retries instantly rather than falling back to the debounce.
       this.lastFlushAt = previousFlushAt
+      this.lastFlushedSnapshot = previousFlushedSnapshot
       this.dirty = true
       this.holdStartedAt = previousHoldStartedAt
       this.urgent = previousUrgent
@@ -286,8 +298,13 @@ export class PrWatch {
 
   private flush(forcedHoldMinutes: number | undefined): string {
     const snapshot = this.snapshot!
-    const report = buildReport(this.target, snapshot, { baselineMs: this.lastFlushAt, forcedHoldMinutes })
+    const report = buildReport(this.target, snapshot, {
+      baselineMs: this.lastFlushAt,
+      baselineSnapshot: this.lastFlushedSnapshot,
+      forcedHoldMinutes,
+    })
     this.lastFlushAt = this.snapshotAt ?? this.deps.now()
+    this.lastFlushedSnapshot = snapshot
     this.dirty = false
     this.holdStartedAt = undefined
     this.urgent = false

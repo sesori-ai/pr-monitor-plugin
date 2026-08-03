@@ -30965,7 +30965,7 @@ var StdioServerTransport = class {
 // core/config.ts
 import { readFile } from "node:fs/promises";
 var DEFAULT_CONFIG = {
-  debounceMinutes: 5,
+  debounceMinutes: 2,
   maxCiWaitMinutes: 30,
   pollIntervalSeconds: 60,
   ignoreCommentTag: void 0,
@@ -31049,17 +31049,41 @@ query($owner: String!, $repo: String!, $number: Int!) {
         ... on Bot { login }
       } } }
       latestReviews(first: 50) { nodes { author { login __typename } state submittedAt } }
-      reviewThreads(first: 100) { nodes {
-        isResolved
-        comments(last: 100) { nodes { author { login __typename } body createdAt } }
-      } }
-      comments(last: 100) { totalCount nodes { author { login __typename } body createdAt } }
+      reviewThreads(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id isResolved
+          comments(last: 100) { nodes { id author { login __typename } body createdAt } }
+        }
+      }
+      comments(last: 100) { totalCount nodes { id author { login __typename } body createdAt } }
       labels(first: 100) { nodes { name } }
     }
   }
 }`;
+var REVIEW_THREADS_PAGE_QUERY = `
+query($owner: String!, $repo: String!, $number: Int!, $cursor: String!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id isResolved
+          comments(last: 100) { nodes { id author { login __typename } body createdAt } }
+        }
+      }
+    }
+  }
+}`;
+function parseGhPayload(stdout) {
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    throw new PollError("gh returned non-JSON output");
+  }
+}
 async function fetchPrSnapshot(input) {
-  const stdout = await input.runGh([
+  const payload = parseGhPayload(await input.runGh([
     "api",
     "graphql",
     "-f",
@@ -31070,17 +31094,42 @@ async function fetchPrSnapshot(input) {
     `repo=${input.target.repo}`,
     "-F",
     `number=${input.target.number}`
-  ]);
-  let payload;
-  try {
-    payload = JSON.parse(stdout);
-  } catch {
-    throw new PollError("gh returned non-JSON output");
+  ]));
+  const pr = payload?.data?.repository?.pullRequest;
+  if (!pr) return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin });
+  const threads = pr.reviewThreads ??= { nodes: [] };
+  threads.nodes ??= [];
+  const seenCursors = /* @__PURE__ */ new Set();
+  while (threads.pageInfo?.hasNextPage) {
+    const cursor = threads.pageInfo.endCursor;
+    if (typeof cursor !== "string" || seenCursors.has(cursor)) {
+      throw new PollError("GitHub returned an invalid review-thread pagination cursor");
+    }
+    seenCursors.add(cursor);
+    const page = parseGhPayload(await input.runGh([
+      "api",
+      "graphql",
+      "-f",
+      `query=${REVIEW_THREADS_PAGE_QUERY}`,
+      "-F",
+      `owner=${input.target.owner}`,
+      "-F",
+      `repo=${input.target.repo}`,
+      "-F",
+      `number=${input.target.number}`,
+      "-f",
+      `cursor=${cursor}`
+    ]));
+    const next = page?.data?.repository?.pullRequest?.reviewThreads;
+    if (!next) throw new PollError("PR not found while fetching review threads", { notFound: true });
+    threads.nodes.push(...next.nodes ?? []);
+    threads.pageInfo = next.pageInfo;
   }
   return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin });
 }
 function toMeta(raw) {
   return {
+    id: raw.id,
     author: raw.author?.login ?? "ghost",
     isBot: raw.author?.__typename === "Bot",
     createdAt: raw.createdAt
@@ -31104,12 +31153,11 @@ function normalizeSnapshot(payload, opts) {
   const reviews = (pr.latestReviews?.nodes ?? []).filter((node) => node.author?.login && node.state !== "PENDING").map((node) => ({ login: node.author.login, state: node.state, submittedAt: node.submittedAt ?? "" }));
   const pendingReviewers = (pr.reviewRequests?.nodes ?? []).map((node) => node.requestedReviewer?.login ?? node.requestedReviewer?.slug).filter((name) => typeof name === "string");
   const threads = pr.reviewThreads?.nodes ?? [];
-  const inlineComments = [];
-  for (const thread of threads) {
-    for (const comment of thread.comments?.nodes ?? []) {
-      if (!ignored(comment)) inlineComments.push(toMeta(comment));
-    }
-  }
+  const reviewThreads = threads.map((thread) => ({
+    id: thread.id,
+    isResolved: thread.isResolved,
+    comments: (thread.comments?.nodes ?? []).filter((comment) => !ignored(comment)).map(toMeta)
+  }));
   const issueNodes = pr.comments?.nodes ?? [];
   const issueVisible = issueNodes.filter((node) => !ignored(node));
   const ignoredCount = issueNodes.length - issueVisible.length;
@@ -31122,8 +31170,7 @@ function normalizeSnapshot(payload, opts) {
     checks,
     reviews,
     pendingReviewers,
-    unresolvedThreads: threads.filter((thread) => !thread.isResolved).length,
-    inlineComments,
+    reviewThreads,
     issueCommentsTotal: Math.max((pr.comments?.totalCount ?? issueNodes.length) - ignoredCount, 0),
     issueComments: issueVisible.map(toMeta),
     labels: (pr.labels?.nodes ?? []).map((node) => node?.name).filter((name) => typeof name === "string")
@@ -31206,14 +31253,24 @@ async function removeReadyForHumanReview(runGh2, target, label) {
 }
 
 // core/activity.ts
-function commentSig(comments) {
-  const last = comments[comments.length - 1];
-  return `${comments.length}:${last?.createdAt ?? ""}`;
-}
 function reviewSig(snapshot) {
   const states = snapshot.reviews.map((review) => `${review.login}=${review.state}@${review.submittedAt}`).sort();
   const pending = [...snapshot.pendingReviewers].sort();
   return `${states.join(",")}|${pending.join(",")}`;
+}
+function hasAddedComment(prev, next) {
+  const before = new Set(prev.map((comment) => comment.id));
+  return next.some((comment) => !before.has(comment.id));
+}
+function reviewThreadsChanged(prev, next) {
+  const before = new Map(prev.map((thread) => [thread.id, thread]));
+  const after = new Set(next.map((thread) => thread.id));
+  if (prev.some((thread) => !after.has(thread.id))) return true;
+  return next.some((thread) => {
+    const previous = before.get(thread.id);
+    if (!previous) return !thread.isResolved || thread.comments.length > 0;
+    return previous.isResolved !== thread.isResolved || hasAddedComment(previous.comments, thread.comments);
+  });
 }
 function ciConcludedSig(snapshot) {
   const failed = snapshot.checks.filter((check2) => check2.outcome === "failure").map((check2) => check2.name).sort();
@@ -31223,6 +31280,9 @@ function mergeableChanged(lastDefinite, next) {
   if (next.mergeable === "UNKNOWN") return false;
   if (lastDefinite === void 0) return false;
   return lastDefinite !== next.mergeable;
+}
+function hasNewMergeConflict(lastDefinite, next) {
+  return next.state === "OPEN" && next.mergeable === "CONFLICTING" && lastDefinite !== "CONFLICTING";
 }
 function hasNewCiFailure(prev, next) {
   const failing = next.checks.filter((check2) => check2.outcome === "failure");
@@ -31235,9 +31295,8 @@ function detectActivity(prev, next, lastDefiniteMergeable) {
   if (prev.state !== next.state) return true;
   if (mergeableChanged(lastDefiniteMergeable, next)) return true;
   if (reviewSig(prev) !== reviewSig(next)) return true;
-  if (prev.unresolvedThreads !== next.unresolvedThreads) return true;
-  if (commentSig(prev.inlineComments) !== commentSig(next.inlineComments)) return true;
-  if (prev.issueCommentsTotal !== next.issueCommentsTotal || commentSig(prev.issueComments) !== commentSig(next.issueComments)) return true;
+  if (reviewThreadsChanged(prev.reviewThreads, next.reviewThreads)) return true;
+  if (prev.issueCommentsTotal !== next.issueCommentsTotal || hasAddedComment(prev.issueComments, next.issueComments)) return true;
   if (ciPhase(next) === "concluded" && (ciPhase(prev) !== "concluded" || ciConcludedSig(prev) !== ciConcludedSig(next))) return true;
   return false;
 }
@@ -31251,8 +31310,34 @@ function authorBreakdown(comments) {
   }
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => `${count} ${name}`).join(", ");
 }
-function newSince(comments, baselineMs) {
+function newSince(comments, baselineMs, baselineComments) {
+  if (baselineComments !== void 0) {
+    const seen = new Set(baselineComments.map((comment) => comment.id));
+    return comments.filter((comment) => !seen.has(comment.id));
+  }
   return comments.filter((comment) => Date.parse(comment.createdAt) > baselineMs);
+}
+function countLabel(count, singular) {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+function inlineLine(snapshot, baselineMs, baseline) {
+  const unresolved = snapshot.reviewThreads.filter((thread) => !thread.isResolved).length;
+  const before = new Map(baseline?.reviewThreads.map((thread) => [thread.id, thread.comments]) ?? []);
+  const changed = snapshot.reviewThreads.map((thread) => ({
+    thread,
+    comments: newSince(thread.comments, baselineMs, baseline ? before.get(thread.id) ?? [] : void 0)
+  })).filter((item) => item.comments.length > 0);
+  if (changed.length === 0) {
+    return `- [comment:inline] ${countLabel(unresolved, "unresolved thread")}; 0 threads received new comments since last flush`;
+  }
+  const fresh = changed.flatMap((item) => item.comments);
+  const changedUnresolved = changed.filter((item) => !item.thread.isResolved).length;
+  const changedResolved = changed.length - changedUnresolved;
+  const states = [
+    changedUnresolved > 0 ? `${changedUnresolved} currently unresolved` : void 0,
+    changedResolved > 0 ? `${changedResolved} currently resolved` : void 0
+  ].filter((part) => part !== void 0);
+  return `- [comment:inline] ${countLabel(unresolved, "unresolved thread")}; ${countLabel(changed.length, "thread")} received ${countLabel(fresh.length, "new comment")} since last flush (${states.join(", ")}; ${authorBreakdown(fresh)})`;
 }
 function ciLine(snapshot, forcedHoldMinutes) {
   const phase = ciPhase(snapshot);
@@ -31285,15 +31370,14 @@ function reviewLine(snapshot) {
 function buildReport(target, snapshot, opts) {
   const stateSuffix = snapshot.state !== "OPEN" ? ` \u2014 ${snapshot.state}` : "";
   const title = snapshot.title.replace(/\s+/g, " ").trim();
-  const newInline = newSince(snapshot.inlineComments, opts.baselineMs);
-  const newIssue = newSince(snapshot.issueComments, opts.baselineMs);
+  const newIssue = newSince(snapshot.issueComments, opts.baselineMs, opts.baselineSnapshot?.issueComments);
   const newPart = (fresh) => fresh.length > 0 ? `${fresh.length} new since last flush: ${authorBreakdown(fresh)}` : "0 new since last flush";
   const lines = [
     `[PR Monitor] [${targetKey(target)}](${snapshot.url}) \u2014 "${title}"${stateSuffix}`,
     ciLine(snapshot, opts.forcedHoldMinutes),
     `- Mergeable: ${snapshot.mergeable}`,
     reviewLine(snapshot),
-    `- [comment:inline] ${snapshot.unresolvedThreads} unresolved threads (${newPart(newInline)})`,
+    inlineLine(snapshot, opts.baselineMs, opts.baselineSnapshot),
     `- [comment:issue] ${snapshot.issueCommentsTotal} total (${newPart(newIssue)})`
   ];
   if (snapshot.labels.length > 0) lines.push(`- Labels: ${snapshot.labels.join(", ")}`);
@@ -31316,15 +31400,15 @@ var PrWatch = class {
   dirty = false;
   lastActivityAt = 0;
   lastFlushAt;
+  lastFlushedSnapshot;
   holdStartedAt;
-  // Set when a check went red: the next flush check ignores the debounce window
-  // and the CI hold.
+  // Set for actionable or terminal changes that must skip both timers.
   urgent = false;
   // Head SHA whose CI failure already triggered an instant flush. Caps the
   // instant path at one report per commit, so a matrix whose jobs go red one by
   // one cannot wake the session once per job; the stragglers ride along with the
   // debounced suite-conclusion report instead.
-  urgentFlushedSha;
+  ciFailureFlushedSha;
   consecutiveFailures = 0;
   deliveryFailures = 0;
   fetchStartedAt;
@@ -31345,6 +31429,7 @@ var PrWatch = class {
     this.startedAt = input.deps.now();
     this.lastFlushAt = this.startedAt;
     this.snapshot = input.initial;
+    this.lastFlushedSnapshot = input.initial;
     this.rememberDefiniteMergeable(input.initial);
   }
   rememberDefiniteMergeable(snapshot) {
@@ -31396,15 +31481,22 @@ var PrWatch = class {
     this.consecutiveFailures = 0;
     this.snapshotAt = this.fetchStartedAt;
     if (this.snapshot !== void 0) {
+      const becameTerminal = this.snapshot.state === "OPEN" && next.state !== "OPEN";
+      const becameConflicting = hasNewMergeConflict(this.lastDefiniteMergeable, next);
       if (detectActivity(this.snapshot, next, this.lastDefiniteMergeable)) {
         this.dirty = true;
         this.lastActivityAt = this.deps.now();
         this.holdStartedAt = void 0;
       }
-      if (this.config.flushOnCiFailure && next.state === "OPEN" && this.urgentFlushedSha !== next.headSha && hasNewCiFailure(this.snapshot, next)) {
+      if (this.config.flushOnCiFailure && next.state === "OPEN" && this.ciFailureFlushedSha !== next.headSha && hasNewCiFailure(this.snapshot, next)) {
         this.dirty = true;
         this.urgent = true;
-        this.urgentFlushedSha = next.headSha;
+        this.ciFailureFlushedSha = next.headSha;
+        this.holdStartedAt = void 0;
+      }
+      if (becameConflicting || becameTerminal) {
+        this.dirty = true;
+        this.urgent = true;
         this.holdStartedAt = void 0;
       }
     }
@@ -31427,6 +31519,7 @@ var PrWatch = class {
     if (this.stopped || this.snapshot === void 0) return;
     const report = buildReport(this.target, this.snapshot, { baselineMs: 0 });
     this.lastFlushAt = this.snapshotAt ?? this.startedAt;
+    this.lastFlushedSnapshot = this.snapshot;
     await this.deliverOrLog(report);
   }
   /**
@@ -31446,7 +31539,10 @@ var PrWatch = class {
       this.snapshotAt = this.fetchStartedAt;
     } catch (error51) {
       if (this.snapshot === void 0) return `${targetKey(this.target)}: flush failed \u2014 ${error51.message}`;
-      const report2 = buildReport(this.target, this.snapshot, { baselineMs: this.lastFlushAt });
+      const report2 = buildReport(this.target, this.snapshot, {
+        baselineMs: this.lastFlushAt,
+        baselineSnapshot: this.lastFlushedSnapshot
+      });
       return `${report2}
 (note: refresh failed \u2014 ${error51.message}; data is from the previous poll; baseline NOT reset)`;
     }
@@ -31502,6 +31598,7 @@ var PrWatch = class {
       }
     }
     const previousFlushAt = this.lastFlushAt;
+    const previousFlushedSnapshot = this.lastFlushedSnapshot;
     const previousHoldStartedAt = this.holdStartedAt;
     const previousUrgent = this.urgent;
     const report = this.flush(forcedHoldMinutes);
@@ -31511,6 +31608,7 @@ var PrWatch = class {
       this.stopIfTerminal();
     } catch (error51) {
       this.lastFlushAt = previousFlushAt;
+      this.lastFlushedSnapshot = previousFlushedSnapshot;
       this.dirty = true;
       this.holdStartedAt = previousHoldStartedAt;
       this.urgent = previousUrgent;
@@ -31531,8 +31629,13 @@ var PrWatch = class {
   }
   flush(forcedHoldMinutes) {
     const snapshot = this.snapshot;
-    const report = buildReport(this.target, snapshot, { baselineMs: this.lastFlushAt, forcedHoldMinutes });
+    const report = buildReport(this.target, snapshot, {
+      baselineMs: this.lastFlushAt,
+      baselineSnapshot: this.lastFlushedSnapshot,
+      forcedHoldMinutes
+    });
     this.lastFlushAt = this.snapshotAt ?? this.deps.now();
+    this.lastFlushedSnapshot = snapshot;
     this.dirty = false;
     this.holdStartedAt = void 0;
     this.urgent = false;
@@ -31813,7 +31916,7 @@ ${raced.watch.statusLine()}`;
   if (config2.announceOnStart) await watch.announceInitial();
   log(`started monitoring ${key} for Claude Code pid ${claudePid}`);
   return `Started monitoring ${key} \u2014 "${initial.title}".
-` + (config2.announceOnStart ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : "") + `Polling every ${config2.pollIntervalSeconds}s; after activity settles for ${config2.debounceMinutes} quiet minutes, a report is injected into this conversation at your next tool call, user message, or turn end. ` + (config2.flushOnCiFailure ? `A failing check does not wait for that quiet window \u2014 it is reported at the next poll, even while the rest of the suite runs, so you can start fixing CI right away. ` : "") + `The monitor stops automatically when the PR is merged or closed, and does not survive this Claude Code session.` + (config2.keepAlive ? `
+` + (config2.announceOnStart ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : "") + `Polling every ${config2.pollIntervalSeconds}s; after activity settles for ${config2.debounceMinutes} quiet minutes, a report is injected into this conversation at your next tool call, user message, or turn end. ` + (config2.flushOnCiFailure ? `A failing check does not wait for that quiet window \u2014 it is reported at the next poll, even while the rest of the suite runs, so you can start fixing CI right away. ` : "") + `A newly detected merge conflict or terminal PR state is also reported at the next poll without waiting. The monitor stops automatically when the PR is merged or closed, and does not survive this Claude Code session.` + (config2.keepAlive ? `
 Keep-alive is on: until this PR is handed off with action 'mark_ready', turn-end is refused and you are asked to wait for the next report rather than going idle. Follow the monitor-pr skill; action 'stop' ends it at any time.` : "");
 };
 var loadProjectConfig = () => loadConfig([join3(projectDir, ".claude", "pr-monitor.json"), join3(projectDir, ".opencode", "pr-monitor.json")], log);
@@ -31914,11 +32017,11 @@ process4.on("SIGTERM", shutdown);
 process4.on("SIGINT", shutdown);
 claimSpool(claudePid);
 collectDeadSpools(claudePid);
-var server = new McpServer({ name: "pr-monitor", version: "0.2.0" });
+var server = new McpServer({ name: "pr-monitor", version: "0.2.1" });
 server.registerTool(
   "pr_monitor",
   {
-    description: "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments, mergeability changes, and merge/close. Changes are aggregated (rolling debounce) and injected into THIS session as '[PR Monitor]' messages stating facts only, delivered at your next tool call, user message, or turn end. A check going red skips the debounce and is reported at the next poll, so CI fixes can start straight away. Actions: start (begin watching a PR), stop (end watching), flush (on-demand: immediately return a full status report and reset the 'new since' baseline; a delivered report already advances the baseline, so a flush after handling one is not needed), status (list this session's monitors), mark_ready (add the configured ready-for-human-review label to the PR on GitHub \u2014 use once CI is green and review feedback is addressed, to signal a human should review now; this is also the handoff that releases the keep-alive loop), unmark_ready (withdraw that label \u2014 use when new feedback arrives on a PR that was already flagged ready, before working on it again). mark_ready/unmark_ready do not require an active monitor. The pr argument must be explicit 'owner/repo#123' or a full PR URL; 'all' is allowed for stop/flush. Tuning lives in .claude/pr-monitor.json. Monitors are per-session and do not survive Claude Code restarts. While a monitored PR is not handed off, keep-alive (config key 'keepAlive') refuses turn-end so reports arriving during idle time are still acted on \u2014 follow the monitor-pr skill.",
+    description: "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments (including follow-ups on existing or resolved review threads), mergeability changes, and merge/close. Changes are aggregated (rolling debounce) and injected into THIS session as '[PR Monitor]' messages stating facts only, delivered at your next tool call, user message, or turn end. A check going red, a newly detected merge conflict, or a terminal PR state skips the debounce and is reported at the next poll. Actions: start (begin watching a PR), stop (end watching), flush (on-demand: immediately return a full status report and reset the 'new since' baseline; a delivered report already advances the baseline, so a flush after handling one is not needed), status (list this session's monitors), mark_ready (add the configured ready-for-human-review label to the PR on GitHub \u2014 use once CI is green and review feedback is addressed, to signal a human should review now; this is also the handoff that releases the keep-alive loop), unmark_ready (withdraw that label \u2014 use when new feedback arrives on a PR that was already flagged ready, before working on it again). mark_ready/unmark_ready do not require an active monitor. The pr argument must be explicit 'owner/repo#123' or a full PR URL; 'all' is allowed for stop/flush. Tuning lives in .claude/pr-monitor.json. Monitors are per-session and do not survive Claude Code restarts. While a monitored PR is not handed off, keep-alive (config key 'keepAlive') refuses turn-end so reports arriving during idle time are still acted on \u2014 follow the monitor-pr skill.",
     inputSchema: {
       action: external_exports.enum(["start", "stop", "flush", "status", "mark_ready", "unmark_ready"]).describe("What to do"),
       pr: external_exports.string().optional().describe(

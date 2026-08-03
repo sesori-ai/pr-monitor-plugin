@@ -7,14 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1]
+
 ### Added
 
 - The OpenCode plugin is now prepared for npm distribution as the public scoped package `@sesori/pr-monitor-opencode`. Its package entry points support both standard package imports and OpenCode's `./server` lookup, and the published artifact is restricted to the OpenCode shell plus the shared core.
 - **Instant CI-failure reports** (config `flushOnCiFailure`, default `true`). A failing check no longer waits out `debounceMinutes` — a window that unrelated PR comments kept resetting, so a red CI could sit unreported for a long time before the session started fixing it. Any check newly in `failure` now flushes on the spot, carrying whatever activity was buffered so far, skipping both the quiet window and the CI hold. Failures found while the suite is still running count too (previously not activity at all, so a lint failure in minute 1 of a 20-minute suite waited for the whole suite plus the debounce); the report states the suite honestly, e.g. `- CI: running (3/8 done, 1 failed so far: lint)`. Capped at one instant report per head commit so a matrix going red job by job cannot wake the session once per job — the suite's conclusion still delivers the full verdict through the normal debounce, and the next push re-arms the instant path.
+- **Instant conflict and terminal-state reports.** A newly detected merge conflict, merge, or close now bypasses both the debounce and a running-CI hold and reports at the next poll.
+- Inline-comment reports now preserve review-thread and comment identity plus current resolution state. They state how many resolved and unresolved threads received visible comments since the last flush, making a human follow-up on an already answered or resolved thread explicit even when the unresolved-thread total is unchanged. Polling paginates beyond GitHub's first 100 review threads, and ignored tagged replies cannot create false visible-comment activity when a full 100-comment thread window rolls over.
+
+### Changed
+
+- The default `debounceMinutes` quiet window is now 2 minutes (previously 5).
 
 ### Fixed
 
-- Auto-flush report delivery is awaited inside the watch's exclusive op instead of being fire-and-forget. Its failure path restores exactly the state a later flush advances (`lastFlushAt`, `dirty`, `holdStartedAt`), so a delivery that rejected after a newer report had already flushed could rewind that newer report's "new since" baseline — and, with the instant CI path above, re-fire a duplicate report immediately. Ticks now skip while a report is in flight, which is the intended trade-off: there is nothing useful to do with a fresher snapshot while the previous report is stuck.
+- Auto-flush report delivery is awaited inside the watch's exclusive op instead of being fire-and-forget. Its failure path restores exactly the state a later flush advances (`lastFlushAt`, `lastFlushedSnapshot`, `dirty`, `holdStartedAt`), so a delivery that rejected after a newer report had already flushed could rewind that newer report's "new since" baseline — and, with the instant CI path above, re-fire a duplicate report immediately. Ticks now skip while a report is in flight, which is the intended trade-off: there is nothing useful to do with a fresher snapshot while the previous report is stuck.
+- "New since last flush" now compares comment IDs with the last flushed snapshot instead of relying only on second-granularity GitHub timestamps, which could render a newly detected follow-up as `0 new` when it landed in the same second as the prior flush.
+- OpenCode shutdown notices now use synchronous `session.prompt` with `noReply: true`. The previous `promptAsync` call returned before its background task persisted the message, and instance disposal then cancelled that task, so the advertised shutdown notice was usually lost.
 
 ## [0.2.0]
 

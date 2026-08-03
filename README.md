@@ -4,10 +4,11 @@ A GitHub PR monitor for coding agents, available as both an [opencode](https://o
 
 ## What it does
 
-- Polls GitHub via `gh api graphql` (one query per watched PR per tick).
-- Detects: CI suite conclusions, new reviews, new inline/issue comments, unresolved-thread count changes, mergeability changes, merge/close.
-- Aggregates activity with a **rolling debounce**: any new activity resets a quiet timer; a report is delivered only after the PR has been quiet for the configured window.
+- Polls GitHub via `gh api graphql` (one query per watched PR per tick, with extra pages only for PRs exceeding 100 review threads).
+- Detects: CI suite conclusions, new reviews, new inline/issue comments (including follow-ups on existing or resolved review threads), review-thread resolution changes, mergeability changes, merge/close.
+- Aggregates ordinary activity with a **rolling debounce**: any new activity resets a quiet timer; a report is delivered after the PR has been quiet for the configured window.
 - **Instant CI failures**: a check going red skips the debounce and the CI hold — the report goes out at the next poll, carrying whatever else was buffered, so the agent starts fixing CI instead of waiting out a timer that PR comments keep resetting.
+- **Instant conflicts and terminal states**: a newly detected merge conflict, merge, or close also reports at the next poll without waiting for the debounce or CI hold.
 - **CI hold**: a due report is held while a check suite is still running (bounded by `maxCiWaitMinutes`), so you get one report with the CI verdict instead of two.
 - Reports are **facts only** — counts, authors, check names. No advice, no comment bodies.
 - Monitors are **per-session and in-memory**: they stop automatically when the PR is merged/closed, and they do not survive a host restart.
@@ -19,7 +20,7 @@ A GitHub PR monitor for coding agents, available as both an [opencode](https://o
 - CI: failing (1/8 failed: analyze)
 - Mergeable: MERGEABLE
 - Reviews: alice ✓ approved · bob ⏳ pending
-- [comment:inline] 3 unresolved threads (2 new since last flush: 2 coderabbitai[bot])
+- [comment:inline] 3 unresolved threads; 2 threads received 2 new comments since last flush (1 currently unresolved, 1 currently resolved; 2 coderabbitai[bot])
 - [comment:issue] 5 total (1 new since last flush: 1 alice)
 ```
 
@@ -95,9 +96,9 @@ Add the plugin to your project's `opencode.json` (committed — the whole team g
 }
 ```
 
-opencode installs npm plugins and their dependencies into its package cache on startup. To make upgrades explicit, pin a version such as `@sesori/pr-monitor-opencode@0.2.0` and bump it deliberately. Quit and restart opencode after changing the plugin configuration.
+opencode installs npm plugins and their dependencies into its package cache on startup. To make upgrades explicit, pin a version such as `@sesori/pr-monitor-opencode@0.2.1` and bump it deliberately. Quit and restart opencode after changing the plugin configuration.
 
-Reports arrive in the owning session as messages starting with `[PR Monitor]`. Monitors stop when the owning session is deleted; graceful opencode shutdowns deliver a stop notice to the owning session.
+Reports arrive in the owning session as messages starting with `[PR Monitor]`. Monitors stop when the owning session is deleted. On graceful opencode shutdown, a no-reply stop notice is persisted to each owning session before the plugin is disposed, so it is present in history when opencode starts again.
 
 ## The `pr_monitor` tool
 
@@ -118,7 +119,7 @@ Optional, per project: `.claude/pr-monitor.json` for Claude Code (with `.opencod
 
 ```json
 {
-  "debounceMinutes": 5,
+  "debounceMinutes": 2,
   "maxCiWaitMinutes": 30,
   "pollIntervalSeconds": 60,
   "ignoreCommentTag": "<!-- pr-monitor:ignore -->",
@@ -133,7 +134,7 @@ Optional, per project: `.claude/pr-monitor.json` for Claude Code (with `.opencod
 
 | Key                    | Default | Meaning |
 | ---------------------- | ------- | ------- |
-| `debounceMinutes`      | `5`     | Quiet window after the last detected activity before a report is delivered. Rolling — new activity resets it. |
+| `debounceMinutes`      | `2`     | Quiet window after the last detected ordinary activity before a report is delivered. Rolling — new activity resets it. |
 | `maxCiWaitMinutes`     | `30`    | Upper bound on holding a due report while CI is still running. After this, the report is force-flushed naming unfinished checks. |
 | `pollIntervalSeconds`  | `60`    | GitHub poll interval per watched PR (clamped to 30 seconds … 24 hours). |
 | `ignoreCommentTag`     | unset   | If set, comments authored by the authenticated `gh` user that contain this tag are invisible to the monitor — useful so an agent replying to review threads doesn't trigger its own reports. |
@@ -146,16 +147,19 @@ Optional, per project: `.claude/pr-monitor.json` for Claude Code (with `.opencod
 
 ## Behavior details
 
-- **Activity** = state/mergeability changes, review changes, unresolved-thread count changes, new comments, and CI *suite conclusions*. Transitions into "running" (a new push) and per-check progress are intentionally not activity.
+- **Activity** = state/mergeability changes, review changes, per-thread resolution or visible-comment changes, issue comments, and CI *suite conclusions*. Transitions into "running" (a new push) and non-failing per-check progress are intentionally not activity.
 - **CI failures bypass the timers** (`flushOnCiFailure`, default on). A check whose outcome is newly `failure` — including one found while the suite is still running, which is otherwise not activity — flushes on the spot: no quiet window, no CI hold. The report reads the suite honestly (`- CI: running (3/8 done, 1 failed so far: lint)`). The instant path fires at most once per head commit, so a matrix going red job by job cannot wake the session once per job; the suite's eventual conclusion still delivers the full verdict through the normal debounce, and the next push re-arms the instant path.
-- **"New since last flush"** counts comments created after the watch's baseline, which advances on every delivered report or manual `flush`.
+- **Conflicts and terminal states bypass the timers.** A newly observed `CONFLICTING` state (including an `UNKNOWN -> CONFLICTING` settle), merge, or close reports at the next poll and is never held behind running CI.
+- **Review-thread follow-ups stay visible.** Inline comments retain their thread identity and current resolved/unresolved state. Reports state how many threads received visible comments since the last flush and split those threads by current state, so a follow-up on a previously handled or resolved thread cannot be mistaken for an unchanged unresolved-thread count. Comments filtered by `ignoreCommentTag` remain invisible.
+- **"New since last flush"** compares stable GitHub comment IDs with the last delivered report or manual `flush`, so comments created within the same timestamp second are not lost.
 - **Failure handling**: 10 consecutive poll failures (or report-delivery failures) stop the monitor with a notice. A deleted/inaccessible PR stops it immediately.
-- **Terminal states**: a report describing a merged/closed PR is delivered with a `Monitor stopped: PR merged|closed` line, then the monitor stops itself. All stop reasons use the same `Monitor stopped: <reason>` phrasing.
+- **Terminal states**: an immediate report describing a merged/closed PR is delivered with a `Monitor stopped: PR merged|closed` line, then the monitor stops itself. All stop reasons use the same `Monitor stopped: <reason>` phrasing.
 
 ## Development
 
 ```sh
 npm install
+npm test            # shared-core and OpenCode-shell regression tests
 npm run typecheck   # core + both shells
 npm run build       # bundle the Claude Code MCP server to claude-code/dist/mcp-server.mjs
 npm run pack:check  # inspect the OpenCode npm package without creating a tarball
@@ -178,6 +182,7 @@ A release uses one version for both targets: the annotated `vX.Y.Z` Git tag rele
 
 ```sh
 npm ci
+npm test
 npm run typecheck
 npm run build
 npm run pack:check

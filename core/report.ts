@@ -1,5 +1,6 @@
 // Report rendering: facts only — no advice, no comment bodies, just counts
-// and authors. "New" = created after the watch's lastFlushAt baseline.
+// and authors. "New" means absent from the last successfully flushed snapshot;
+// standalone initial reports fall back to their timestamp baseline.
 
 import { ciPhase, type CommentMeta, type PrSnapshot } from "./github"
 import { targetKey, type Target } from "./target"
@@ -16,8 +17,43 @@ function authorBreakdown(comments: CommentMeta[]): string {
     .join(", ")
 }
 
-function newSince(comments: CommentMeta[], baselineMs: number): CommentMeta[] {
+function newSince(comments: CommentMeta[], baselineMs: number, baselineComments?: CommentMeta[]): CommentMeta[] {
+  if (baselineComments !== undefined) {
+    const seen = new Set(baselineComments.map((comment) => comment.id))
+    return comments.filter((comment) => !seen.has(comment.id))
+  }
   return comments.filter((comment) => Date.parse(comment.createdAt) > baselineMs)
+}
+
+function countLabel(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`
+}
+
+function inlineLine(snapshot: PrSnapshot, baselineMs: number, baseline?: PrSnapshot): string {
+  const unresolved = snapshot.reviewThreads.filter((thread) => !thread.isResolved).length
+  const before = new Map(baseline?.reviewThreads.map((thread) => [thread.id, thread.comments]) ?? [])
+  const changed = snapshot.reviewThreads
+    .map((thread) => ({
+      thread,
+      comments: newSince(thread.comments, baselineMs, baseline ? before.get(thread.id) ?? [] : undefined),
+    }))
+    .filter((item) => item.comments.length > 0)
+  if (changed.length === 0) {
+    return `- [comment:inline] ${countLabel(unresolved, "unresolved thread")}; 0 threads received new comments since last flush`
+  }
+
+  const fresh = changed.flatMap((item) => item.comments)
+  const changedUnresolved = changed.filter((item) => !item.thread.isResolved).length
+  const changedResolved = changed.length - changedUnresolved
+  const states = [
+    changedUnresolved > 0 ? `${changedUnresolved} currently unresolved` : undefined,
+    changedResolved > 0 ? `${changedResolved} currently resolved` : undefined,
+  ].filter((part): part is string => part !== undefined)
+  return (
+    `- [comment:inline] ${countLabel(unresolved, "unresolved thread")}; ` +
+    `${countLabel(changed.length, "thread")} received ${countLabel(fresh.length, "new comment")} since last flush ` +
+    `(${states.join(", ")}; ${authorBreakdown(fresh)})`
+  )
 }
 
 function ciLine(snapshot: PrSnapshot, forcedHoldMinutes: number | undefined): string {
@@ -53,12 +89,11 @@ function reviewLine(snapshot: PrSnapshot): string {
 export function buildReport(
   target: Target,
   snapshot: PrSnapshot,
-  opts: { baselineMs: number; forcedHoldMinutes?: number },
+  opts: { baselineMs: number; baselineSnapshot?: PrSnapshot; forcedHoldMinutes?: number },
 ): string {
   const stateSuffix = snapshot.state !== "OPEN" ? ` — ${snapshot.state}` : ""
   const title = snapshot.title.replace(/\s+/g, " ").trim()
-  const newInline = newSince(snapshot.inlineComments, opts.baselineMs)
-  const newIssue = newSince(snapshot.issueComments, opts.baselineMs)
+  const newIssue = newSince(snapshot.issueComments, opts.baselineMs, opts.baselineSnapshot?.issueComments)
   const newPart = (fresh: CommentMeta[]): string =>
     fresh.length > 0 ? `${fresh.length} new since last flush: ${authorBreakdown(fresh)}` : "0 new since last flush"
   const lines = [
@@ -66,7 +101,7 @@ export function buildReport(
     ciLine(snapshot, opts.forcedHoldMinutes),
     `- Mergeable: ${snapshot.mergeable}`,
     reviewLine(snapshot),
-    `- [comment:inline] ${snapshot.unresolvedThreads} unresolved threads (${newPart(newInline)})`,
+    inlineLine(snapshot, opts.baselineMs, opts.baselineSnapshot),
     `- [comment:issue] ${snapshot.issueCommentsTotal} total (${newPart(newIssue)})`,
   ]
   // Reported so a session can see whether the PR is already handed off to a

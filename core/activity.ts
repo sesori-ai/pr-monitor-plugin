@@ -1,14 +1,25 @@
-import { ciPhase, type CommentMeta, type PrSnapshot } from "./github"
-
-function commentSig(comments: CommentMeta[]): string {
-  const last = comments[comments.length - 1]
-  return `${comments.length}:${last?.createdAt ?? ""}`
-}
+import { ciPhase, type CommentMeta, type PrSnapshot, type ReviewThreadInfo } from "./github"
 
 function reviewSig(snapshot: PrSnapshot): string {
   const states = snapshot.reviews.map((review) => `${review.login}=${review.state}@${review.submittedAt}`).sort()
   const pending = [...snapshot.pendingReviewers].sort()
   return `${states.join(",")}|${pending.join(",")}`
+}
+
+function hasAddedComment(prev: CommentMeta[], next: CommentMeta[]): boolean {
+  const before = new Set(prev.map((comment) => comment.id))
+  return next.some((comment) => !before.has(comment.id))
+}
+
+function reviewThreadsChanged(prev: ReviewThreadInfo[], next: ReviewThreadInfo[]): boolean {
+  const before = new Map(prev.map((thread) => [thread.id, thread]))
+  const after = new Set(next.map((thread) => thread.id))
+  if (prev.some((thread) => !after.has(thread.id))) return true
+  return next.some((thread) => {
+    const previous = before.get(thread.id)
+    if (!previous) return !thread.isResolved || thread.comments.length > 0
+    return previous.isResolved !== thread.isResolved || hasAddedComment(previous.comments, thread.comments)
+  })
 }
 
 function ciConcludedSig(snapshot: PrSnapshot): string {
@@ -40,6 +51,14 @@ function mergeableChanged(lastDefinite: PrSnapshot["mergeable"] | undefined, nex
   return lastDefinite !== next.mergeable
 }
 
+/** True when a conflict is newly observed, including after an initial UNKNOWN. */
+export function hasNewMergeConflict(
+  lastDefinite: PrSnapshot["mergeable"] | undefined,
+  next: PrSnapshot,
+): boolean {
+  return next.state === "OPEN" && next.mergeable === "CONFLICTING" && lastDefinite !== "CONFLICTING"
+}
+
 /**
  * True when `next` shows a failing check that `prev` did not — including the
  * case where CI is still running, which `detectActivity` deliberately ignores.
@@ -69,9 +88,8 @@ export function detectActivity(prev: PrSnapshot, next: PrSnapshot, lastDefiniteM
   if (prev.state !== next.state) return true
   if (mergeableChanged(lastDefiniteMergeable, next)) return true
   if (reviewSig(prev) !== reviewSig(next)) return true
-  if (prev.unresolvedThreads !== next.unresolvedThreads) return true
-  if (commentSig(prev.inlineComments) !== commentSig(next.inlineComments)) return true
-  if (prev.issueCommentsTotal !== next.issueCommentsTotal || commentSig(prev.issueComments) !== commentSig(next.issueComments)) return true
+  if (reviewThreadsChanged(prev.reviewThreads, next.reviewThreads)) return true
+  if (prev.issueCommentsTotal !== next.issueCommentsTotal || hasAddedComment(prev.issueComments, next.issueComments)) return true
   // CI: only suite conclusion counts. Transitions into "running" (new push)
   // and per-check progress are intentionally NOT activity.
   if (ciPhase(next) === "concluded" && (ciPhase(prev) !== "concluded" || ciConcludedSig(prev) !== ciConcludedSig(next))) return true

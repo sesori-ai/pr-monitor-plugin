@@ -1,7 +1,8 @@
 // pr-monitor — opencode plugin that watches GitHub PRs and reports changes.
 //
 // One watch per PR, owned by the session that started it. Polls GitHub via
-// `gh api graphql` (one query per watch per tick). Reports are delivered to
+// `gh api graphql` (one query per watch per tick, plus review-thread pages when
+// needed). Reports are delivered to
 // the owning session via promptAsync as "[PR Monitor]" messages. In-memory
 // only: opencode restarts drop all watches by design. See README.md for the
 // full design.
@@ -14,11 +15,11 @@ import { tool, type Plugin } from "@opencode-ai/plugin"
 import { loadConfig, type MonitorConfig } from "../core/config"
 import { createGhRunner, fetchPrSnapshot, type PrSnapshot } from "../core/github"
 import { markReadyForHumanReview, removeReadyForHumanReview } from "../core/label"
-import { parseTarget, targetKey, type Target } from "../core/target"
+import { parseTarget, targetKey, targetUrl, type Target } from "../core/target"
 import { PrWatch } from "../core/watch"
 
 export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }) => {
-  type Entry = { watch: PrWatch; timer: ReturnType<typeof setInterval> }
+  type Entry = { watch: PrWatch; timer: ReturnType<typeof setInterval>; persist: (report: string) => Promise<void> }
   const watches = new Map<string, Entry>() // key: `${sessionID} ${owner/repo#n}`
 
   // Latest model per session, captured from user messages and replayed on report
@@ -71,6 +72,21 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
     })
     if (result.error !== undefined) {
       throw new Error(`prompt_async rejected: ${JSON.stringify(result.error)}`)
+    }
+  }
+
+  // promptAsync acknowledges before its background task has written the user
+  // message. Instance disposal cancels that task, so shutdown notices need the
+  // synchronous endpoint with noReply: it returns only after the factual notice
+  // is durable and does not start a model turn while opencode is exiting.
+  const persist = (sessionID: string, agent: string) => async (report: string): Promise<void> => {
+    const model = sessionModels.get(sessionID)
+    const result = await client.session.prompt({
+      path: { id: sessionID },
+      body: { agent, model, noReply: true, parts: [{ type: "text", text: report }] },
+    })
+    if (result.error !== undefined) {
+      throw new Error(`prompt rejected: ${JSON.stringify(result.error)}`)
     }
   }
 
@@ -139,7 +155,7 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
       },
     })
     const timer = setInterval(() => void watch.tick(), config.pollIntervalSeconds * 1000)
-    watches.set(key, { watch, timer })
+    watches.set(key, { watch, timer, persist: persist(sessionID, agent) })
     // Announce the current state immediately so the session knows its starting
     // point and can address anything already outstanding on the PR (comments
     // added before — or during — startup that periodic polling would otherwise
@@ -154,6 +170,7 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
       (config.flushOnCiFailure
         ? `A failing check does not wait for that quiet window — it is reported at the next poll, even while the rest of the suite runs, so you can start fixing CI right away. `
         : "") +
+      `A newly detected merge conflict or terminal PR state is also reported at the next poll without waiting. ` +
       `The monitor stops automatically when the PR is merged or closed, and does not survive an opencode restart.`
     )
   }
@@ -179,10 +196,11 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
     tool: {
       pr_monitor: tool({
         description:
-          "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments, " +
+          "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments " +
+          "(including follow-ups on existing or resolved review threads), " +
           "mergeability changes, and merge/close. Changes are aggregated (rolling debounce) and delivered to THIS session " +
-          "as a '[PR Monitor]' message stating facts only. A check going red skips the debounce and is reported at the " +
-          "next poll, so CI fixes can start straight away. Actions: start (begin watching a PR), stop (end watching), " +
+          "as a '[PR Monitor]' message stating facts only. A check going red, a newly detected merge conflict, or a terminal " +
+          "PR state skips the debounce and is reported at the next poll. Actions: start (begin watching a PR), stop (end watching), " +
           "flush (on-demand: immediately return a full status report and reset the 'new since' baseline; a delivered " +
           "report already advances the baseline, so a flush after handling one is not needed), status (list this " +
           "session's monitors), mark_ready (add the configured ready-for-human-review label to the PR on GitHub — use " +
@@ -256,12 +274,20 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
     },
 
     dispose: async () => {
+      const entries = [...watches.values()]
+      for (const entry of entries) entry.watch.stop()
       await Promise.all(
-        [...watches.values()].map((entry) =>
-          entry.watch.stopWithNotice(
-            "Monitor stopped: opencode is shutting down. Re-start monitoring after opencode starts if still needed.",
-          ),
-        ),
+        entries.map(async (entry) => {
+          const target = entry.watch.target
+          const notice =
+            `[PR Monitor] [${targetKey(target)}](${targetUrl(target)}) — ` +
+            "Monitor stopped: opencode is shutting down. Re-start monitoring after opencode starts if still needed."
+          try {
+            await entry.persist(notice)
+          } catch (error) {
+            log(`shutdown notice delivery failed for ${targetKey(target)}: ${error}`)
+          }
+        }),
       )
     },
   }

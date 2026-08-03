@@ -185,6 +185,7 @@ const startWatch = async (pr: string): Promise<string> => {
     (config.flushOnCiFailure
       ? `A failing check does not wait for that quiet window — it is reported at the next poll, even while the rest of the suite runs, so you can start fixing CI right away. `
       : "") +
+    `A newly detected merge conflict or terminal PR state is also reported at the next poll without waiting. ` +
     `The monitor stops automatically when the PR is merged or closed, and does not survive this Claude Code session.` +
     (config.keepAlive
       ? `\nKeep-alive is on: until this PR is handed off with action 'mark_ready', turn-end is refused and you are asked to wait for ` +
@@ -325,16 +326,17 @@ process.on("SIGINT", shutdown)
 claimSpool(claudePid)
 collectDeadSpools(claudePid)
 
-const server = new McpServer({ name: "pr-monitor", version: "0.2.0" })
+const server = new McpServer({ name: "pr-monitor", version: "0.2.1" })
 
 server.registerTool(
   "pr_monitor",
   {
     description:
-      "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments, " +
+      "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments " +
+      "(including follow-ups on existing or resolved review threads), " +
       "mergeability changes, and merge/close. Changes are aggregated (rolling debounce) and injected into THIS session " +
       "as '[PR Monitor]' messages stating facts only, delivered at your next tool call, user message, or turn end. " +
-      "A check going red skips the debounce and is reported at the next poll, so CI fixes can start straight away. " +
+      "A check going red, a newly detected merge conflict, or a terminal PR state skips the debounce and is reported at the next poll. " +
       "Actions: start (begin watching a PR), stop (end watching), flush (on-demand: immediately return a full status " +
       "report and reset the 'new since' baseline; a delivered report already advances the baseline, so a flush after " +
       "handling one is not needed), status (list this session's monitors), mark_ready (add the configured " +
