@@ -3,18 +3,18 @@
 ## Current State
 
 - **Plan slug:** `pi-omp-pr-monitor`
-- **Plan status:** Step 1/6 in progress
+- **Plan status:** Step 1/6 open for review
 - **Current branch:** `cross-harness-plugin-scaling`
-- **Current PR:** not opened yet
+- **Current PR:** [#10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10)
 - **Implementation started:** no
-- **Next action:** validate, commit, push, and open the Step 1 planning/skills PR
+- **Next action:** pass review and merge Step 1; then start the shared-runtime Step 2
 - **Retirement:** blocked until every required row in `PLAN.md` passes
 
 ## Fixed Delivery Sequence
 
 | Done | Step | Exact PR title | Complexity | Soft line target | State |
 |---|---|---|---|---:|---|
-| [ ] | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan and exact skill copy | 1,000 | In progress |
+| [ ] | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan and exact skill copy | 1,000 | [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) open |
 | [ ] | 2/6 | `⚙️ [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Moderate shared-state and lifecycle refactor | 1,400 | Pending Step 1 |
 | [ ] | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 | Pending Step 2 |
 | [ ] | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 1,500 | Pending Step 3 |
@@ -51,7 +51,7 @@ independently valid PR, update this plan and every unopened title before opening
 - [x] Verify both copied skill files are byte-identical to their requested sources.
 - [x] Write `PLAN.md` and this tracker under `.plan/active/pi-omp-pr-monitor/`.
 - [x] Validate fixed titles/totals, Markdown paths, changed-line count, and `git diff --check`.
-- [ ] Commit with the exact Step 1 title, push, and open the planning PR with the required body sections.
+- [x] Commit with the exact Step 1 title, push, and open the planning PR with the required body sections.
 
 ## Review Log
 
@@ -67,8 +67,9 @@ independently valid PR, update this plan and every unopened title before opening
 - [x] Plan validation passes: fixed slug, six exact ordered titles, and balanced Markdown fences.
 - [x] Every referenced current source path exists; future paths are explicitly assigned to implementation steps.
 - [x] `git diff --check` passes.
-- [x] Changed lines: 937, within the 1,000-line Step 1 target.
+- [x] Changed lines: 938, within the 1,000-line Step 1 target.
 - [x] TypeScript, host, and bundle suites not run: this step changes only plans and agent skills.
+- [x] Commit `17b1562` pushed and [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) opened with the exact Step 1 title.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/
 platform matrix required by `PLAN.md`.
