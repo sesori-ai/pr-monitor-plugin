@@ -34,7 +34,14 @@ independently valid PR, update this plan and every unopened title before opening
   in adapters.
 - Bundle private core/runtime into npm artifacts rather than publishing a core package.
 - Make the root package private; publish OpenCode and Pi from target workspaces.
-- Preserve Claude's plugin-root, hook, spool, keep-alive, and committed-bundle design.
+- Preserve Claude's plugin-root, hook, spool, keep-alive, committed-bundle design, and label-before-handoff ordering.
+- A failed `mark_ready` never records handoff or releases Claude keep-alive; skills must not claim success and must
+  diagnose/retry. Idempotent label success is valid handoff.
+- Every tool description and shipped monitor skill says reports arrive automatically and agents must never invent
+  sleeps, delayed/scheduled jobs, polling loops, repeated `gh pr checks`, or routine `status`/`flush` while waiting.
+- Claude's sole waiting exception is the exact `await-activity.mjs` event waiter issued by its keep-alive hook.
+  Pi/OMP end the turn and rely on native `sendMessage` wake-up.
+- Pi and OMP discover the same package skill exactly once.
 - Keep one release version across both npm artifacts and Claude metadata.
 - Keep watches in-memory and session-scoped; no daemon or persistent restoration.
 - Add `.pr-monitor.json` as the common config location while retaining existing host config fallbacks.
@@ -67,9 +74,11 @@ independently valid PR, update this plan and every unopened title before opening
 - [x] Plan validation passes: fixed slug, six exact ordered titles, and balanced Markdown fences.
 - [x] Every referenced current source path exists; future paths are explicitly assigned to implementation steps.
 - [x] `git diff --check` passes.
-- [x] Changed lines: 938, within the 1,000-line Step 1 target.
+- [x] Changed lines: 962, within the 1,000-line Step 1 target.
 - [x] TypeScript, host, and bundle suites not run: this step changes only plans and agent skills.
 - [x] Commit `17b1562` pushed and [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) opened with the exact Step 1 title.
+- [x] User clarification incorporated: preserve reliable Claude ready-label handoff, discover the Pi/OMP skill once,
+  and make autonomous notification/no-agent-delay behavior an explicit tested contract.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/
 platform matrix required by `PLAN.md`.

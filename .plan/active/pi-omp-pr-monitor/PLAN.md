@@ -39,17 +39,21 @@ a small, explicit integration rather than another copy of start/stop/config/time
 7. Pi loads project configuration only for a trusted project. OMP uses its documented always-trusted
    compatibility result. Both resolve the host config directory through `CONFIG_DIR_NAME`, never a hardcoded
    `.pi` or `.omp` branch.
-8. A package-owned `monitor-pr` skill teaches Pi and OMP to start monitoring after PR creation, address every
-   report, hand off with `mark_ready`, and take the PR back after later activity. It contains no Claude-only
-   spool or keep-alive instructions.
-9. `@sesori/pr-monitor-opencode` remains install-compatible, including its `.` and `./server` exports, while
-   `@sesori/pr-monitor-pi` is independently installable by Pi and OMP.
-10. Neither npm artifact depends on a separately published core package. The private core/runtime are bundled
+8. Pi and OMP each discover the same package-owned `monitor-pr` skill exactly once. It teaches the full ownership
+   loop without Claude-only spool/keep-alive instructions.
+9. Every shipped skill and tool description says that the monitor owns polling and reports arrive automatically.
+   Agents must never invent sleeps, delayed/scheduled jobs, polling loops, or routine `status`/`flush` calls while
+   waiting for CI/review. Claude may run only the exact event waiter supplied by its keep-alive hook; Pi/OMP end
+   the turn and let `sendMessage` wake them.
+10. A clean PR is handed off only after `mark_ready` confirms that GitHub accepted the label. Label failure never
+    records Claude handoff or releases keep-alive, and the skill requires diagnosis/retry rather than claiming ready.
+11. `@sesori/pr-monitor-opencode` remains install-compatible, including its `.` and `./server` exports, while
+    `@sesori/pr-monitor-pi` is independently installable by Pi and OMP.
+12. Neither npm artifact depends on a separately published core package. The private core/runtime are bundled
     into each artifact, so internal refactors cannot create package-version skew.
-11. The root is non-publishable and coordinates builds, tests, package inspection, and one lockstep product
+13. The root is non-publishable and coordinates builds, tests, package inspection, and one lockstep product
     version across both npm artifacts and the Claude Code manifest.
-12. Packed-artifact and real-host verification covers OpenCode, Claude Code, Pi, and OMP before this plan is
-    retired.
+14. Packed-artifact and real-host verification covers OpenCode, Claude Code, Pi, and OMP before retirement.
 
 ## Current Behavior And Evidence
 
@@ -157,7 +161,8 @@ know which host supplied a channel.
 The runtime returns structured start/ready results containing the target, config, initial snapshot, and factual
 base text. Adapters add only truthful host delivery/lifecycle wording. Claude's handed-off set and keep-alive
 state stay in `claude-code/`; the shared session exposes target presence and a status-line decoration seam rather
-than owning Claude policy.
+than owning Claude policy. The existing Claude invariant is locked: add the GitHub label first, record handoff only
+on success, and leave keep-alive armed on failure. Idempotent label addition remains success.
 
 `PrWatch` keeps only per-PR state and drops `sessionID`. No generic event bus, daemon, persistent registry, or
 cross-process coordinator is added.
@@ -192,6 +197,8 @@ denominator:
 
 Do not use OMP-only `pi.zod`, `ctx.setInterval`, jobs, daemon supervision, MCP, or hooks. Use ordinary timers only
 inside `MonitorSession`, and clear them synchronously from `session_shutdown`, which is supported by both hosts.
+The shared tool description must explicitly prohibit agent-created sleeps, scheduled checks, polling loops, and
+routine `status`/`flush`: reports are autonomous, and Pi/OMP should end the turn when no report needs work.
 
 The package declares both manifests:
 
@@ -336,7 +343,10 @@ because repository redirects and branding provide no implementation benefit to P
 - Adapt OpenCode and Claude Code to the runtime without changing their delivery, reload, handoff, keep-alive,
   shutdown, or config-fallback behavior.
 - Add runtime contract tests for duplicate starts, per-session isolation, timer cleanup, config/auth resolution,
-  actions, shutdown channel choice, and identity-safe removal. Preserve and extend existing core/OpenCode tests.
+  actions, shutdown channel choice, identity-safe removal, and label-before-handoff behavior. A failed label call
+  must keep Claude active; an idempotent success may hand off. Preserve and extend existing core/OpenCode tests.
+- Centralize host-neutral tool wording: polling/delivery are automatic, and agents must never create delay jobs or
+  polling loops. Preserve Claude's one narrow exception for the exact hook-issued event waiter.
 - Rebuild the committed Claude Code bundle.
 - Verify with `npm test`, `npm run typecheck`, `npm run build`, source-focused tests, and `git diff --check`.
 
@@ -366,7 +376,10 @@ because repository redirects and branding provide no implementation benefit to P
 - Add Pi and OMP manifests, upstream host peer dependencies, bundle/pack scripts, lockstep version checks, and CI
   loader validation against Pi `0.84.2` and OMP `18.0.3` plus the then-current releases.
 - Add fake-API contract tests for registration, every action, busy/idle delivery options, lifecycle cleanup,
-  config trust, skill discovery, delivery exceptions, and no duplicate timers after reload.
+  config trust, exactly-once skill discovery, autonomous-delivery/never-delay wording, delivery exceptions, and no
+  duplicate timers after reload.
+- Make the Pi/OMP skill say to end the turn while idle: never use `sleep`, delayed Bash, cron, a background job,
+  repeated `gh pr checks`, or routine `status`/`flush`. Require confirmed `mark_ready` success before handoff.
 - Add packed-plugin loader smoke tests that require no model call, then disposable live tests with a configured model
   for direct wake-up behavior.
 - Preserve OpenCode and Claude tests/build/pack checks in the same CI matrix.
@@ -375,7 +388,8 @@ because repository redirects and branding provide no implementation benefit to P
 
 - Add `docs/regression/README.md` with this repository's proof levels, boundaries, matrix/result vocabulary, and
   plan-retirement rule.
-- Add `docs/regression/pull-request-monitoring.md` for shared monitor semantics and per-host delivery/lifecycle.
+- Add `docs/regression/pull-request-monitoring.md` for shared monitor semantics, confirmed ready-label handoff,
+  autonomous notifications, the prohibition on agent-created waits/polling, and per-host delivery/lifecycle.
 - Add `docs/regression/plugin-installation.md` for npm/Claude distributions, package contents, loader compatibility,
   and lockstep release metadata.
 - Update root and target READMEs, `AGENTS.md`, and `CHANGELOG.md` with the final architecture, installation commands,
@@ -405,11 +419,11 @@ monitor; it does not require unrelated product checks.
 | Area | Required evidence | Boundary and matrix |
 |---|---|---|
 | Core watch semantics | debounce, CI hold, instant failure/conflict/terminal delivery, baseline rollback, comment/thread identity, terminal stop | L2 automated; Node 22 on Linux, macOS, and Windows |
-| Shared monitor session | action validation, duplicate-start race, session isolation, timer ownership, label actions, config/auth failures, normal/persistent shutdown channels | L3 automated adapter contract; all four adapters represented |
+| Shared monitor session | action validation, duplicate-start race, session isolation, timer ownership, idempotent label success, label-failure-without-handoff, config/auth failures, normal/persistent shutdown channels | L3 automated adapter contract; all four adapters represented |
 | OpenCode artifact | packed install, `.` and `./server` import, tool registration, initial delivery, model/agent preservation, session deletion, reload/shutdown notice | L3 actual OpenCode loader on Linux and macOS; automated Windows package import |
 | Claude Code plugin | clean committed bundle, MCP tool start/status/stop/labels, spool injection, handoff/keep-alive, shutdown notice, no subagent drain | L3 automated MCP/hooks plus one live Claude Code session on a release host |
-| Pi package | npm tarball install, manifest skill/extension discovery, trusted/default config, start/status/flush/labels/stop, busy steer and idle wake, reload/new/quit cleanup | L4 actual Pi minimum and current loaders; Linux and macOS, Windows loader smoke |
-| OMP package | npm tarball install through `omp` manifest, upstream-import rewrite, skill discovery, same action/report behavior, lifecycle cleanup | L4 actual OMP minimum and current loaders; Linux and macOS, Windows loader smoke |
+| Pi package | tarball install, exactly-once skill/extension discovery, trusted/default config, every action, anti-delay wording, busy steer/idle wake, lifecycle cleanup | L4 actual Pi minimum/current loaders; Linux/macOS, Windows loader smoke |
+| OMP package | tarball install through `omp`, import rewrite, exactly-once shared skill, anti-delay wording, same action/report behavior and cleanup | L4 actual OMP minimum/current loaders; Linux/macOS, Windows loader smoke |
 | Cross-host GitHub flow | one real open PR produces initial status, ordinary comment/review aggregation, failing-CI or conflict urgency where safely reproducible, ready-label handoff and withdrawal, and terminal stop | L5 packaged/external; authenticated `gh`, Pi and OMP live, representative OpenCode/Claude regression |
 | Release contents | no private core package dependency, only declared files, host peers external, versions equal, Claude bundle reproducible, install docs match artifacts | L5 packaged; both npm tarballs plus Claude Git plugin root |
 
@@ -419,8 +433,9 @@ host configuration files.
 
 ## Risks And Mitigations
 
-- **Shared-runtime regression:** OpenCode and Claude have mature lifecycle edge cases. Step 2 first captures them in
-  runtime/adapter tests and keeps delivery-specific state outside the extraction.
+- **Shared-runtime regression:** OpenCode and Claude have mature lifecycle edge cases. Step 2 captures them in
+  runtime/adapter tests, including Claude's proven label-before-handoff ordering, and keeps delivery policy outside
+  the extraction.
 - **OpenCode packaging change:** bundling replaces source execution in the npm artifact. Step 3 preserves the sole
   export and tests both supported entry points from the packed tarball before Pi work builds on it.
 - **OMP compatibility drift:** author only against the upstream Pi common denominator, keep OMP-specific behavior to
