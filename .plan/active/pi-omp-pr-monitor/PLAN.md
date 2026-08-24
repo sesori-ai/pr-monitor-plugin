@@ -345,7 +345,7 @@ because repository redirects and branding provide no implementation benefit to P
 | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan, skill copy, and regression baseline | 1,150 |
 | 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,100 |
 | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 |
-| 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 3,300 |
+| 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 3,350 |
 | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 |
 | 6/6 | `⚙️ [pi-omp-pr-monitor] test: verify Pi and OMP and retire the plan [step 6/6]` | Moderate packaged, live-host, and external verification | 700 |
 
@@ -403,7 +403,7 @@ because repository redirects and branding provide no implementation benefit to P
 
 ### Step 4/6: Add the Pi and OMP adapter
 
-- The approximately 3,300-line review diff exceeds the 1,500-line soft cap because adding the pinned Pi floor to
+- The approximately 3,350-line review diff exceeds the 1,500-line soft cap because adding the pinned Pi floor to
   the workspace generates roughly 1,845 package-lock lines; non-lockfile changes remain near 1,400 lines. The Pi
   package, two real-loader contracts, OpenCode/Pi/OMP skill injection requested during execution, and their shared
   packaging checks must land atomically so no merged artifact advertises an entry or skill it does not ship.
