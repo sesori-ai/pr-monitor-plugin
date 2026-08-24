@@ -27,9 +27,11 @@ runtime/             # Host-neutral application/session layer.
   node-gh.ts         # child_process gh runner shared by Node-based adapters.
   tool.ts            # Shared action enum and autonomous-delivery/no-delay tool wording.
 
-opencode/            # OpenCode adapter. Executed from source.
-  index.ts     # Sole export PrMonitorPlugin (loader invokes EVERY export — keep it the only one).
+opencode/            # OpenCode source plus publishable npm workspace.
+  index.ts     # Sole source export PrMonitorPlugin (loader invokes EVERY export — keep it the only one).
   gh.ts        # OpenCode's injected Bun-shell GhRunner.
+  package.json # @sesori/pr-monitor-opencode; exports the generated dist/index.js bundle.
+  dist/        # Ephemeral JS bundle + sole-export declaration, ignored; never commit.
 
 claude-code/         # Claude Code shell. THIS DIRECTORY IS THE PLUGIN ROOT (= ${CLAUDE_PLUGIN_ROOT}).
   src/               # Bundled; never executed from source.
@@ -94,7 +96,7 @@ where the plugin root sits in the repo.
 
 ## Building / releasing
 
-- `npm run typecheck` covers `core/`, `runtime/`, `opencode/`, `claude-code/src/`, and `test/`. `npm run build` bundles `claude-code/src/mcp-server.ts` → `claude-code/dist/mcp-server.mjs` (esbuild, ESM, node18 target, createRequire banner for CJS deps). **`claude-code/dist/` is committed** — Claude Code plugin installs copy files and run no build, so rebuild + commit whenever `claude-code/src/`, `runtime/`, or `core/` changes. The bundle is marked `linguist-generated` in `.gitattributes` so it collapses in GitHub diffs; review the sources, not the bundle.
+- The root is a private npm workspace coordinator. `npm run build` produces ephemeral `opencode/dist/index.js` with private core/runtime bundled and rebuilds committed `claude-code/dist/mcp-server.mjs`. OpenCode leaves `@opencode-ai/plugin` external. Claude plugin installs run no build, so rebuild + commit its bundle whenever `claude-code/src/`, `runtime/`, or `core/` changes; never commit OpenCode dist.
 - `claude-code/hooks/drain-spool.mjs` and `claude-code/hooks/await-activity.mjs` must stay dependency-free (node builtins only) and keep their path/format schemes in sync with `claude-code/src/spool.ts` and `claude-code/src/session-state.ts`. They are shipped as source, not bundled — only `claude-code/src/` goes through esbuild.
 - `claude-code/skills/monitor-pr/SKILL.md` ships with the Claude Code plugin (discovered by convention, like `commands/`). It is the *behavior* layer: changing what the loop does usually means editing it, not the TypeScript. opencode does not load plugin-shipped skills — the equivalent there lives in the consuming repo's `.opencode/skills/`.
-- A release uses one version for both targets. The root package publishes the OpenCode target as public npm package `@sesori/pr-monitor-opencode` (the transitional source allowlist ships `core/` + `runtime/` + `opencode/`), while an annotated `vX.Y.Z` Git tag releases the Claude Code target. Before releasing: update `package.json`, `package-lock.json`, `claude-code/.claude-plugin/plugin.json`, and `CHANGELOG.md`; run `npm test`, `npm run typecheck`, `npm run build`, and `npm run pack:check`; commit the rebuilt bundle; then, from a clean release commit on `main`, run `npm publish`, create the local tag, and push the tag only after publication succeeds.
+- One version spans `opencode/package.json` and the Claude manifest (`npm run version:check`). `npm run pack:check` creates the OpenCode tarball in a temporary directory, enforces exact contents, installs it, and imports both exports. Release from a clean commit with `npm publish --workspace @sesori/pr-monitor-opencode`; only after npm succeeds create/push the annotated Claude release tag.

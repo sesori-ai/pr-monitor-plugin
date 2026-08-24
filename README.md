@@ -160,10 +160,12 @@ Optional, per project: use `.pr-monitor.json` for both hosts. Without it, Claude
 
 ```sh
 npm install
-npm test            # core, shared runtime, and adapter regression tests
-npm run typecheck   # core + runtime + both adapters
-npm run build       # bundle the Claude Code MCP server to claude-code/dist/mcp-server.mjs
-npm run pack:check  # inspect the OpenCode npm package without creating a tarball
+npm test             # core, shared runtime, and adapter regression tests
+npm run typecheck    # core + runtime + both adapters
+npm run build        # OpenCode publish bundle + committed Claude MCP bundle
+npm run version:check
+npm run pack:check   # pack/install/import both OpenCode exports in a temporary consumer
+npm run clean        # remove ephemeral OpenCode build output
 ```
 
 Layout — one directory per target, plus shared core/runtime layers:
@@ -176,17 +178,18 @@ claude-code/     Claude Code shell — this directory is the plugin root (${CLAU
 .claude-plugin/  marketplace.json, which stays at the repo root and points at ./claude-code
 ```
 
-Dependency flows adapter → `runtime/` → `core/`; core imports no host SDK and runtime owns common session orchestration. OpenCode executes TypeScript directly, and its loader invokes every export of the entry module as a plugin, so `PrMonitorPlugin` must remain the sole export of `opencode/index.ts`. The transitional `@sesori/pr-monitor-opencode` source artifact allowlists `core/`, `runtime/`, and `opencode/`; it does not contain the Claude Code distribution. The Claude Code shell is bundled with esbuild into the committed `claude-code/dist/mcp-server.mjs`, since plugin installs run no build step; `claude-code/hooks/drain-spool.mjs` is the dependency-free hook that injects spooled reports and runs the keep-alive loop, and `claude-code/hooks/await-activity.mjs` is the blocking waiter it hands to the session; `claude-code/skills/monitor-pr/` is the behavior — when to start a monitor, what to do with each report, when to hand off; `claude-code/.mcp.json` declares the MCP server (plugin-root convention — an inline `mcpServers` field in plugin.json is not picked up).
+Dependency flows adapter → `runtime/` → `core/`; core imports no host SDK and runtime owns common session orchestration. The root is a private npm workspace coordinator. OpenCode source stays in `opencode/`, but publication bundles it with private core/runtime into `opencode/dist/index.js`; both `.` and `./server` resolve to that sole-export bundle. Its tarball contains only the bundle and declaration, target README/license, and manifest; generated OpenCode output stays uncommitted. The Claude Code shell is bundled with esbuild into the committed `claude-code/dist/mcp-server.mjs`, since Git plugin installs run no build step; `claude-code/hooks/drain-spool.mjs` is the dependency-free hook that injects spooled reports and runs the keep-alive loop, and `claude-code/hooks/await-activity.mjs` is the blocking waiter it hands to the session; `claude-code/skills/monitor-pr/` is the behavior — when to start a monitor, what to do with each report, when to hand off; `claude-code/.mcp.json` declares the MCP server (plugin-root convention — an inline `mcpServers` field in plugin.json is not picked up).
 
 ## Releasing
 
-A release uses one version for both targets: the annotated `vX.Y.Z` Git tag releases the Claude Code plugin, and the root package publishes the OpenCode target as `@sesori/pr-monitor-opencode`. There is no separate GitHub Release step. Update `package.json`, `package-lock.json`, `claude-code/.claude-plugin/plugin.json`, and `CHANGELOG.md`, then run:
+A release uses one version for both targets: the annotated `vX.Y.Z` Git tag releases the Claude Code plugin, and the `opencode/` workspace publishes `@sesori/pr-monitor-opencode`. The private root cannot be published accidentally. There is no separate GitHub Release step. Update `opencode/package.json`, `package-lock.json`, `claude-code/.claude-plugin/plugin.json`, and `CHANGELOG.md`, then run:
 
 ```sh
 npm ci
 npm test
 npm run typecheck
 npm run build
+npm run version:check
 npm run pack:check
 git diff --exit-code -- claude-code/dist/mcp-server.mjs
 ```
@@ -195,7 +198,7 @@ Commit any rebuilt bundle and the release metadata. From the clean release commi
 
 ```sh
 git push origin main
-npm publish
+npm publish --workspace @sesori/pr-monitor-opencode
 git tag -a vX.Y.Z -m "vX.Y.Z — summary"
 git push origin vX.Y.Z
 ```

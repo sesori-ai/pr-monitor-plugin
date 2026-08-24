@@ -3,7 +3,7 @@
 ## Status
 
 - **Plan slug:** `pi-omp-pr-monitor`
-- **Status:** Step 2/6, shared runtime implementation
+- **Status:** Step 2/6 merged; Step 3/6 packaging open in PR #12
 - **Plan date:** 2026-08-23
 - **Implementation base:** `origin/main` at `af612132995aac6e48b52c7c35dd3d133d08ce82`
 - **Host research baselines:** Pi `0.84.2`, OMP `18.0.3`, OpenCode `>=1.17.0`, and Claude Code plugin
@@ -40,9 +40,10 @@ a small, explicit integration rather than another copy of start/stop/config/time
 7. Pi loads project configuration only for a trusted project. OMP uses its documented always-trusted
    compatibility result. Both resolve the host config directory through `CONFIG_DIR_NAME`, never a hardcoded
    `.pi` or `.omp` branch.
-8. Pi and OMP each discover the same package-owned `monitor-pr` skill exactly once. It teaches the full ownership
-   loop without Claude-only spool/keep-alive instructions.
-9. Every shipped skill and tool description says that the monitor owns polling and reports arrive automatically.
+8. OpenCode, Pi, and OMP each discover the same package-owned `monitor-pr` skill exactly once, without requiring
+   a consuming repository to install its own copy. Claude Code continues discovering its host-specific skill once.
+   The push-host skill teaches the full ownership loop without Claude-only spool/keep-alive instructions.
+9. Every injected skill and tool description says that the monitor owns polling and reports arrive automatically.
    Agents must never invent sleeps, delayed/scheduled jobs, polling loops, or routine `status`/`flush` calls while
    waiting for CI/review. Claude may run only the exact event waiter supplied by its keep-alive hook; Pi/OMP end
    the turn and let `sendMessage` wake them.
@@ -117,8 +118,9 @@ Keep one repository. Split source and release concerns inside it rather than spl
 ```text
 core/                  pure per-PR domain/state machine
 runtime/               host-neutral session orchestration and Node gh runner
+skills/                canonical monitor-pr skill for push-capable OpenCode/Pi/OMP hosts
 opencode/              OpenCode source plus @sesori/pr-monitor-opencode package metadata
-pi/                    shared implementation, thin Pi/OMP entries, skill, and npm package metadata
+pi/                    shared implementation, thin Pi/OMP entries, and npm package metadata
 claude-code/           Claude Code plugin root, MCP source, hooks, commands, skill, committed bundle
 scripts/               workspace build, package-content, and version checks
 ```
@@ -186,6 +188,21 @@ Pi checks `ctx.isProjectTrusted()` before considering project-local paths. An un
 never reads a local monitor config. OMP's compatibility implementation returns true because OMP already loads
 project resources without Pi's trust gate.
 
+### Cross-harness skill injection
+
+Keep the existing Claude Code skill host-specific because its hook-issued keep-alive waiter is unique to that
+adapter. Add one canonical push-host skill under `skills/monitor-pr/SKILL.md` for OpenCode, Pi, and OMP. It tells
+agents to start monitoring immediately, handle every autonomous report, confirm the ready label before handoff,
+and end the turn rather than inventing waits.
+
+OpenCode `>=1.17.0` exposes configured skill paths but no plugin resource-discovery hook. Its config hook therefore
+adds the packaged skill directory to `config.skills.paths` idempotently. Pi discovers the generated package copy
+through `package.json#pi.skills`; OMP's thin entry contributes that same directory through `resources_discover`
+because its plugin manifest does not load skill resources. Build scripts copy the canonical file into each npm
+package, pack checks require it, and adapter tests prove one path/skill per host even across repeated config or
+resource discovery. Do not use system-prompt duplication or require a consuming repository's `.opencode/skills`,
+`.pi/skills`, or `.agents/skills` setup.
+
 ### Pi-family adapter and lifecycle seam
 
 Keep tool, delivery, config, and monitor ownership in one shared Pi-family implementation. `pi/index.ts` is the
@@ -230,7 +247,7 @@ manifest. Each loader sees it exactly once.
 - Bundle OpenCode to ESM while leaving `@opencode-ai/plugin` external and declared as its runtime dependency.
 - Bundle Pi/OMP to ESM while leaving Pi host packages and TypeBox external as peer dependencies, per Pi package
   guidance. OMP resolves those peers through its compatibility loader.
-- Keep only target bundle, target README, license, and required skill files in each npm tarball.
+- Keep only target bundle, target README, license, and required generated skill files in each npm tarball.
 - Do not commit OpenCode/Pi npm bundles; build and inspect them during test/prepack. Continue committing only the
   Claude Code bundle because Git plugin installs run no build step.
 - Preserve `@sesori/pr-monitor-opencode` and its `.`/`./server` exports. Add
@@ -376,8 +393,8 @@ because repository redirects and branding provide no implementation benefit to P
 - Convert the root package to a private workspace coordinator.
 - Move the existing OpenCode npm metadata into `opencode/package.json`; preserve package name, runtime dependency,
   engine floor, exports, and public metadata.
-- Add publish-time ESM bundling for OpenCode, target README/license contents, tarball allowlisting, and an artifact
-  import check for both `.` and `./server`.
+- Add publish-time ESM bundling and a generated sole-export declaration for OpenCode, target README/license
+  contents, tarball allowlisting, and artifact checks for typed `.`/`./server` imports plus `./package.json`.
 - Add root scripts for all builds, tests, per-target pack inspection, version equality, and clean generated output.
 - Keep Claude Code's marketplace root and committed plugin bundle arrangement intact.
 - Add CI on supported Node platforms for tests, typecheck, build reproducibility, and OpenCode pack inspection.
@@ -386,19 +403,20 @@ because repository redirects and branding provide no implementation benefit to P
 
 ### Step 4/6: Add the Pi and OMP adapter
 
-- Add the shared Pi-family implementation, upstream `pi/index.ts`, thin `pi/omp.ts`, package metadata, target
-  README/license, and `pi/skills/monitor-pr/SKILL.md`.
+- Add the canonical push-host `skills/monitor-pr/SKILL.md`, shared Pi-family implementation, upstream
+  `pi/index.ts`, thin `pi/omp.ts`, package metadata, and target README/license.
 - Register the complete `pr_monitor` action surface and delegate both entries to one session-owned
   `MonitorSession` implementation.
 - Deliver normal, urgent, initial, terminal, and stop reports as visible `pr-monitor` custom messages with steering
   delivery and idle turn triggering.
 - Start no timers during factory evaluation. Upstream Pi clears them on post-success `session_shutdown`; OMP clears
   them on post-success `session_switch` and process `session_shutdown`. Do not clear on cancelable before-events.
-- Apply project trust and config-path rules, and expose the skill once in each host.
+- Apply project trust and config-path rules. Inject the packaged push-host skill once through OpenCode
+  `config.skills.paths`, Pi's package manifest, and OMP `resources_discover`; preserve Claude's one conventional skill.
 - Add Pi and OMP manifests, upstream host peer dependencies, bundle/pack scripts, lockstep version checks, and CI
   loader validation against Pi `0.84.2` and OMP `18.0.3` plus the then-current releases.
 - Add fake-API contract tests for registration, every action, busy/idle delivery options, config trust,
-  exactly-once skill discovery, autonomous-delivery wording, and delivery exceptions. Independently test successful
+  exactly-once skill discovery in OpenCode/Pi/OMP, autonomous-delivery wording, and delivery exceptions. Independently test successful
   new/resume/fork/reload/quit cleanup in both lifecycle models, canceled transitions, idempotence, and no old-session
   report delivery or duplicate timers after replacement.
 - Make the Pi/OMP skill say to end the turn while idle: never use `sleep`, delayed Bash, cron, a background job,
@@ -444,8 +462,8 @@ monitor; it does not require unrelated product checks.
 |---|---|---|
 | Core watch semantics | debounce, CI hold, instant failure/conflict/terminal delivery, baseline rollback, comment/thread identity, terminal stop | L2 automated; Node 22 on Linux, macOS, and Windows |
 | Shared monitor session | action validation, duplicate-start race, session isolation, timer ownership, idempotent label success, label-failure-without-handoff, config/auth failures, normal/persistent shutdown channels | L3 automated adapter contract; all four adapters represented |
-| OpenCode artifact | packed install, `.` and `./server` import, tool registration, initial delivery, model/agent preservation, session deletion, reload/shutdown notice | L3 actual OpenCode loader on Linux and macOS; automated Windows package import |
-| Claude Code plugin | clean committed bundle, MCP tool start/status/stop/labels, spool injection, handoff/keep-alive, shutdown notice, no subagent drain | L3 automated MCP/hooks plus one live Claude Code session on a release host |
+| OpenCode artifact | packed install, `.` and `./server` import, exactly-once packaged skill injection, tool registration, initial delivery, model/agent preservation, session deletion, reload/shutdown notice | L3 actual OpenCode loader on Linux and macOS; automated Windows package import |
+| Claude Code plugin | clean committed bundle, exactly-once conventional skill, MCP tool start/status/stop/labels, spool injection, handoff/keep-alive, shutdown notice, no subagent drain | L3 automated MCP/hooks plus one live Claude Code session on a release host |
 | Pi package | tarball install, exactly-once discovery, config/actions, anti-delay wording, busy/idle delivery, post-success shutdown/rebind and canceled-transition retention | L4 actual Pi minimum/current loaders; Linux/macOS, Windows loader smoke |
 | OMP package | tarball install, import rewrite, exactly-once skill, same behavior, post-success switch cleanup, canceled-transition retention, no cross-session reports | L4 actual OMP minimum/current loaders; Linux/macOS, Windows loader smoke |
 | Cross-host GitHub flow | one real open PR produces initial status, ordinary comment/review aggregation, failing-CI or conflict urgency where safely reproducible, ready-label handoff and withdrawal, and terminal stop | L5 packaged/external; authenticated `gh`, Pi and OMP live, representative OpenCode/Claude regression |

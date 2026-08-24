@@ -1,0 +1,59 @@
+{
+  "name": "@sesori/pr-monitor-opencode",
+  "version": "0.3.0",
+  "description": "OpenCode plugin that watches GitHub PRs and delivers factual status reports into the owning session",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sesori-ai/opencode-pr-monitor.git"
+  },
+  "homepage": "https://github.com/sesori-ai/opencode-pr-monitor#readme",
+  "bugs": {
+    "url": "https://github.com/sesori-ai/opencode-pr-monitor/issues"
+  },
+  "author": {
+    "name": "Sesori",
+    "url": "https://github.com/sesori-ai"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "github",
+    "pull-request",
+    "monitor"
+  ],
+  "engines": {
+    "opencode": ">=1.17.0"
+  },
+  "scripts": {
+    "build": "node ../scripts/build-opencode.mjs",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm --prefix .. run release:check"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.4.9"
+  }
+}

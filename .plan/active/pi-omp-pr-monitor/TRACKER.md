@@ -3,11 +3,11 @@
 ## Current State
 
 - **Plan slug:** `pi-omp-pr-monitor`
-- **Plan status:** Step 2/6 open for review
-- **Current branch:** `pi-omp-pr-monitor-step-2`
-- **Current PR:** [#11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11)
+- **Plan status:** Step 2/6 merged; Step 3/6 open for review
+- **Current branch:** `pi-omp-pr-monitor-step-3`
+- **Current PR:** Step 3 [#12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12)
 - **Implementation started:** yes
-- **Next action:** address Step 2 review/monitor reports and merge; then advance Step 3 packaging
+- **Next action:** address Step 3 review reports while implementing Step 4 locally, including all-harness skill injection
 - **Retirement:** blocked until every required row in `PLAN.md` passes
 
 ## Fixed Delivery Sequence
@@ -15,8 +15,8 @@
 | Done | Step | Exact PR title | Complexity | Soft line target | State |
 |---|---|---|---|---:|---|
 | [x] | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan, exact skill copy, and regression baseline | 1,150 | [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) merged |
-| [ ] | 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,100 | [PR #11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11) open |
-| [ ] | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 | Pending Step 2 |
+| [x] | 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,100 | [PR #11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11) merged |
+| [ ] | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 | [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12) open |
 | [ ] | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 1,500 | Pending Step 3 |
 | [ ] | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 | Pending Step 4 |
 | [ ] | 6/6 | `⚙️ [pi-omp-pr-monitor] test: verify Pi and OMP and retire the plan [step 6/6]` | Moderate packaged, live-host, and external verification | 700 | Pending Step 5 |
@@ -43,7 +43,8 @@ resumes only after its repair passes. Do not silently exceed the 1,500-line soft
   sleeps, delayed/scheduled jobs, polling loops, repeated `gh pr checks`, or routine `status`/`flush` while waiting.
 - Claude's sole waiting exception is the exact `await-activity.mjs` event waiter issued by its keep-alive hook.
   Pi/OMP end the turn and rely on native `sendMessage` wake-up.
-- Pi and OMP discover the same package skill exactly once.
+- OpenCode, Pi, and OMP discover the same package-owned push-host skill exactly once; Claude retains its one
+  host-specific conventional skill.
 - Keep one release version across both npm artifacts and Claude metadata.
 - Keep watches in-memory and session-scoped; no daemon or persistent restoration.
 - Add `.pr-monitor.json` as the common config location while retaining existing host config fallbacks.
@@ -82,6 +83,19 @@ both shipping adapters, transitional package allowlist, and tests form one atomi
 adapter or package would leave a merged revision duplicated or unpublishable. Complexity is reassessed from ⚙️ to 🚧
 because the implementation moves concurrency and lifecycle ownership.
 
+## Step 3 Checklist
+
+- [x] Convert the root to private workspace coordinator version `0.0.0`.
+- [x] Move OpenCode product metadata/dependency/version into `opencode/package.json`.
+- [x] Bundle private core/runtime into ephemeral ESM while externalizing `@opencode-ai/plugin`.
+- [x] Preserve `.` and `./server`, add target README/license, and enforce exact tarball contents.
+- [x] Install the packed artifact in a temporary consumer and import both exports with sole `PrMonitorPlugin`.
+- [x] Add clean/build/version/release scripts and verify OpenCode/Claude/lock/MCP versions agree.
+- [x] Preserve the committed Claude plugin root/bundle and add Linux/macOS/Windows Node 22 CI.
+- [x] Update development/release/architecture docs and regenerate the workspace lockfile.
+- [x] Complete a clean `npm ci`, release checks, prepack check, actionlint, line-width, and diff checks.
+- [x] Rebase onto merged Step 2, push, and open [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12).
+
 ## Review Log
 
 | Date | Review | Result |
@@ -100,6 +114,15 @@ because the implementation moves concurrency and lifecycle ownership.
 | 2026-08-24 | Cubic: in-flight start after cleanup | Accepted: lifecycle generation invalidates starts crossing `stopAll`; dedicated timer/map test added. |
 | 2026-08-24 | Cubic: unconditional CI/label wording | Accepted: tool text names `flushOnCiFailure` and the configured ready label; assertions added. |
 | 2026-08-24 | Cubic/Codex: case-variant Claude handoff | Accepted: ready events use the watched target identity and Claude stores normalized registry keys; the handoff test marks and unmarks through variant casing. |
+| 2026-08-24 | User: inject the monitor skill for every harness | Accepted for Step 4: one canonical push-host skill is packaged/discovered once by OpenCode, Pi, and OMP; Claude keeps its waiter-specific skill. |
+| 2026-08-24 | Codex/Cubic: Windows cannot execute `npm.cmd` directly | Accepted: pack checks now invoke `npm_execpath` through `process.execPath`, avoiding shell-dependent command shims. |
+| 2026-08-24 | Cubic: optional Pi manifest catch hides read failures | Accepted: only an `ENOENT` remains optional; every other read failure is rethrown. |
+| 2026-08-24 | Cubic: bundled OpenCode artifact lost declarations/metadata export | Accepted: build emits the sole-export declaration, both entries carry type conditions, and `./package.json` is exported and smoke-tested. |
+| 2026-08-24 | Cubic: CI jobs retain GitHub's six-hour timeout | Accepted: each matrix job now has a 20-minute limit. |
+| 2026-08-24 | Main advanced through release PR #13 during review | Merged (not rebased): preserve the private workspace while carrying product version `0.3.0`, Claude source/bundle, changelog, and release docs forward. |
+| 2026-08-24 | Cubic: hand-written declaration can drift | Accepted: build now runs TypeScript declaration emit and copies the compiler output; consumer assignments assert both entries are `Plugin`. |
+| 2026-08-24 | Codex: workspace changelog entry became retroactive | Accepted: the unshipped Step 3 packaging change moved back under `Unreleased`; released Step 2 behavior remains under `0.3.0`. |
+| 2026-08-24 | Cubic: declaration temp directory can leak | Accepted: existing `dist` cleanup now runs inside the declaration directory's `try/finally`. |
 
 ## Verification Log
 
@@ -129,6 +152,17 @@ because the implementation moves concurrency and lifecycle ownership.
 - [x] Packed OpenCode entry imports with sole export `PrMonitorPlugin`; Claude bundle starts and shuts down over stdio.
 - [x] Core/runtime host-import scans, rewritten-source 120-column check, and `git diff --check` pass.
 - [x] Diff: 2,028 textual changed lines including review fixes, within the recorded 2,100-line target.
+
+### Step 3/6
+
+- [x] Clean `npm ci`; `npm test` (24/24); `npm run typecheck`; `npm run build`.
+- [x] `npm run version:check` — OpenCode, Claude manifest, lockfile, and MCP source all `0.3.0` after merging release PR #13.
+- [x] `npm run pack:check` — exact five-file tarball; temporary install; typed `.`/`./server` imports and package metadata export.
+- [x] `npm run release:check`; workspace prepack rebuild; OpenCode clean/build cycle.
+- [x] Claude committed bundle unchanged; root/target licenses byte-identical; `actionlint` and `git diff --check` pass.
+- [x] Linux, macOS, and Windows CI pass after the shell-independent npm fix.
+- [x] Review-fixed diff: 601 textual changed lines including PR/plan bookkeeping, within the 1,200-line target.
+- [x] Commit `38122df` pushed and [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12) opened with the exact Step 3 title.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/
 platform matrix required by `PLAN.md`.

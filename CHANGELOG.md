@@ -7,13 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The root is now a private npm workspace coordinator. `@sesori/pr-monitor-opencode` publishes from `opencode/` as an ESM bundle containing private core/runtime code, with exact tarball/install/import and lockstep-version checks.
+
 ## [0.3.0]
 
 ### Changed
 
 - OpenCode and Claude Code now share one session runtime for watch ownership, timers, GitHub identity, actions, labels, and shutdown channels; host adapters retain only delivery and lifecycle policy.
 - Repository `.pr-monitor.json` is now the preferred shared config path. Tool/skill guidance makes autonomous delivery explicit and forbids agent-created delays or CI polling; Claude handoff is recorded only after `mark_ready` confirms label success.
-
 ## [0.2.1]
 
 ### Added
