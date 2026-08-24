@@ -23,7 +23,8 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   Newly definite merge conflict, merge, and close are always urgent. Instant CI failure is limited to one delivery
   per head commit; the concluded suite can report later.
 - Reviews, issue comments, thread resolution, and visible review-thread follow-ups count as activity. Stable comment
-  IDs preserve same-second follow-ups, and ignored tagged self-comments do not alter visible signatures.
+  IDs preserve same-second follow-ups, and ignored tagged self-comments inside fetched windows do not alter visible
+  signatures.
 - Reports contain state, counts, authors, labels, and check names, never comment bodies or advice. Delivery failure
   restores the prior baseline and urgency. Ten consecutive poll failures stop with a notice; ten consecutive
   delivery failures stop after logging because the failed delivery channel cannot reliably carry a notice.
@@ -98,8 +99,9 @@ All hosts prefer repository `.pr-monitor.json`. Remaining candidates are evaluat
 - Trusted Pi and OMP: `${CONFIG_DIR_NAME}/pr-monitor.json`, then `.opencode/pr-monitor.json`.
 - Untrusted Pi: defaults only; no project-local monitor file is read.
 
-Config for `start`, `mark_ready`, and `unmark_ready` is loaded from that action's current cwd/trust context; creating
-the session runtime with an earlier `status` call must not pin a different project. An active watch keeps the config
+Pi and OMP select config candidates from each `start`, `mark_ready`, and `unmark_ready` action's current cwd/trust
+context; creating the session runtime with an earlier `status` call must not pin a different project. OpenCode and
+Claude reread their adapter-lifetime project/worktree candidates for each action. An active watch keeps the config
 captured when it started. Loading is permissive: first readable valid JSON wins, unknown keys and invalid values fall
 back independently, and invalid JSON is logged before the next candidate/defaults are used.
 
@@ -108,9 +110,9 @@ back independently, and invalid JSON is logged before the next candidate/default
 - **L1 Smoke:** Core/runtime and every adapter load; one tool and one skill are visible per host; a fake open PR can
   start, report, and stop.
 - **L2 Routine:** Automated activity, debounce/hold/urgency, report baselines, retry rollback, action validation,
-  labels, races, and timer cleanup.
-- **L3 Release:** Packed OpenCode plus bundled Claude adapter contracts: owning-session delivery, reload/process
-  lifecycle, spool/hook injection, and handoff.
+  labels, races, and timer cleanup on Node 22 across Linux, macOS, and Windows.
+- **L3 Release:** Shared-session adapter contracts represent OpenCode, Claude, Pi, and OMP. Packed OpenCode plus
+  bundled Claude checks cover owning-session delivery, reload/process lifecycle, spool/hook injection, and handoff.
 - **L4 Extended:** Actual minimum and current Pi/OMP loaders, busy/idle steering, trust/config paths, successful and
   canceled transitions, and required OS rows.
 - **L5 Full:** Packaged hosts against an authenticated disposable GitHub PR: initial/ordinary/urgent/terminal
@@ -141,6 +143,8 @@ GitHub mutation failure, already-labeled PR, missing label removal, plain issue,
 - Watches and handoff state are in memory and are not restored after a host process restart.
 - A bare head-SHA push is not activity. A later CI conclusion, review/comment, conflict, or terminal change reports;
   a CI-less push without another visible event does not wake a handed-off session.
+- Issue-comment details are limited to GitHub's latest 100 comments. Once more than 100 ignored tagged issue comments
+  exist, older ignored comments cannot be subtracted from the repository-wide total and may cause false activity.
 - GitHub CLI authentication, GitHub GraphQL/REST behavior, rate limits, and external CI timing cannot be proved by
   fakes; those claims remain partial unless their L5 rows run.
 - Claude delivery is necessarily spool/hook based. Desktop notifications and the supported live Claude matrix are

@@ -171,6 +171,11 @@ incomplete host contract.
 | 2026-08-24 | Codex: skills promise CI-less push reports | Accepted: both skills now promise takeback only for reportable comments/review changes, not a bare head push. |
 | 2026-08-24 | Step 5 implementation review applicability | Not run: documentation-only reconciliation changes no production architecture; source and artifact contracts are reviewed directly. |
 | 2026-08-24 | Codex: three regression requirements exceed implementation | Accepted: urgent CI is conditional on `flushOnCiFailure`; a failed delivery channel logs rather than carries its own terminal notice; interrupting one Claude waiter does not disarm keep-alive. |
+| 2026-08-24 | Codex: per-invocation config stated for every host | Accepted: Pi/OMP select from each action context; OpenCode/Claude reread fixed adapter-lifetime candidates. |
+| 2026-08-24 | Codex: regression levels omit required matrices | Accepted: L2 now fixes Node 22 across three OSes and L3 represents all four adapters. |
+| 2026-08-24 | Codex: ignored issue comments exceed fetched window | Accepted as a documented boundary: older ignored comments beyond the latest 100 can create false activity. |
+| 2026-08-24 | Codex: Claude artifact lacks an exact manifest | Accepted: the catalog enumerates every tracked file in the Git plugin root. |
+| 2026-08-24 | Codex: release order can precede required host rows | Accepted: publication now requires every minimum/current/live-host matrix row to be `Pass`. |
 
 ## Verification Log
 
@@ -235,7 +240,7 @@ incomplete host contract.
 - [x] Feature index, local Markdown references, heading hierarchy, and code fences validate across 10 changed files.
 - [x] Monitoring and installation claims cross-checked against final adapters, manifests, package checks, and tests.
 - [x] Changed prose satisfies the 120-column limit and `git diff --check` passes.
-- [x] Diff: 463 textual changed lines within the 700-line target.
+- [x] Diff: 493 textual changed lines within the 700-line target.
 - [x] TypeScript/build suites not run: Step 5 changes documentation only; Step 4 verification remains unchanged.
 - [x] Implementation commit `3f09065` pushed and [PR #15](https://github.com/sesori-ai/opencode-pr-monitor/pull/15) opened.
 

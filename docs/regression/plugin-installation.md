@@ -95,7 +95,26 @@ Install from the marketplace:
 /plugin install pr-monitor@sesori
 ```
 
-- Root `.claude-plugin/marketplace.json` points to `./claude-code`, which is the complete plugin root.
+- Root `.claude-plugin/marketplace.json` points to `./claude-code`, which is the complete plugin root. Its tracked
+  payload contains exactly:
+
+```text
+.claude-plugin/plugin.json
+.mcp.json
+commands/ready.md
+commands/status.md
+commands/unready.md
+commands/watch.md
+dist/mcp-server.mjs
+hooks/await-activity.mjs
+hooks/drain-spool.mjs
+hooks/hooks.json
+skills/monitor-pr/SKILL.md
+src/mcp-server.ts
+src/session-state.ts
+src/spool.ts
+```
+
 - Claude discovers `.mcp.json`, `hooks/hooks.json`, `commands/`, and `skills/` by convention. Runtime paths use
   `${CLAUDE_PLUGIN_ROOT}` and must not depend on the repository's checkout depth.
 - `claude-code/dist/mcp-server.mjs` is committed and must reproduce from `claude-code/src/`, `runtime/`, and `core/`.
@@ -117,9 +136,11 @@ The private root stays `0.0.0`. `npm run version:check` rejects any product drif
 
 From a clean release commit:
 
-1. Run the full test/type/build/version/pack and real Pi/OMP host checks, then confirm rebuilding leaves the committed
-   Claude bundle clean.
-2. Publish both npm workspaces. A failure stops the release before any Git tag is created.
+1. Complete every required matrix row below from the clean release commit, including minimum/current OpenCode,
+   Pi, and OMP loaders and the live Claude release-host session. Run test/type/build/version/pack/host checks and
+   confirm rebuilding leaves the committed Claude bundle clean.
+2. Publish both npm workspaces only after the complete matrix is `Pass`. A failure stops the release before any Git
+   tag is created.
 3. Create and push one annotated `vX.Y.Z` tag for the Claude Git plugin only after both npm publishes succeed.
 
 npm versions are immutable. First publication also requires permission to create public packages in the `@sesori`
