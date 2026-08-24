@@ -7,9 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `@sesori/pr-monitor-pi`, one package for upstream Pi and OMP with native steering delivery, session-safe lifecycle cleanup, trusted project config, and real-loader checks.
+- Added a packaged `monitor-pr` skill for every harness. OpenCode, Pi, and OMP share one generated push-host skill; Claude Code retains its keep-alive-aware variant. Consuming repositories no longer need to copy OpenCode guidance into `.opencode/skills/`.
+
 ### Changed
 
 - The root is now a private npm workspace coordinator. `@sesori/pr-monitor-opencode` publishes from `opencode/` as an ESM bundle containing private core/runtime code, with exact tarball/install/import and lockstep-version checks.
+
+### Fixed
+
+- Pi/OMP actions resolve project trust and configuration from each current tool invocation instead of retaining the
+  context that first created the session runtime.
+- Monitor skills no longer promise an automatic report for a head push by itself; comments, reviews, CI conclusions,
+  conflicts, and terminal state remain reportable activity.
 
 ## [0.3.0]
 

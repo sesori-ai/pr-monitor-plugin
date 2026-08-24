@@ -16,11 +16,17 @@ import {
   MONITOR_ACTION_VALUES,
   MonitorAction,
 } from "../runtime/tool"
+import { packageSkillDirectory } from "../runtime/package-skill"
 import { createOpenCodeGhRunner } from "./gh"
+
+type SkillAwareConfig = {
+  skills?: { paths?: string[] }
+}
 
 export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }) => {
   const sessions = new Map<string, MonitorSession<MonitorConfig>>()
   const sessionModels = new Map<string, { providerID: string; modelID: string }>()
+  const skillDirectory = packageSkillDirectory({ moduleUrl: import.meta.url })
 
   const log = (message: string): void => {
     void client.app.log({ body: { service: "pr-monitor", level: "info", message } }).catch(() => {})
@@ -102,6 +108,12 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
   })
 
   return {
+    config: async (config) => {
+      const skillConfig = config as typeof config & SkillAwareConfig
+      const skills = (skillConfig.skills ??= {})
+      skills.paths = [...new Set([...(skills.paths ?? []), skillDirectory])]
+    },
+
     tool: {
       pr_monitor: tool({
         description: buildMonitorToolDescription({

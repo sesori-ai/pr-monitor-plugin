@@ -1,7 +1,7 @@
 {
-  "name": "@sesori/pr-monitor-opencode",
+  "name": "@sesori/pr-monitor-pi",
   "version": "0.3.0",
-  "description": "OpenCode plugin that watches GitHub PRs and delivers factual status reports into the owning session",
+  "description": "Pi and OMP extension that watches GitHub PRs and delivers factual status reports into the active session",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,9 +11,9 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./server": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+    "./omp": {
+      "types": "./dist/omp.d.ts",
+      "import": "./dist/omp.js"
     },
     "./package.json": "./package.json"
   },
@@ -36,25 +36,41 @@
     "url": "https://github.com/sesori-ai"
   },
   "keywords": [
-    "opencode",
-    "opencode-plugin",
+    "pi-package",
+    "pi-coding-agent",
+    "oh-my-pi",
     "github",
     "pull-request",
     "monitor"
   ],
   "engines": {
-    "opencode": ">=1.17.0"
+    "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "node ../scripts/build-opencode.mjs",
+    "build": "node ../scripts/build-pi.mjs",
     "prepack": "npm run build",
     "prepublishOnly": "npm --prefix .. run release:check"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "omp": {
+    "extensions": [
+      "./dist/omp.js"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
   },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
-  },
-  "dependencies": {
-    "@opencode-ai/plugin": "^1.4.9"
   }
 }

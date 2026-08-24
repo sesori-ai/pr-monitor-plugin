@@ -3,15 +3,8 @@ import { readFile } from "node:fs/promises"
 const manifests = [
   ["OpenCode", new URL("../opencode/package.json", import.meta.url)],
   ["Claude Code", new URL("../claude-code/.claude-plugin/plugin.json", import.meta.url)],
+  ["Pi/OMP", new URL("../pi/package.json", import.meta.url)],
 ]
-const piManifest = new URL("../pi/package.json", import.meta.url)
-try {
-  await readFile(piManifest)
-  manifests.push(["Pi/OMP", piManifest])
-} catch (error) {
-  if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error
-  // The Pi workspace is introduced by the next planned step.
-}
 
 const versions = await Promise.all(
   manifests.map(async ([name, url]) => {
@@ -23,6 +16,7 @@ const versions = await Promise.all(
 const expected = versions[0][1]
 const lock = JSON.parse(await readFile(new URL("../package-lock.json", import.meta.url), "utf8"))
 versions.push(["OpenCode lock", lock.packages?.opencode?.version])
+versions.push(["Pi/OMP lock", lock.packages?.pi?.version])
 const serverSource = await readFile(new URL("../claude-code/src/mcp-server.ts", import.meta.url), "utf8")
 const serverVersion = /new McpServer\(\{ name: "pr-monitor", version: "([^"]+)" \}\)/.exec(serverSource)?.[1]
 versions.push(["Claude MCP", serverVersion])

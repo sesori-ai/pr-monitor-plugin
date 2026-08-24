@@ -31725,15 +31725,17 @@ var MonitorSession = class {
   async execute({
     action,
     pr,
-    start
+    start,
+    loadConfig
   }) {
+    const actionLoadConfig = loadConfig ?? this.deps.loadConfig ?? (() => Promise.reject(new Error("this host did not provide a configuration loader")));
     switch (action) {
       case "start" /* start */:
         if (!pr || pr === "all") {
           return { text: "action 'start' requires a single explicit pr: 'owner/repo#123' or a PR URL." };
         }
         if (start === void 0) return { text: "Cannot start monitor: this host did not provide a report channel." };
-        return await this.start({ pr, options: start });
+        return await this.start({ pr, options: start, loadConfig: actionLoadConfig });
       case "stop" /* stop */:
         if (!pr) return { text: "action 'stop' requires pr: 'owner/repo#123', a PR URL, or 'all'." };
         return this.stop({ pr });
@@ -31746,12 +31748,12 @@ var MonitorSession = class {
         if (!pr || pr === "all") {
           return { text: "action 'mark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL." };
         }
-        return await this.changeReady({ pr, ready: true });
+        return await this.changeReady({ pr, ready: true, loadConfig: actionLoadConfig });
       case "unmark_ready" /* unmarkReady */:
         if (!pr || pr === "all") {
           return { text: "action 'unmark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL." };
         }
-        return await this.changeReady({ pr, ready: false });
+        return await this.changeReady({ pr, ready: false, loadConfig: actionLoadConfig });
     }
   }
   async stopAll({
@@ -31776,7 +31778,8 @@ var MonitorSession = class {
   }
   async start({
     pr,
-    options
+    options,
+    loadConfig
   }) {
     const target = parseTarget(pr);
     if ("error" in target) return { text: target.error };
@@ -31790,7 +31793,7 @@ ${existing.watch.statusLine()}` };
     if (preparationError !== void 0) return { text: preparationError };
     let config2;
     try {
-      config2 = await this.deps.loadConfig();
+      config2 = await loadConfig();
     } catch (error51) {
       return {
         text: `Cannot start monitor for ${displayKey}: loading configuration failed (${error51.message}).`
@@ -31911,14 +31914,15 @@ ${raced.watch.statusLine()}` };
   }
   async changeReady({
     pr,
-    ready
+    ready,
+    loadConfig
   }) {
     const target = parseTarget(pr);
     if ("error" in target) return { text: target.error };
     const key = targetRegistryKey(target);
     const displayKey = targetKey(target);
     try {
-      const config2 = await this.deps.loadConfig();
+      const config2 = await loadConfig();
       const text = ready ? await markReadyForHumanReview(this.deps.runGh, target, config2.readyLabel) : await removeReadyForHumanReview(this.deps.runGh, target, config2.readyLabel);
       const watchedEntry = this.watches.get(key);
       const watched = watchedEntry !== void 0;

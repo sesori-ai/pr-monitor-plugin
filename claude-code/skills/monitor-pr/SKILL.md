@@ -41,8 +41,8 @@ pr_monitor(action: "start", pr: "owner/repo#123")
   work in a fresh session, run `pr_monitor(action: "status")` and re-start what
   is missing.
 - Tuning (debounce, poll interval, CI wait, ignored comment tag, keep-alive)
-  lives in `.claude/pr-monitor.json` or `.opencode/pr-monitor.json` — never in
-  tool arguments.
+  lives in `.pr-monitor.json`, with `.claude/pr-monitor.json` and
+  `.opencode/pr-monitor.json` as fallbacks — never in tool arguments.
 
 ## 2. Handle each `[PR Monitor]` report
 
@@ -129,9 +129,9 @@ the user. The user always wins over the loop.
 
 ## 5. Taking the PR back
 
-A PR that was handed off keeps being monitored. When a human leaves a comment,
-requests changes, or pushes to it, a new report arrives and the PR becomes your
-job again. In that case:
+A PR that was handed off keeps being monitored. When a human leaves a comment
+or requests changes, a new report arrives and the PR becomes your job again.
+In that case:
 
 1. `pr_monitor(action: "unmark_ready", pr: "owner/repo#123")` — withdraw the
    label first, so the PR stops advertising itself as awaiting review while you

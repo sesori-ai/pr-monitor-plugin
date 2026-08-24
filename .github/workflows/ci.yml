@@ -12,7 +12,7 @@ jobs:
   verify:
     name: Node 22 / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -24,6 +24,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
       - run: npm ci
       - run: npm test
       - run: npm run typecheck
@@ -32,3 +35,4 @@ jobs:
       - name: Verify committed Claude bundle
         run: git diff --exit-code -- claude-code/dist/mcp-server.mjs
       - run: npm run pack:check
+      - run: npm run host:check
