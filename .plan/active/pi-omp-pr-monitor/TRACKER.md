@@ -170,6 +170,7 @@ incomplete host contract.
 | 2026-08-24 | Codex: Pi retains the first invocation context | Accepted: per-execute config loaders now use the current cwd/trust context without splitting session ownership. |
 | 2026-08-24 | Codex: skills promise CI-less push reports | Accepted: both skills now promise takeback only for reportable comments/review changes, not a bare head push. |
 | 2026-08-24 | Step 5 implementation review applicability | Not run: documentation-only reconciliation changes no production architecture; source and artifact contracts are reviewed directly. |
+| 2026-08-24 | Codex: three regression requirements exceed implementation | Accepted: urgent CI is conditional on `flushOnCiFailure`; a failed delivery channel logs rather than carries its own terminal notice; interrupting one Claude waiter does not disarm keep-alive. |
 
 ## Verification Log
 
@@ -229,12 +230,12 @@ incomplete host contract.
   1,574 are source, skills, tests, scripts, docs, bundle, and tracker evidence.
 - [x] Final head `6a14ac6` merged as `429068d` through [PR #14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14).
 
-### Step 5/6 (local successor)
+### Step 5/6
 
 - [x] Feature index, local Markdown references, heading hierarchy, and code fences validate across 10 changed files.
 - [x] Monitoring and installation claims cross-checked against final adapters, manifests, package checks, and tests.
 - [x] Changed prose satisfies the 120-column limit and `git diff --check` passes.
-- [x] Diff: 460 textual changed lines within the 700-line target.
+- [x] Diff: 463 textual changed lines within the 700-line target.
 - [x] TypeScript/build suites not run: Step 5 changes documentation only; Step 4 verification remains unchanged.
 - [x] Implementation commit `3f09065` pushed and [PR #15](https://github.com/sesori-ai/opencode-pr-monitor/pull/15) opened.
 

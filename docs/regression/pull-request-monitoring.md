@@ -19,12 +19,14 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   actions do not require an active watch; watch actions never infer a target from the current directory.
 - Ordinary activity is debounced from the latest visible change. A due report waits for running CI only up to
   `maxCiWaitMinutes`. Entering CI `running` and non-failing per-check progress are not ordinary activity.
-- A newly failing check, newly definite merge conflict, merge, or close is urgent and bypasses both debounce and the
-  CI hold. Instant CI failure is limited to one delivery per head commit; the concluded suite can report later.
+- With `flushOnCiFailure` enabled, a newly failing check is urgent and bypasses both debounce and the CI hold.
+  Newly definite merge conflict, merge, and close are always urgent. Instant CI failure is limited to one delivery
+  per head commit; the concluded suite can report later.
 - Reviews, issue comments, thread resolution, and visible review-thread follow-ups count as activity. Stable comment
   IDs preserve same-second follow-ups, and ignored tagged self-comments do not alter visible signatures.
 - Reports contain state, counts, authors, labels, and check names, never comment bodies or advice. Delivery failure
-  restores the prior baseline and urgency; ten consecutive poll or delivery failures stop the watch with a notice.
+  restores the prior baseline and urgency. Ten consecutive poll failures stop with a notice; ten consecutive
+  delivery failures stop after logging because the failed delivery channel cannot reliably carry a notice.
 - Merge/close produces one terminal report and removes the watch. Explicit stop, session cleanup, and failed starts
   leave no timer. A lifecycle cleanup that crosses an in-flight start wins, so that start cannot register late.
 
@@ -65,7 +67,7 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 - The MCP process spools one file per report under the owning Claude process identity. Hooks claim reports exactly
   once, do not let Task subagents consume them, and inject them on prompt, tool completion, or turn end.
 - Keep-alive publishes a liveness heartbeat and rolling idle deadline. It ends on confirmed handoff, stop, terminal
-  state, MCP death, user interruption, or idle expiry; only its exact event waiter may block.
+  state, MCP death, or idle expiry; only its exact event waiter may block.
 - `/clear` retains process-owned watches. Process exit loses them. MCP restart spools factual stop notices when the
   owning process remains able to receive them.
 - Claude discovers exactly one conventional waiter-aware `monitor-pr` skill.
