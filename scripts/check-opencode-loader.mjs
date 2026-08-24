@@ -70,9 +70,10 @@ try {
     assert.equal(toolIds.filter((toolId) => toolId === "pr_monitor").length, 1)
   } finally {
     clearTimeout(timeout)
-    if (server.exitCode === null) {
+    if (server.exitCode === null && server.signalCode === null) {
+      const exited = new Promise((resolveExit) => server.once("exit", resolveExit))
       server.kill("SIGTERM")
-      await new Promise((resolveExit) => server.once("exit", resolveExit))
+      await exited
     }
   }
 

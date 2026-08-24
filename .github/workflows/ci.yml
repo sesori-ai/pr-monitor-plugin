@@ -36,6 +36,16 @@ jobs:
         run: git diff --exit-code -- claude-code/dist/mcp-server.mjs
       - run: npm run pack:check
       - run: npm run host:check
+      - name: Install minimum OpenCode host
+        if: runner.os != 'Windows'
+        run: |
+          npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund opencode-ai@1.17.0
+          node node_modules/opencode-ai/postinstall.mjs
+      - name: Verify minimum OpenCode loader
+        if: runner.os != 'Windows'
+        run: npm run host:check:opencode
+        env:
+          OPENCODE_CLI: node_modules/.bin/opencode
       - name: Install current OpenCode host
         if: runner.os != 'Windows'
         run: |

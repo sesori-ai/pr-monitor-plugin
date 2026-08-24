@@ -192,6 +192,9 @@ incomplete host contract.
 | 2026-08-24 | Codex: release order can precede required host rows | Accepted: publication now requires every minimum/current/live-host matrix row to be `Pass`. |
 | 2026-08-24 | User: release version | Keep all product artifacts at `0.3.0`, move the completed series notes under `0.3.0`, and release only after Step 6 merges. |
 | 2026-08-24 | Step 6 implementation review applicability | Not run: this step adds verification tooling/tests and release evidence only; no production architecture changes. |
+| 2026-08-24 | Cubic: newly added tracker line exceeds 120 columns | Accepted: wrap the Step 5 implementation/PR evidence across two lines. |
+| 2026-08-24 | Codex: OpenCode floor absent from actual-host CI | Accepted: Linux/macOS now load both 1.17.0 and current 1.18.21; Windows retains its package smoke. |
+| 2026-08-24 | Codex: loader cleanup can await a past exit event | Accepted: skip cleanup after either exit code or signal and create the exit promise before sending SIGTERM. |
 
 ## Verification Log
 
@@ -258,20 +261,21 @@ incomplete host contract.
 - [x] Changed prose satisfies the 120-column limit and `git diff --check` passes.
 - [x] Diff: 493 textual changed lines within the 700-line target.
 - [x] TypeScript/build suites not run: Step 5 changes documentation only; Step 4 verification remains unchanged.
-- [x] Initial implementation commit `3f09065` pushed and [PR #15](https://github.com/sesori-ai/opencode-pr-monitor/pull/15) opened.
+- [x] Initial implementation commit `3f09065` pushed and
+  [PR #15](https://github.com/sesori-ai/opencode-pr-monitor/pull/15) opened.
 - [x] Final head `bc38fd1` merged as `053e105` after all documentation review threads were resolved.
 
 ### Step 6/6 (preliminary; retirement still blocked)
 
-Local release host: macOS 26.6.2, Node.js 22.23.2, Bun 1.4.0, authenticated `gh`; OpenCode 1.18.21, Claude Code
-2.1.237, Pi 0.84.2, and OMP 18.0.3/18.0.4. No credential, prompt, transcript, account identity, raw log, or host
-configuration is retained.
+Local release host: macOS 26.6.2, Node.js 22.23.2, Bun 1.4.0, authenticated `gh`;
+OpenCode 1.17.0/1.18.21, Claude Code 2.1.237, Pi 0.84.2, and OMP 18.0.3/18.0.4. No credential, prompt,
+transcript, account identity, raw log, or host configuration is retained.
 
 | Area | Result | Privacy-safe evidence |
 |---|---|---|
 | Core watch semantics | Pass | 34 local Node 22 tests; final Step 4 CI run [32717896376](https://github.com/sesori-ai/opencode-pr-monitor/actions/runs/32717896376) passed Ubuntu, macOS, and Windows. |
 | Shared monitor session | Pass | Runtime/action/race/timer/label tests represent all adapters; actual host sessions exercised the shared actions. |
-| OpenCode artifact | Partial | Exact tarball install plus OpenCode 1.18.21 macOS loader exposed one tool/skill; Linux actual-host row awaits Step 6 CI. |
+| OpenCode artifact | Partial | Exact tarball install plus OpenCode 1.17.0/1.18.21 macOS loaders exposed one tool/skill; Linux actual-host rows await Step 6 CI. |
 | Claude Code plugin | Pass | Exact tracked root and hook drain/subagent/keep-alive tests; live 2.1.237 Git-root session performed authenticated start, hook injection, status, and stop. |
 | Pi package | Pass | Exact tarball install and one skill; Pi 0.84.2 model sessions delivered while busy and from idle; prior CI covers three OSes and the floor is current. |
 | OMP package | Partial | Exact tarball install; 18.0.3 covers three OSes and live model delivery; 18.0.4 passes macOS, with Linux current-host row awaiting Step 6 CI. |
@@ -279,8 +283,8 @@ configuration is retained.
 | Release contents | Pass | Exact files/types/exports/peers/versions, clean Claude rebuild, disposable installs, and byte-identical repeated packs pass. |
 
 - [x] `npm ci`; 34 tests; typecheck; build; version, exact pack, Pi/OMP host, actionlint, and diff checks pass.
-- [x] Current host checks pass locally: actual OpenCode 1.18.21 and OMP 18.0.4 loaders each expose one tool and one
-  skill. CI now preserves OMP 18.0.3 on all OSes and adds current OpenCode/OMP on Linux and macOS.
+- [x] Host checks pass locally: actual OpenCode 1.17.0/1.18.21 and OMP 18.0.4 loaders each expose one tool and one
+  skill. CI preserves OMP 18.0.3 on all OSes and adds both OpenCode versions plus current OMP on Linux/macOS.
 - [x] Packed `0.3.0` OpenCode, Pi, and OMP installs each loaded in the actual host; Pi/OMP authenticated starts
   delivered an initial report. The committed Claude root loaded in Claude Code and injected its spooled report.
 - [x] SHA-256: OpenCode tarball `f714275fc250bc5e0a950a509d1e564c3055491061b040868c4c8dc10fd10ecf`;
@@ -290,7 +294,7 @@ configuration is retained.
   [32733809249](https://github.com/sesori-ai/opencode-pr-monitor/actions/runs/32733809249). The PR is closed; its
   remote/local branch, comments, and labels are removed. All host processes, temporary installs/config, spools, and
   sessions were stopped or removed.
-- [x] Review diff: 327 textual changed lines within the 700-line target.
+- [x] Review diff: 342 textual changed lines within the 700-line target.
 - [x] Implementation commit `77faeb0` pushed and [PR #17](https://github.com/sesori-ai/opencode-pr-monitor/pull/17) opened.
 - [ ] Replace both `Partial` rows after final Step 6 CI passes and only then retire the plan.
 
