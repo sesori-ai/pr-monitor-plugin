@@ -393,8 +393,8 @@ because repository redirects and branding provide no implementation benefit to P
 - Convert the root package to a private workspace coordinator.
 - Move the existing OpenCode npm metadata into `opencode/package.json`; preserve package name, runtime dependency,
   engine floor, exports, and public metadata.
-- Add publish-time ESM bundling for OpenCode, target README/license contents, tarball allowlisting, and an artifact
-  import check for both `.` and `./server`.
+- Add publish-time ESM bundling and a generated sole-export declaration for OpenCode, target README/license
+  contents, tarball allowlisting, and artifact checks for typed `.`/`./server` imports plus `./package.json`.
 - Add root scripts for all builds, tests, per-target pack inspection, version equality, and clean generated output.
 - Keep Claude Code's marketplace root and committed plugin bundle arrangement intact.
 - Add CI on supported Node platforms for tests, typecheck, build reproducibility, and OpenCode pack inspection.

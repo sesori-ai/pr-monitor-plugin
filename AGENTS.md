@@ -31,7 +31,7 @@ opencode/            # OpenCode source plus publishable npm workspace.
   index.ts     # Sole source export PrMonitorPlugin (loader invokes EVERY export — keep it the only one).
   gh.ts        # OpenCode's injected Bun-shell GhRunner.
   package.json # @sesori/pr-monitor-opencode; exports the generated dist/index.js bundle.
-  dist/        # Ephemeral publish output, ignored; never commit.
+  dist/        # Ephemeral JS bundle + sole-export declaration, ignored; never commit.
 
 claude-code/         # Claude Code shell. THIS DIRECTORY IS THE PLUGIN ROOT (= ${CLAUDE_PLUGIN_ROOT}).
   src/               # Bundled; never executed from source.

@@ -3,13 +3,15 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
-const npm = process.platform === "win32" ? "npm.cmd" : "npm"
+const npmCli = process.env["npm_execpath"]
+if (npmCli === undefined) throw new Error("npm_execpath is missing; run this check through npm run pack:check")
 const temporaryDirectory = await mkdtemp(join(tmpdir(), "pr-monitor-opencode-pack-"))
 
 try {
   const raw = execFileSync(
-    npm,
+    process.execPath,
     [
+      npmCli,
       "pack",
       "--workspace",
       "@sesori/pr-monitor-opencode",
@@ -31,7 +33,7 @@ try {
   }
 
   const files = metadata.files.map((file) => file.path).sort()
-  const expectedFiles = ["LICENSE", "README.md", "dist/index.js", "package.json"]
+  const expectedFiles = ["LICENSE", "README.md", "dist/index.d.ts", "dist/index.js", "package.json"]
   if (JSON.stringify(files) !== JSON.stringify(expectedFiles)) {
     throw new Error(`unexpected OpenCode package files: ${files.join(", ")}`)
   }
@@ -44,8 +46,9 @@ try {
   await mkdir(consumerDirectory)
   await writeFile(join(consumerDirectory, "package.json"), JSON.stringify({ private: true, type: "module" }))
   execFileSync(
-    npm,
+    process.execPath,
     [
+      npmCli,
       "install",
       "--ignore-scripts",
       "--no-audit",
@@ -63,15 +66,40 @@ try {
   const smoke =
     'const root = await import("@sesori/pr-monitor-opencode");' +
     'const server = await import("@sesori/pr-monitor-opencode/server");' +
+    'const {createRequire} = await import("node:module");' +
+    'const manifest = createRequire(import.meta.url)("@sesori/pr-monitor-opencode/package.json");' +
     'const expected = "PrMonitorPlugin";' +
-    'if (Object.keys(root).join() !== expected || Object.keys(server).join() !== expected) process.exit(1);'
+    'if (Object.keys(root).join() !== expected || Object.keys(server).join() !== expected) process.exit(1);' +
+    'if (manifest.name !== "@sesori/pr-monitor-opencode") process.exit(1);'
   execFileSync(process.execPath, ["--input-type=module", "--eval", smoke], {
     cwd: consumerDirectory,
     stdio: "pipe",
   })
+  await writeFile(
+    join(consumerDirectory, "index.ts"),
+    'import { PrMonitorPlugin } from "@sesori/pr-monitor-opencode"\n' +
+      'import { PrMonitorPlugin as ServerPlugin } from "@sesori/pr-monitor-opencode/server"\n' +
+      "void PrMonitorPlugin\nvoid ServerPlugin\n",
+  )
+  execFileSync(
+    process.execPath,
+    [
+      resolve("node_modules/typescript/bin/tsc"),
+      "--noEmit",
+      "--module",
+      "NodeNext",
+      "--moduleResolution",
+      "NodeNext",
+      "--target",
+      "ES2022",
+      "--skipLibCheck",
+      join(consumerDirectory, "index.ts"),
+    ],
+    { cwd: process.cwd(), stdio: "pipe" },
+  )
 
   console.log(
-    `OpenCode pack check passed: ${metadata.filename}; exact files; root and ./server imports expose PrMonitorPlugin`,
+    `OpenCode pack check passed: ${metadata.filename}; exact files, typed exports, and package metadata`,
   )
 } finally {
   await rm(temporaryDirectory, { recursive: true, force: true })

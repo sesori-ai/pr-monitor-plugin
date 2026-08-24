@@ -115,6 +115,10 @@ because the implementation moves concurrency and lifecycle ownership.
 | 2026-08-24 | Cubic: unconditional CI/label wording | Accepted: tool text names `flushOnCiFailure` and the configured ready label; assertions added. |
 | 2026-08-24 | Cubic/Codex: case-variant Claude handoff | Accepted: ready events use the watched target identity and Claude stores normalized registry keys; the handoff test marks and unmarks through variant casing. |
 | 2026-08-24 | User: inject the monitor skill for every harness | Accepted for Step 4: one canonical push-host skill is packaged/discovered once by OpenCode, Pi, and OMP; Claude keeps its waiter-specific skill. |
+| 2026-08-24 | Codex/Cubic: Windows cannot execute `npm.cmd` directly | Accepted: pack checks now invoke `npm_execpath` through `process.execPath`, avoiding shell-dependent command shims. |
+| 2026-08-24 | Cubic: optional Pi manifest catch hides read failures | Accepted: only an `ENOENT` remains optional; every other read failure is rethrown. |
+| 2026-08-24 | Cubic: bundled OpenCode artifact lost declarations/metadata export | Accepted: build emits the sole-export declaration, both entries carry type conditions, and `./package.json` is exported and smoke-tested. |
+| 2026-08-24 | Cubic: CI jobs retain GitHub's six-hour timeout | Accepted: each matrix job now has a 20-minute limit. |
 
 ## Verification Log
 
@@ -149,10 +153,11 @@ because the implementation moves concurrency and lifecycle ownership.
 
 - [x] Clean `npm ci`; `npm test` (24/24); `npm run typecheck`; `npm run build`.
 - [x] `npm run version:check` — OpenCode, Claude manifest, lockfile, and MCP source all `0.2.1`.
-- [x] `npm run pack:check` — exact four-file tarball; temporary install; `.`/`./server` sole-export imports.
+- [x] `npm run pack:check` — exact five-file tarball; temporary install; typed `.`/`./server` imports and package metadata export.
 - [x] `npm run release:check`; workspace prepack rebuild; OpenCode clean/build cycle.
 - [x] Claude committed bundle unchanged; root/target licenses byte-identical; `actionlint` and `git diff --check` pass.
-- [x] Implementation diff before PR bookkeeping: 470 textual changed lines, within the 1,200-line target.
+- [ ] Windows CI rerun after the shell-independent npm fix; Linux/macOS already pass.
+- [x] Review-fixed diff: 571 textual changed lines including PR/plan bookkeeping, within the 1,200-line target.
 - [x] Commit `38122df` pushed and [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12) opened with the exact Step 3 title.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/

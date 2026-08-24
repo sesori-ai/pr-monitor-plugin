@@ -8,7 +8,8 @@ const piManifest = new URL("../pi/package.json", import.meta.url)
 try {
   await readFile(piManifest)
   manifests.push(["Pi/OMP", piManifest])
-} catch {
+} catch (error) {
+  if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error
   // The Pi workspace is introduced by the next planned step.
 }
 
