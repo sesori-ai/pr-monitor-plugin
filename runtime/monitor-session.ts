@@ -69,7 +69,7 @@ type WatchEntry<TConfig extends MonitorConfig> = {
 
 type MonitorSessionDeps<TConfig extends MonitorConfig> = {
   runGh: GhRunner
-  loadConfig: () => Promise<TConfig>
+  loadConfig?: () => Promise<TConfig>
   log: (message: string) => void
   now?: () => number
   schedule?: (input: { callback: () => void; intervalMs: number }) => unknown
@@ -119,18 +119,24 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     action,
     pr,
     start,
+    loadConfig,
   }: {
     action: MonitorAction
     pr: string | undefined
     start?: StartOptions<TConfig>
+    loadConfig?: () => Promise<TConfig>
   }): Promise<MonitorActionResult<TConfig>> {
+    const actionLoadConfig =
+      loadConfig ??
+      this.deps.loadConfig ??
+      (() => Promise.reject(new Error("this host did not provide a configuration loader")))
     switch (action) {
       case MonitorAction.start:
         if (!pr || pr === "all") {
           return { text: "action 'start' requires a single explicit pr: 'owner/repo#123' or a PR URL." }
         }
         if (start === undefined) return { text: "Cannot start monitor: this host did not provide a report channel." }
-        return await this.start({ pr, options: start })
+        return await this.start({ pr, options: start, loadConfig: actionLoadConfig })
       case MonitorAction.stop:
         if (!pr) return { text: "action 'stop' requires pr: 'owner/repo#123', a PR URL, or 'all'." }
         return this.stop({ pr })
@@ -143,12 +149,12 @@ export class MonitorSession<TConfig extends MonitorConfig> {
         if (!pr || pr === "all") {
           return { text: "action 'mark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL." }
         }
-        return await this.changeReady({ pr, ready: true })
+        return await this.changeReady({ pr, ready: true, loadConfig: actionLoadConfig })
       case MonitorAction.unmarkReady:
         if (!pr || pr === "all") {
           return { text: "action 'unmark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL." }
         }
-        return await this.changeReady({ pr, ready: false })
+        return await this.changeReady({ pr, ready: false, loadConfig: actionLoadConfig })
     }
   }
 
@@ -183,9 +189,11 @@ export class MonitorSession<TConfig extends MonitorConfig> {
   private async start({
     pr,
     options,
+    loadConfig,
   }: {
     pr: string
     options: StartOptions<TConfig>
+    loadConfig: () => Promise<TConfig>
   }): Promise<MonitorActionResult<TConfig>> {
     const target = parseTarget(pr)
     if ("error" in target) return { text: target.error }
@@ -200,7 +208,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
 
     let config: TConfig
     try {
-      config = await this.deps.loadConfig()
+      config = await loadConfig()
     } catch (error) {
       return {
         text: `Cannot start monitor for ${displayKey}: loading configuration failed (${(error as Error).message}).`,
@@ -339,16 +347,18 @@ export class MonitorSession<TConfig extends MonitorConfig> {
   private async changeReady({
     pr,
     ready,
+    loadConfig,
   }: {
     pr: string
     ready: boolean
+    loadConfig: () => Promise<TConfig>
   }): Promise<MonitorActionResult<TConfig>> {
     const target = parseTarget(pr)
     if ("error" in target) return { text: target.error }
     const key = targetRegistryKey(target)
     const displayKey = targetKey(target)
     try {
-      const config = await this.deps.loadConfig()
+      const config = await loadConfig()
       const text = ready
         ? await markReadyForHumanReview(this.deps.runGh, target, config.readyLabel)
         : await removeReadyForHumanReview(this.deps.runGh, target, config.readyLabel)

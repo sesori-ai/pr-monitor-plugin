@@ -214,6 +214,7 @@ npm run typecheck
 npm run build
 npm run version:check
 npm run pack:check
+npm run host:check    # requires Bun; exercises real Pi/OMP loaders and RPC discovery
 git diff --exit-code -- claude-code/dist/mcp-server.mjs
 ```
 

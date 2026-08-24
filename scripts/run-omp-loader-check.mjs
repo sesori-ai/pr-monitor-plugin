@@ -19,7 +19,7 @@ try {
     })
     const packageDirectory = join(temporaryDirectory, "node_modules", "@oh-my-pi", "pi-coding-agent")
     loaderModule = pathToFileURL(join(packageDirectory, "src", "index.ts")).href
-    ompCli = join(packageDirectory, "dist", "cli.js")
+    ompCli ??= join(packageDirectory, "dist", "cli.js")
   }
   ompCli ??= fileURLToPath(new URL("../dist/cli.js", loaderModule))
 

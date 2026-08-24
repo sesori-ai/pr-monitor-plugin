@@ -129,9 +129,9 @@ the user. The user always wins over the loop.
 
 ## 5. Taking the PR back
 
-A PR that was handed off keeps being monitored. When a human leaves a comment,
-requests changes, or pushes to it, a new report arrives and the PR becomes your
-job again. In that case:
+A PR that was handed off keeps being monitored. When a human leaves a comment
+or requests changes, a new report arrives and the PR becomes your job again.
+In that case:
 
 1. `pr_monitor(action: "unmark_ready", pr: "owner/repo#123")` — withdraw the
    label first, so the PR stops advertising itself as awaiting review while you

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
-import { resolve } from "node:path"
 import test from "node:test"
+import { fileURLToPath } from "node:url"
 
 import { PrMonitorPlugin } from "../opencode/index"
 
@@ -122,6 +122,6 @@ test("OpenCode injects the packaged monitor skill path exactly once", async () =
   await hooks.config!(config as never)
   await hooks.config!(config as never)
 
-  assert.deepEqual(config.skills?.paths, ["existing-skills", resolve("skills")])
+  assert.deepEqual(config.skills?.paths, ["existing-skills", fileURLToPath(new URL("../skills", import.meta.url))])
   await hooks.dispose!()
 })

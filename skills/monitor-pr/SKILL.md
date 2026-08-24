@@ -122,8 +122,8 @@ user always wins over this loop.
 
 ## 5. Take handed-off work back
 
-A handed-off PR remains monitored. When a human comments, requests changes, or
-pushes, the next report makes the PR your job again:
+A handed-off PR remains monitored. When a human comments or requests changes,
+the next report makes the PR your job again:
 
 1. Call `pr_monitor(action: "unmark_ready", pr: "owner/repo#123")` first so the
    PR no longer advertises itself as ready while work is active.

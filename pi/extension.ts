@@ -84,24 +84,23 @@ export function registerPiMonitor({
       console.error(`[pr-monitor] ${message}`)
     })
   let currentSession: MonitorSession<MonitorConfig> | undefined
-
-  const getSession = ({ context }: { context: ExtensionContext }): MonitorSession<MonitorConfig> => {
-    if (currentSession !== undefined) return currentSession
+  const loadConfigForContext = ({ context }: { context: ExtensionContext }): Promise<MonitorConfig> => {
     const customLoadConfig = dependencies.loadConfig
+    if (customLoadConfig !== undefined) return customLoadConfig({ context })
+    return loadMonitorConfig({
+      paths: piMonitorConfigPaths({
+        cwd: context.cwd,
+        trusted: context.isProjectTrusted(),
+        configDirectory: CONFIG_DIR_NAME,
+      }),
+      log,
+    })
+  }
+
+  const getSession = (): MonitorSession<MonitorConfig> => {
+    if (currentSession !== undefined) return currentSession
     currentSession = new MonitorSession<MonitorConfig>({
       runGh,
-      loadConfig:
-        customLoadConfig === undefined
-          ? () =>
-              loadMonitorConfig({
-                paths: piMonitorConfigPaths({
-                  cwd: context.cwd,
-                  trusted: context.isProjectTrusted(),
-                  configDirectory: CONFIG_DIR_NAME,
-                }),
-                log,
-              })
-          : () => customLoadConfig({ context }),
       log,
       schedule: dependencies.schedule,
       cancel: dependencies.cancel,
@@ -136,9 +135,10 @@ export function registerPiMonitor({
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, context) {
-      const result = await getSession({ context }).execute({
+      const result = await getSession().execute({
         action: params.action,
         pr: params.pr,
+        loadConfig: () => loadConfigForContext({ context }),
         start:
           params.action === MonitorAction.start
             ? {

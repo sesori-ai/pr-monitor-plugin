@@ -11,6 +11,10 @@ assert.equal(result.extensions.length, 1)
 const extension = result.extensions[0]
 assert.ok(extension)
 assert.deepEqual([...extension.tools.keys()], ["pr_monitor"])
+const monitorTool = extension.tools.get("pr_monitor")
+assert.ok(monitorTool)
+assert.match(monitorTool.definition.description, /\.omp\/pr-monitor\.json/)
+assert.doesNotMatch(monitorTool.definition.description, /\.pi\/pr-monitor\.json/)
 assert.equal(extension.handlers.get("session_shutdown")?.length, 1)
 assert.equal(extension.handlers.get("session_switch")?.length, 1)
 const resourceHandlers = extension.handlers.get("resources_discover") ?? []

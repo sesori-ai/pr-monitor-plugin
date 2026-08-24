@@ -148,9 +148,15 @@ function runnerHarness({ states = ["OPEN"] }: { states?: PrSnapshot["state"][] }
   return { runGh, get labelAdded() { return labelAdded } }
 }
 
-function extensionContext({ trusted = true }: { trusted?: boolean } = {}): ExtensionContext {
+function extensionContext({
+  trusted = true,
+  cwd = process.cwd(),
+}: {
+  trusted?: boolean
+  cwd?: string
+} = {}): ExtensionContext {
   return {
-    cwd: process.cwd(),
+    cwd,
     isProjectTrusted: () => trusted,
   } as unknown as ExtensionContext
 }
@@ -212,6 +218,47 @@ test("Pi registers every monitor action and uses native steering delivery", asyn
   assert.equal(runner.labelAdded, false)
   assert.match(await executeTool({ tool: pi.tool, action: MonitorAction.stop, pr: "all" }), /Stopped 1 monitor/)
   assert.equal(timers.timers[0]?.cancelled, true)
+})
+
+test("Pi reloads configuration from each tool invocation context", async () => {
+  const pi = fakePiHarness()
+  const timers = timerHarness()
+  const runner = runnerHarness()
+  const loadedDirectories: string[] = []
+  registerPiMonitor({
+    pi: pi.pi,
+    dependencies: {
+      runGh: runner.runGh,
+      loadConfig: async ({ context }) => {
+        loadedDirectories.push(context.cwd)
+        return monitorConfig({ announceOnStart: false })
+      },
+      schedule: timers.schedule,
+      cancel: timers.cancel,
+      log: () => {},
+    },
+  })
+
+  await executeTool({
+    tool: pi.tool,
+    action: MonitorAction.status,
+    context: extensionContext({ cwd: resolve("first-project") }),
+  })
+  await executeTool({
+    tool: pi.tool,
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    context: extensionContext({ cwd: resolve("second-project") }),
+  })
+  await executeTool({
+    tool: pi.tool,
+    action: MonitorAction.markReady,
+    pr: "sesori/example#42",
+    context: extensionContext({ cwd: resolve("third-project") }),
+  })
+
+  assert.deepEqual(loadedDirectories, [resolve("second-project"), resolve("third-project")])
+  await pi.handlers.get("session_shutdown")?.[0]?.({}, extensionContext())
 })
 
 test("Pi reports through the same steering options while busy and idle", async () => {
@@ -326,6 +373,7 @@ test("package manifests expose the push-host skill exactly once", async () => {
     assert.match(skill, /notifications arrive automatically/i)
     assert.match(skill, /never.*sleep/is)
     assert.match(skill, /mark_ready.*confirms success/is)
+    assert.doesNotMatch(skill, /or pushes/i)
   }
   assert.doesNotMatch(pushSkill, /await-activity\.mjs/)
   assert.match(claudeSkill, /await-activity\.mjs/)

@@ -7,7 +7,7 @@
 - **Current branch:** `pi-omp-pr-monitor-step-4`
 - **Current PR:** Step 4 [#14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14)
 - **Implementation started:** yes
-- **Next action:** address Step 4 reports and begin the Step 5 documentation successor locally
+- **Next action:** address Step 4 reports; the verified Step 5 successor remains local
 - **Retirement:** blocked until every required row in `PLAN.md` passes
 
 ## Fixed Delivery Sequence
@@ -17,7 +17,7 @@
 | [x] | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan, exact skill copy, and regression baseline | 1,150 | [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) merged |
 | [x] | 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,100 | [PR #11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11) merged |
 | [x] | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 | [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12) merged |
-| [ ] | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 3,350 | [PR #14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14) open |
+| [ ] | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 3,500 | [PR #14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14) open |
 | [ ] | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 | Pending Step 4 |
 | [ ] | 6/6 | `⚙️ [pi-omp-pr-monitor] test: verify Pi and OMP and retire the plan [step 6/6]` | Moderate packaged, live-host, and external verification | 700 | Pending Step 5 |
 
@@ -100,7 +100,7 @@ because the implementation moves concurrency and lifecycle ownership.
 
 - [x] Add one `@sesori/pr-monitor-pi` workspace with upstream Pi and thin OMP entries.
 - [x] Register all monitor actions against one shared `MonitorSession` and deliver with native steering plus turn trigger.
-- [x] Apply trusted project config paths using `CONFIG_DIR_NAME`; untrusted Pi projects use defaults.
+- [x] Apply trusted config paths using host-resolved `CONFIG_DIR_NAME` and reload config from each action context.
 - [x] Clear upstream watches on post-success shutdown and OMP watches on post-success switch/process shutdown only.
 - [x] Add one canonical push-host skill and inject/discover it exactly once in OpenCode, Pi, and OMP.
 - [x] Keep Claude's waiter-aware skill and align its preferred `.pr-monitor.json` guidance.
@@ -113,9 +113,10 @@ because the implementation moves concurrency and lifecycle ownership.
 - [x] Keep local until Step 3 merges, then sync with current `main`.
 - [x] Push and open Step 4.
 
-The Step 4 total is expected near 3,350 changed lines: approximately 1,845 are generated lockfile changes from the
-pinned Pi floor, while non-lockfile source, skills, tests, scripts, and docs remain near 1,500. Splitting the package
-metadata from its adapter, generated skill, or loader checks would publish or merge an incomplete host contract.
+The Step 4 total is expected near 3,500 changed lines: approximately 1,845 are generated lockfile changes from the
+pinned Pi floor, while non-lockfile source, skills, tests, scripts, docs, and review fixes remain near 1,700.
+Splitting the package metadata from its adapter, generated skill, or loader checks would publish or merge an
+incomplete host contract.
 
 ## Review Log
 
@@ -139,12 +140,22 @@ metadata from its adapter, generated skill, or loader checks would publish or me
 | 2026-08-24 | Codex/Cubic: Windows cannot execute `npm.cmd` directly | Accepted: pack checks now invoke `npm_execpath` through `process.execPath`, avoiding shell-dependent command shims. |
 | 2026-08-24 | Cubic: optional Pi manifest catch hides read failures | Accepted: only an `ENOENT` remains optional; every other read failure is rethrown. |
 | 2026-08-24 | Cubic: bundled OpenCode artifact lost declarations/metadata export | Accepted: build emits the sole-export declaration, both entries carry type conditions, and `./package.json` is exported and smoke-tested. |
-| 2026-08-24 | Cubic: CI jobs retain GitHub's six-hour timeout | Accepted: each matrix job now has a 20-minute limit. |
+| 2026-08-24 | Cubic: CI jobs retain GitHub's six-hour timeout | Accepted: matrix jobs were bounded and now allow 30 minutes for real-loader installation. |
 | 2026-08-24 | Main advanced through release PR #13 during review | Merged (not rebased): preserve the private workspace while carrying product version `0.3.0`, Claude source/bundle, changelog, and release docs forward. |
 | 2026-08-24 | Cubic: hand-written declaration can drift | Accepted: build now runs TypeScript declaration emit and copies the compiler output; consumer assignments assert both entries are `Plugin`. |
 | 2026-08-24 | Codex: workspace changelog entry became retroactive | Accepted: the unshipped Step 3 packaging change moved back under `Unreleased`; released Step 2 behavior remains under `0.3.0`. |
 | 2026-08-24 | Cubic: declaration temp directory can leak | Accepted: existing `dist` cleanup now runs inside the declaration directory's `try/finally`. |
 | 2026-08-24 | Step 4 implementation review applicability | No repository-local architecture implementation reviewer exists; completed direct adapter/lifecycle/dependency/package review plus real-loader tests. |
+| 2026-08-24 | User: why not Bun 1.4.0? | Accepted: 1.3.14 matched OMP's floor, but current integration CI now pins Bun 1.4.0. |
+| 2026-08-24 | Cubic: configured OMP CLI is overwritten | Accepted: downloaded loader setup now preserves an explicit `OMP_CLI`. |
+| 2026-08-24 | Cubic: host check timeout/dependency drift | Partially accepted: raised CI to 30 minutes and pinned Bun/top-level OMP; fresh transitive resolution remains intentional install compatibility coverage. |
+| 2026-08-24 | Cubic: host checks absent from publish gate | Accepted: `release:check` now includes real Pi/OMP loader and RPC checks. |
+| 2026-08-24 | Cubic: OMP adapter documentation points at entry | Accepted: `AGENTS.md` now distinguishes `omp.ts` from the lifecycle/resource adapter. |
+| 2026-08-24 | Cubic: OpenCode skill test depends on cwd | Accepted: expected skill path is now module-relative. |
+| 2026-08-24 | Cubic: narrow Pi peer ranges | Declined: upstream Pi package docs require host-provided imports to use `"*"`; narrowing also conflicts with OMP's compatibility rewrite. |
+| 2026-08-24 | Codex: OMP config resolves `.pi` | Declined with actual-loader proof: OMP rewrites the host import to its shim, where `CONFIG_DIR_NAME` is `.omp`; loader assertion added. |
+| 2026-08-24 | Codex: Pi retains the first invocation context | Accepted: per-execute config loaders now use the current cwd/trust context without splitting session ownership. |
+| 2026-08-24 | Codex: skills promise CI-less push reports | Accepted: both skills now promise takeback only for reportable comments/review changes, not a bare head push. |
 
 ## Verification Log
 
@@ -188,20 +199,20 @@ metadata from its adapter, generated skill, or loader checks would publish or me
 
 ### Step 4/6 (local successor)
 
-- [x] `npm test` — 31/31 pass, including Pi/OMP action, delivery, lifecycle, trust, and skill contracts.
+- [x] `npm test` — 32/32 pass, including per-invocation Pi/OMP config, delivery, lifecycle, trust, and skill contracts.
 - [x] `npm run typecheck`; changed TypeScript/JavaScript files satisfy the 120-column limit.
 - [x] `npm run version:check` — OpenCode, Pi/OMP, Claude, both lock entries, and MCP source are `0.3.0`.
 - [x] `npm run pack:check` — exact typed OpenCode and Pi tarballs; generated skills match the canonical source;
   disposable installs import every entry and both package manifests.
-- [x] `npm run host:check` — Pi 0.84.2 and OMP 18.0.3 load one tool; RPC discovers one `monitor-pr` skill per host.
+- [x] `npm run host:check` — Pi 0.84.2 and OMP 18.0.3 on Bun 1.4.0 load one tool and discover one skill each.
 - [x] OpenCode 1.18.21 `debug skill` discovers exactly one packaged `monitor-pr` skill.
 - [x] OMP new/resume/fork and shutdown cleanup, upstream new/resume/fork/reload/quit cleanup, canceled-transition
   retention, old-timer silence, and busy/idle steering options are covered.
-- [x] Clean `npm ci` and `npm run release:check`; repeated builds produced identical OpenCode, Pi/OMP, and Claude hashes.
+- [x] Clean `npm ci`; `npm run release:check` now includes host checks; repeated builds remain byte-identical.
 - [x] Direct source/dependency review, `actionlint`, generated-skill/license equality, 120-column source scan, and
   `git diff --check` pass.
-- [x] Diff: 3,306 textual changed lines within the revised 3,350 target; 1,845 are generated lockfile changes and
-  1,461 are source, skills, tests, scripts, docs, and tracker evidence.
+- [x] Diff: 3,419 textual changed lines within the revised 3,500 target; 1,845 are generated lockfile changes and
+  1,574 are source, skills, tests, scripts, docs, bundle, and tracker evidence.
 - [x] Implementation commit `07fa318` pushed and [PR #14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14) opened.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/
