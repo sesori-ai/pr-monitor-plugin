@@ -3,11 +3,11 @@
 ## Current State
 
 - **Plan slug:** `pi-omp-pr-monitor`
-- **Plan status:** Step 5/6 merged; Step 6/6 final verification in progress locally
+- **Plan status:** Step 5/6 merged; Step 6/6 open, with retirement gated on its final CI rows
 - **Current branch:** `pi-omp-pr-monitor-step-6`
-- **Current PR:** none; Step 6 is being prepared
+- **Current PR:** Step 6 [#17](https://github.com/sesori-ai/opencode-pr-monitor/pull/17)
 - **Implementation started:** yes
-- **Next action:** finish the clean local matrix, open Step 6, then retire after its required CI rows pass
+- **Next action:** address Step 6 reports, record final CI evidence, and retire only when every row is `Pass`
 - **Retirement:** blocked until every required row in `PLAN.md` passes
 
 ## Fixed Delivery Sequence
@@ -19,7 +19,7 @@
 | [x] | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 | [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12) merged |
 | [x] | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 3,500 | [PR #14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14) merged |
 | [x] | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 | [PR #15](https://github.com/sesori-ai/opencode-pr-monitor/pull/15) merged |
-| [ ] | 6/6 | `⚙️ [pi-omp-pr-monitor] test: verify Pi and OMP and retire the plan [step 6/6]` | Moderate packaged, live-host, and external verification | 700 | Final verification local; ready to open after clean checks |
+| [ ] | 6/6 | `⚙️ [pi-omp-pr-monitor] test: verify Pi and OMP and retire the plan [step 6/6]` | Moderate packaged, live-host, and external verification | 700 | [PR #17](https://github.com/sesori-ai/opencode-pr-monitor/pull/17) open; final CI rows pending |
 
 The six milestone titles and total are fixed. Emergent defects use separately tracked
 `🐛 [pi-omp-pr-monitor] fix: <description> [repair <n>]` PRs without renumbering milestones; the blocked milestone
@@ -141,7 +141,7 @@ incomplete host contract.
 - [x] Clean the disposable PR's branch, comments, labels, host processes, installs, and temporary configuration.
 - [x] Keep release metadata at `0.3.0`, assign the completed notes to it, and document the all-harness publish order.
 - [x] Sync with merged Step 5 and rerun the full clean local matrix from final source.
-- [ ] Commit, push, and open Step 6.
+- [x] Commit, push, and open Step 6.
 - [ ] Record final Linux/macOS/Windows CI URLs and make every required result `Pass`.
 - [ ] Move the plan/tracker to `.plan/completed/` and push the retirement evidence.
 
@@ -290,7 +290,8 @@ configuration is retained.
   [32733809249](https://github.com/sesori-ai/opencode-pr-monitor/actions/runs/32733809249). The PR is closed; its
   remote/local branch, comments, and labels are removed. All host processes, temporary installs/config, spools, and
   sessions were stopped or removed.
-- [x] Review diff: 326 textual changed lines within the 700-line target.
+- [x] Review diff: 327 textual changed lines within the 700-line target.
+- [x] Implementation commit `77faeb0` pushed and [PR #17](https://github.com/sesori-ai/opencode-pr-monitor/pull/17) opened.
 - [ ] Replace both `Partial` rows after final Step 6 CI passes and only then retire the plan.
 
 Do not mark a regression row passed without the boundary and host/platform matrix required by `PLAN.md`.
