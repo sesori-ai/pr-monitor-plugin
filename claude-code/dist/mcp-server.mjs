@@ -32252,7 +32252,7 @@ process4.on("SIGTERM", shutdown);
 process4.on("SIGINT", shutdown);
 claimSpool(claudePid);
 collectDeadSpools(claudePid);
-var server = new McpServer({ name: "pr-monitor", version: "0.2.1" });
+var server = new McpServer({ name: "pr-monitor", version: "0.3.0" });
 server.registerTool(
   "pr_monitor",
   {

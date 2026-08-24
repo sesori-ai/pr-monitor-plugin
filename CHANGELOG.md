@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0]
+
 ### Changed
 
 - OpenCode and Claude Code now share one session runtime for watch ownership, timers, GitHub identity, actions, labels, and shutdown channels; host adapters retain only delivery and lifecycle policy.

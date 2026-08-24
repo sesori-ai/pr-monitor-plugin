@@ -119,6 +119,7 @@ because the implementation moves concurrency and lifecycle ownership.
 | 2026-08-24 | Cubic: optional Pi manifest catch hides read failures | Accepted: only an `ENOENT` remains optional; every other read failure is rethrown. |
 | 2026-08-24 | Cubic: bundled OpenCode artifact lost declarations/metadata export | Accepted: build emits the sole-export declaration, both entries carry type conditions, and `./package.json` is exported and smoke-tested. |
 | 2026-08-24 | Cubic: CI jobs retain GitHub's six-hour timeout | Accepted: each matrix job now has a 20-minute limit. |
+| 2026-08-24 | Main advanced through release PR #13 during review | Merged (not rebased): preserve the private workspace while carrying product version `0.3.0`, Claude source/bundle, changelog, and release docs forward. |
 
 ## Verification Log
 
@@ -152,12 +153,12 @@ because the implementation moves concurrency and lifecycle ownership.
 ### Step 3/6
 
 - [x] Clean `npm ci`; `npm test` (24/24); `npm run typecheck`; `npm run build`.
-- [x] `npm run version:check` — OpenCode, Claude manifest, lockfile, and MCP source all `0.2.1`.
+- [x] `npm run version:check` — OpenCode, Claude manifest, lockfile, and MCP source all `0.3.0` after merging release PR #13.
 - [x] `npm run pack:check` — exact five-file tarball; temporary install; typed `.`/`./server` imports and package metadata export.
 - [x] `npm run release:check`; workspace prepack rebuild; OpenCode clean/build cycle.
 - [x] Claude committed bundle unchanged; root/target licenses byte-identical; `actionlint` and `git diff --check` pass.
 - [ ] Windows CI rerun after the shell-independent npm fix; Linux/macOS already pass.
-- [x] Review-fixed diff: 571 textual changed lines including PR/plan bookkeeping, within the 1,200-line target.
+- [x] Review-fixed diff: 572 textual changed lines including PR/plan bookkeeping, within the 1,200-line target.
 - [x] Commit `38122df` pushed and [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12) opened with the exact Step 3 title.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/

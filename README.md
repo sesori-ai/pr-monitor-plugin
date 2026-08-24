@@ -97,7 +97,7 @@ Add the plugin to your project's `opencode.json` (committed — the whole team g
 }
 ```
 
-opencode installs npm plugins and their dependencies into its package cache on startup. To make upgrades explicit, pin a version such as `@sesori/pr-monitor-opencode@0.2.1` and bump it deliberately. Quit and restart opencode after changing the plugin configuration.
+opencode installs npm plugins and their dependencies into its package cache on startup. To make upgrades explicit, pin a version such as `@sesori/pr-monitor-opencode@0.3.0` and bump it deliberately. Quit and restart opencode after changing the plugin configuration.
 
 Reports arrive in the owning session as messages starting with `[PR Monitor]`. Monitors stop when the owning session is deleted. On graceful opencode shutdown, a no-reply stop notice is persisted to each owning session before the plugin is disposed, so it is present in history when opencode starts again.
 
