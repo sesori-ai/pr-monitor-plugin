@@ -1,6 +1,6 @@
 {
   "name": "@sesori/pr-monitor-opencode",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "OpenCode plugin that watches GitHub PRs in the background and delivers factual [PR Monitor] reports into the owning session",
   "license": "MIT",
   "type": "module",
