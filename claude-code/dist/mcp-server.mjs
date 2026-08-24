@@ -31049,6 +31049,9 @@ function parseTarget(input) {
 function targetKey(target) {
   return `${target.owner}/${target.repo}#${target.number}`;
 }
+function targetRegistryKey(target) {
+  return `${target.owner.toLowerCase()}/${target.repo.toLowerCase()}#${target.number}`;
+}
 function targetUrl(target) {
   return `https://github.com/${target.owner}/${target.repo}/pull/${target.number}`;
 }
@@ -31692,13 +31695,14 @@ function buildMonitorToolDescription({
   lifecycle,
   waiting
 }) {
-  return `Monitor a GitHub PR in the background. Detects CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports state facts only. A newly failing check, merge conflict, or terminal PR state skips debounce and is reported at the next poll. The monitor itself owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting for CI or review. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (add the ready-for-human-review label only after CI/review is clean; never claim handoff unless it confirms success), and unmark_ready (withdraw it before handling later feedback). Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Tuning lives in ${configPath}. ${lifecycle}`;
+  return `Monitor a GitHub PR in the background. Detects CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports state facts only. A newly failing check (when flushOnCiFailure is enabled), merge conflict, or terminal PR state skips debounce and is reported at the next poll. The monitor itself owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting for CI or review. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (add the configured ready label after CI/review is clean; never claim handoff unless it confirms success), and unmark_ready (withdraw it before handling later feedback). Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Tuning lives in ${configPath}. ${lifecycle}`;
 }
 
 // runtime/monitor-session.ts
 var MonitorSession = class {
   deps;
   watches = /* @__PURE__ */ new Map();
+  lifecycleGeneration = 0;
   selfLogin;
   selfLoginPromise;
   constructor(deps) {
@@ -31754,6 +31758,7 @@ var MonitorSession = class {
     notice,
     channel = "normal" /* normal */
   }) {
+    this.lifecycleGeneration += 1;
     const entries = [...this.watches.values()];
     for (const entry of entries) entry.watch.stop();
     if (notice === void 0) return;
@@ -31775,17 +31780,21 @@ var MonitorSession = class {
   }) {
     const target = parseTarget(pr);
     if ("error" in target) return { text: target.error };
-    const key = targetKey(target);
+    const key = targetRegistryKey(target);
+    const displayKey = targetKey(target);
     const existing = this.watches.get(key);
-    if (existing) return { text: `Already monitoring ${key} in this session.
+    if (existing) return { text: `Already monitoring ${displayKey} in this session.
 ${existing.watch.statusLine()}` };
+    const lifecycleGeneration = this.lifecycleGeneration;
     const preparationError = await options.prepare?.();
     if (preparationError !== void 0) return { text: preparationError };
     let config2;
     try {
       config2 = await this.deps.loadConfig();
     } catch (error51) {
-      return { text: `Cannot start monitor for ${key}: loading configuration failed (${error51.message}).` };
+      return {
+        text: `Cannot start monitor for ${displayKey}: loading configuration failed (${error51.message}).`
+      };
     }
     if (config2.ignoreCommentTag !== void 0 && this.selfLogin === void 0) {
       try {
@@ -31802,11 +31811,16 @@ ${existing.watch.statusLine()}` };
     try {
       initial = await this.fetchSnapshot({ target, config: config2 });
     } catch (error51) {
-      return { text: `Cannot start monitor for ${key}: ${error51.message}` };
+      return { text: `Cannot start monitor for ${displayKey}: ${error51.message}` };
     }
-    if (initial.state !== "OPEN") return { text: `Cannot start monitor: ${key} is already ${initial.state}.` };
+    if (this.lifecycleGeneration !== lifecycleGeneration) {
+      return { text: `Monitor session ended while ${displayKey} was starting; no active monitor remains.` };
+    }
+    if (initial.state !== "OPEN") {
+      return { text: `Cannot start monitor: ${displayKey} is already ${initial.state}.` };
+    }
     const raced = this.watches.get(key);
-    if (raced) return { text: `Already monitoring ${key} in this session.
+    if (raced) return { text: `Already monitoring ${displayKey} in this session.
 ${raced.watch.statusLine()}` };
     const reportChannel = options.createChannel({ target, config: config2 });
     let timer;
@@ -31842,16 +31856,16 @@ ${raced.watch.statusLine()}` };
       if (options.announcementMode === "await_delivery" /* awaitDelivery */) {
         announcement = await watch.announceInitial() ? "delivered" /* delivered */ : "retrying" /* retrying */;
         if (watch.isStopped) {
-          return { text: `Monitor for ${key} stopped before startup completed; no active monitor remains.` };
+          return { text: `Monitor for ${displayKey} stopped before startup completed; no active monitor remains.` };
         }
       } else {
         announcement = "pending" /* pending */;
         void watch.announceInitial();
       }
     }
-    this.deps.log(`started monitoring ${key}`);
+    this.deps.log(`started monitoring ${displayKey}`);
     return {
-      text: `Started monitoring ${key} \u2014 "${initial.title}".`,
+      text: `Started monitoring ${displayKey} \u2014 "${initial.title}".`,
       start: { target, config: config2, announcement }
     };
   }
@@ -31859,7 +31873,7 @@ ${raced.watch.statusLine()}` };
     if (pr === "all") return [...this.watches.values()];
     const target = parseTarget(pr);
     if ("error" in target) return target;
-    const entry = this.watches.get(targetKey(target));
+    const entry = this.watches.get(targetRegistryKey(target));
     if (!entry) {
       return {
         error: `No monitor for ${targetKey(target)} in this session. Use action "status" to list active monitors.`
@@ -31901,7 +31915,8 @@ ${raced.watch.statusLine()}` };
   }) {
     const target = parseTarget(pr);
     if ("error" in target) return { text: target.error };
-    const key = targetKey(target);
+    const key = targetRegistryKey(target);
+    const displayKey = targetKey(target);
     try {
       const config2 = await this.deps.loadConfig();
       const text = ready ? await markReadyForHumanReview(this.deps.runGh, target, config2.readyLabel) : await removeReadyForHumanReview(this.deps.runGh, target, config2.readyLabel);
@@ -31909,7 +31924,7 @@ ${raced.watch.statusLine()}` };
       this.notifyReadyChanged({ target, ready, watched, config: config2 });
       return { text, ready: { target, ready, watched } };
     } catch (error51) {
-      const action = ready ? `mark ${key} as ready for human review` : `withdraw the ready-for-human-review label from ${key}`;
+      const action = ready ? `mark ${displayKey} as ready for human review` : `withdraw the ready-for-human-review label from ${displayKey}`;
       return { text: `Cannot ${action}: ${error51.message}` };
     }
   }

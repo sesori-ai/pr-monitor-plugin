@@ -326,7 +326,7 @@ because repository redirects and branding provide no implementation benefit to P
 | Step | Exact PR title | Complexity | Soft line target |
 |---|---|---|---:|
 | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan, skill copy, and regression baseline | 1,150 |
-| 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,000 |
+| 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,100 |
 | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 |
 | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 1,500 |
 | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 |
@@ -347,7 +347,7 @@ because repository redirects and branding provide no implementation benefit to P
 ### Step 2/6: Centralize monitor session orchestration
 
 - Reassessed as complex because it moves concurrency and lifecycle ownership across both shipping adapters. The
-  approximately 2,000-line review diff exceeds the 1,500-line soft target: `MonitorSession`, both adapter migrations,
+  approximately 2,100-line review diff exceeds the 1,500-line soft target: `MonitorSession`, both adapter migrations,
   the transitional npm allowlist, and their contract tests must land atomically so every merged revision remains
   installable and has one orchestration owner. Splitting only runners/config would create an intermediate API churn
   PR without proving the boundary; splitting adapters would retain the duplication this step removes.

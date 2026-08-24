@@ -5,7 +5,7 @@
 import type { MonitorConfig } from "../core/config"
 import { fetchPrSnapshot, type GhRunner, type PrSnapshot } from "../core/github"
 import { markReadyForHumanReview, removeReadyForHumanReview } from "../core/label"
-import { parseTarget, targetKey, targetUrl, type Target } from "../core/target"
+import { parseTarget, targetKey, targetRegistryKey, targetUrl, type Target } from "../core/target"
 import { PrWatch } from "../core/watch"
 import { MonitorAction } from "./tool"
 
@@ -90,6 +90,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
   private readonly deps: Required<Pick<MonitorSessionDeps<TConfig>, "now" | "schedule" | "cancel">> &
     Omit<MonitorSessionDeps<TConfig>, "now" | "schedule" | "cancel">
   private readonly watches = new Map<string, WatchEntry<TConfig>>()
+  private lifecycleGeneration = 0
   private selfLogin: string | undefined
   private selfLoginPromise: Promise<string> | undefined
 
@@ -158,6 +159,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     notice?: string
     channel?: StopNoticeChannel
   }): Promise<void> {
+    this.lifecycleGeneration += 1
     const entries = [...this.watches.values()]
     for (const entry of entries) entry.watch.stop()
     if (notice === undefined) return
@@ -187,9 +189,11 @@ export class MonitorSession<TConfig extends MonitorConfig> {
   }): Promise<MonitorActionResult<TConfig>> {
     const target = parseTarget(pr)
     if ("error" in target) return { text: target.error }
-    const key = targetKey(target)
+    const key = targetRegistryKey(target)
+    const displayKey = targetKey(target)
     const existing = this.watches.get(key)
-    if (existing) return { text: `Already monitoring ${key} in this session.\n${existing.watch.statusLine()}` }
+    if (existing) return { text: `Already monitoring ${displayKey} in this session.\n${existing.watch.statusLine()}` }
+    const lifecycleGeneration = this.lifecycleGeneration
 
     const preparationError = await options.prepare?.()
     if (preparationError !== undefined) return { text: preparationError }
@@ -198,7 +202,9 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     try {
       config = await this.deps.loadConfig()
     } catch (error) {
-      return { text: `Cannot start monitor for ${key}: loading configuration failed (${(error as Error).message}).` }
+      return {
+        text: `Cannot start monitor for ${displayKey}: loading configuration failed (${(error as Error).message}).`,
+      }
     }
     if (config.ignoreCommentTag !== undefined && this.selfLogin === undefined) {
       try {
@@ -218,12 +224,17 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     try {
       initial = await this.fetchSnapshot({ target, config })
     } catch (error) {
-      return { text: `Cannot start monitor for ${key}: ${(error as Error).message}` }
+      return { text: `Cannot start monitor for ${displayKey}: ${(error as Error).message}` }
     }
-    if (initial.state !== "OPEN") return { text: `Cannot start monitor: ${key} is already ${initial.state}.` }
+    if (this.lifecycleGeneration !== lifecycleGeneration) {
+      return { text: `Monitor session ended while ${displayKey} was starting; no active monitor remains.` }
+    }
+    if (initial.state !== "OPEN") {
+      return { text: `Cannot start monitor: ${displayKey} is already ${initial.state}.` }
+    }
 
     const raced = this.watches.get(key)
-    if (raced) return { text: `Already monitoring ${key} in this session.\n${raced.watch.statusLine()}` }
+    if (raced) return { text: `Already monitoring ${displayKey} in this session.\n${raced.watch.statusLine()}` }
 
     const reportChannel = options.createChannel({ target, config })
     let timer: unknown
@@ -262,7 +273,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
           ? InitialAnnouncementState.delivered
           : InitialAnnouncementState.retrying
         if (watch.isStopped) {
-          return { text: `Monitor for ${key} stopped before startup completed; no active monitor remains.` }
+          return { text: `Monitor for ${displayKey} stopped before startup completed; no active monitor remains.` }
         }
       } else {
         announcement = InitialAnnouncementState.pending
@@ -270,9 +281,9 @@ export class MonitorSession<TConfig extends MonitorConfig> {
       }
     }
 
-    this.deps.log(`started monitoring ${key}`)
+    this.deps.log(`started monitoring ${displayKey}`)
     return {
-      text: `Started monitoring ${key} — "${initial.title}".`,
+      text: `Started monitoring ${displayKey} — "${initial.title}".`,
       start: { target, config, announcement },
     }
   }
@@ -281,7 +292,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     if (pr === "all") return [...this.watches.values()]
     const target = parseTarget(pr)
     if ("error" in target) return target
-    const entry = this.watches.get(targetKey(target))
+    const entry = this.watches.get(targetRegistryKey(target))
     if (!entry) {
       return {
         error: `No monitor for ${targetKey(target)} in this session. Use action "status" to list active monitors.`,
@@ -334,7 +345,8 @@ export class MonitorSession<TConfig extends MonitorConfig> {
   }): Promise<MonitorActionResult<TConfig>> {
     const target = parseTarget(pr)
     if ("error" in target) return { text: target.error }
-    const key = targetKey(target)
+    const key = targetRegistryKey(target)
+    const displayKey = targetKey(target)
     try {
       const config = await this.deps.loadConfig()
       const text = ready
@@ -345,8 +357,8 @@ export class MonitorSession<TConfig extends MonitorConfig> {
       return { text, ready: { target, ready, watched } }
     } catch (error) {
       const action = ready
-        ? `mark ${key} as ready for human review`
-        : `withdraw the ready-for-human-review label from ${key}`
+        ? `mark ${displayKey} as ready for human review`
+        : `withdraw the ready-for-human-review label from ${displayKey}`
       return { text: `Cannot ${action}: ${(error as Error).message}` }
     }
   }

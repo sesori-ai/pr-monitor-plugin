@@ -209,8 +209,15 @@ test("sessions isolate targets and stale timers cannot remove a successor watch"
 
   await first.execute({ action: MonitorAction.start, pr: "sesori/example#42", start: startOptions(channel) })
   await second.execute({ action: MonitorAction.start, pr: "sesori/example#42", start: startOptions(channel) })
+  const caseVariant = await first.execute({
+    action: MonitorAction.start,
+    pr: "SESORI/Example#42",
+    start: startOptions(channel),
+  })
+  assert.match(caseVariant.text, /Already monitoring/)
+  assert.equal(firstTimers.timers.length, 1)
   const staleTimer = firstTimers.timers[0]!
-  await first.execute({ action: MonitorAction.stop, pr: "sesori/example#42" })
+  await first.execute({ action: MonitorAction.stop, pr: "SESORI/Example#42" })
   await first.execute({ action: MonitorAction.start, pr: "sesori/example#42", start: startOptions(channel) })
 
   staleTimer.callback()
@@ -219,6 +226,37 @@ test("sessions isolate targets and stale timers cannot remove a successor watch"
   assert.equal(second.list().length, 1)
   assert.equal(staleTimer.cancelled, true)
   await Promise.all([first.stopAll({}), second.stopAll({})])
+})
+
+test("lifecycle cleanup invalidates a start that is still loading", async () => {
+  const runner = runnerHarness()
+  const timers = timerHarness()
+  const channel = channelHarness()
+  let resolveConfig!: (value: MonitorConfig) => void
+  const configPending = new Promise<MonitorConfig>((resolve) => {
+    resolveConfig = resolve
+  })
+  const session = new MonitorSession({
+    runGh: runner.runGh,
+    loadConfig: () => configPending,
+    log: () => {},
+    schedule: timers.schedule,
+    cancel: timers.cancel,
+  })
+
+  const starting = session.execute({
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    start: startOptions(channel),
+  })
+  await Promise.resolve()
+  await session.stopAll({})
+  resolveConfig(config())
+
+  const result = await starting
+  assert.match(result.text, /session ended while .* was starting/)
+  assert.equal(session.list().length, 0)
+  assert.equal(timers.timers.length, 0)
 })
 
 test("persistent shutdown notices use the persistent channel and clear every timer", async () => {
@@ -304,4 +342,6 @@ test("tool wording makes autonomous delivery and the no-delay rule explicit", ()
   assert.match(description, /notifications arrive automatically/)
   assert.match(description, /NEVER create sleeps/)
   assert.match(description, /routine status\/flush/)
+  assert.match(description, /when flushOnCiFailure is enabled/)
+  assert.match(description, /configured ready label/)
 })

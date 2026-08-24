@@ -22,14 +22,15 @@ function resolveImport(importer, specifier) {
 }
 
 function visit(file) {
-  const path = relative(process.cwd(), file)
+  const path = relative(process.cwd(), file).replaceAll("\\", "/")
   if (visited.has(path)) return
   visited.add(path)
   if (!packed.has(path)) throw new Error(`packed OpenCode import graph is missing ${path}`)
 
   const source = readFileSync(file, "utf8")
-  const imports = /(?:from\s+|import\s*\(\s*)["'](\.[^"']+)["']/g
-  for (const match of source.matchAll(imports)) visit(resolveImport(file, match[1]))
+  const imports =
+    /(?:from\s+|import\s*\(\s*)["'](\.[^"']+)["']|(?:^|[;\s])import\s*["'](\.[^"']+)["']/gm
+  for (const match of source.matchAll(imports)) visit(resolveImport(file, match[1] ?? match[2]))
 }
 
 visit(resolve(process.cwd(), "opencode/index.ts"))
