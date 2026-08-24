@@ -99,6 +99,7 @@ because the implementation moves concurrency and lifecycle ownership.
 | 2026-08-24 | Cubic: case-variant targets | Accepted: registry keys normalize owner/repo casing while reports retain caller casing; duplicate/start/stop test added. |
 | 2026-08-24 | Cubic: in-flight start after cleanup | Accepted: lifecycle generation invalidates starts crossing `stopAll`; dedicated timer/map test added. |
 | 2026-08-24 | Cubic: unconditional CI/label wording | Accepted: tool text names `flushOnCiFailure` and the configured ready label; assertions added. |
+| 2026-08-24 | Cubic/Codex: case-variant Claude handoff | Accepted: ready events use the watched target identity and Claude stores normalized registry keys; the handoff test marks and unmarks through variant casing. |
 
 ## Verification Log
 
@@ -120,14 +121,14 @@ because the implementation moves concurrency and lifecycle ownership.
 
 ### Step 2/6
 
-- [x] `npm test` — 24 tests pass, including lifecycle cleanup during an in-flight start and case-insensitive registry behavior.
+- [x] `npm test` — 24 tests pass, including lifecycle cleanup and case-insensitive registry and ready-handoff behavior.
 - [x] `npm run typecheck`.
 - [x] `npm run pack:check` — packed OpenCode graph includes all 11 reachable local imports.
 - [x] `npm run build` — Claude Code bundle rebuilt twice with SHA-256
-  `e5dac000e954e83b94059c7eeb1c55dc675e04edbbbb7f0cead472599046dbfe` both times.
+  `df5c43e28a05cbe0baeb445b9c725ec878aa7bd0591047cbcfa571581ac718d4` both times.
 - [x] Packed OpenCode entry imports with sole export `PrMonitorPlugin`; Claude bundle starts and shuts down over stdio.
 - [x] Core/runtime host-import scans, rewritten-source 120-column check, and `git diff --check` pass.
-- [x] Diff: 2,013 textual changed lines including review fixes, within the recorded 2,100-line target.
+- [x] Diff: 2,028 textual changed lines including review fixes, within the recorded 2,100-line target.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/
 platform matrix required by `PLAN.md`.

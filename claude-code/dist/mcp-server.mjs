@@ -31920,9 +31920,11 @@ ${raced.watch.statusLine()}` };
     try {
       const config2 = await this.deps.loadConfig();
       const text = ready ? await markReadyForHumanReview(this.deps.runGh, target, config2.readyLabel) : await removeReadyForHumanReview(this.deps.runGh, target, config2.readyLabel);
-      const watched = this.watches.has(key);
-      this.notifyReadyChanged({ target, ready, watched, config: config2 });
-      return { text, ready: { target, ready, watched } };
+      const watchedEntry = this.watches.get(key);
+      const watched = watchedEntry !== void 0;
+      const eventTarget = watchedEntry?.watch.target ?? target;
+      this.notifyReadyChanged({ target: eventTarget, ready, watched, config: config2 });
+      return { text, ready: { target: eventTarget, ready, watched } };
     } catch (error51) {
       const action = ready ? `mark ${displayKey} as ready for human review` : `withdraw the ready-for-human-review label from ${displayKey}`;
       return { text: `Cannot ${action}: ${error51.message}` };
@@ -32140,7 +32142,7 @@ var runGh = createNodeGhRunner();
 var monitorSession;
 var refreshSessionState = () => {
   const watches = monitorSession.list();
-  const active = watches.filter(({ target }) => !handedOff.has(targetKey(target)));
+  const active = watches.filter(({ target }) => !handedOff.has(targetRegistryKey(target)));
   const pollMs = Math.max(...watches.map(({ config: config2 }) => config2.pollIntervalSeconds * 1e3), 0);
   writeSessionState(claudePid, {
     version: 1,
@@ -32159,7 +32161,7 @@ var deliver = ({
   report
 }) => {
   spoolReport(claudePid, report);
-  handedOff.delete(targetKey(target));
+  handedOff.delete(targetRegistryKey(target));
   extendKeepAlive({ config: config2 });
   refreshSessionState();
   if (config2.desktopNotifications) {
@@ -32173,16 +32175,16 @@ monitorSession = new MonitorSession({
   log,
   onWatchChanged: ({ type, target, config: config2 }) => {
     if (type === "started" /* started */) extendKeepAlive({ config: config2 });
-    else handedOff.delete(targetKey(target));
+    else handedOff.delete(targetRegistryKey(target));
     refreshSessionState();
   },
   onTickSettled: refreshSessionState,
   onReadyChanged: ({ target, ready, watched }) => {
-    if (ready && watched) handedOff.add(targetKey(target));
-    if (!ready) handedOff.delete(targetKey(target));
+    if (ready && watched) handedOff.add(targetRegistryKey(target));
+    if (!ready) handedOff.delete(targetRegistryKey(target));
     refreshSessionState();
   },
-  statusSuffix: ({ target }) => handedOff.has(targetKey(target)) ? ", handed off for human review" : ""
+  statusSuffix: ({ target }) => handedOff.has(targetRegistryKey(target)) ? ", handed off for human review" : ""
 });
 var prepareStart = async () => {
   try {

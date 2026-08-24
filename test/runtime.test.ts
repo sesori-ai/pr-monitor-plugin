@@ -10,6 +10,7 @@ import {
   type MonitorConfig,
 } from "../core/config"
 import type { GhRunner, PrSnapshot } from "../core/github"
+import { targetKey } from "../core/target"
 import {
   InitialAnnouncementMode,
   MonitorSession,
@@ -291,24 +292,28 @@ test("persistent shutdown notices use the persistent channel and clear every tim
   }
 })
 
-test("ready handoff happens only after GitHub accepts the label", async () => {
+test("ready handoff follows label success and the watched target identity", async () => {
   const runner = runnerHarness()
   const timers = timerHarness()
   const channel = channelHarness()
-  let handedOff = false
+  const handedOff = new Set<string>()
   const readyEvents: boolean[] = []
+  const readyTargets: string[] = []
   const session = new MonitorSession({
     runGh: runner.runGh,
     loadConfig: async () => config(),
     log: () => {},
     schedule: timers.schedule,
     cancel: timers.cancel,
-    onReadyChanged: ({ ready, watched }) => {
+    onReadyChanged: ({ target, ready, watched }) => {
       assert.equal(runner.state.labelAdded, ready)
       readyEvents.push(ready)
-      handedOff = ready && watched
+      readyTargets.push(targetKey(target))
+      if (ready && watched) handedOff.add(targetKey(target))
+      if (!ready) handedOff.delete(targetKey(target))
     },
-    statusSuffix: () => (handedOff ? ", handed off for human review" : ""),
+    statusSuffix: ({ target }) =>
+      handedOff.has(targetKey(target)) ? ", handed off for human review" : "",
   })
   await session.execute({ action: MonitorAction.start, pr: "sesori/example#42", start: startOptions(channel) })
 
@@ -316,19 +321,21 @@ test("ready handoff happens only after GitHub accepts the label", async () => {
   const failed = await session.execute({ action: MonitorAction.markReady, pr: "sesori/example#42" })
   assert.match(failed.text, /Cannot mark/)
   assert.deepEqual(readyEvents, [])
-  assert.equal(handedOff, false)
+  assert.equal(handedOff.size, 0)
 
   runner.state.failLabelAdd = false
-  const ready = await session.execute({ action: MonitorAction.markReady, pr: "sesori/example#42" })
+  const ready = await session.execute({ action: MonitorAction.markReady, pr: "SESORI/Example#42" })
   assert.match(ready.text, /label "ready-for-human-review" added/)
   assert.deepEqual(readyEvents, [true])
+  assert.deepEqual(readyTargets, ["sesori/example#42"])
   const status = await session.execute({ action: MonitorAction.status, pr: undefined })
   assert.match(status.text, /handed off for human review/)
 
-  const unready = await session.execute({ action: MonitorAction.unmarkReady, pr: "sesori/example#42" })
+  const unready = await session.execute({ action: MonitorAction.unmarkReady, pr: "SESORI/Example#42" })
   assert.match(unready.text, /no longer flagged for human review/)
   assert.deepEqual(readyEvents, [true, false])
-  assert.equal(handedOff, false)
+  assert.deepEqual(readyTargets, ["sesori/example#42", "sesori/example#42"])
+  assert.equal(handedOff.size, 0)
   await session.stopAll({})
 })
 

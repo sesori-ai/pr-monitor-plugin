@@ -7,7 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 import { loadClaudeConfig, type ClaudeMonitorConfig } from "../../core/config"
-import { targetKey, type Target } from "../../core/target"
+import { targetKey, targetRegistryKey, type Target } from "../../core/target"
 import {
   InitialAnnouncementMode,
   InitialAnnouncementState,
@@ -47,7 +47,7 @@ let monitorSession: MonitorSession<ClaudeMonitorConfig>
 
 const refreshSessionState = (): void => {
   const watches = monitorSession.list()
-  const active = watches.filter(({ target }) => !handedOff.has(targetKey(target)))
+  const active = watches.filter(({ target }) => !handedOff.has(targetRegistryKey(target)))
   const pollMs = Math.max(...watches.map(({ config }) => config.pollIntervalSeconds * 1000), 0)
   writeSessionState(claudePid, {
     version: 1,
@@ -72,7 +72,7 @@ const deliver = ({
   report: string
 }): Promise<void> => {
   spoolReport(claudePid, report)
-  handedOff.delete(targetKey(target))
+  handedOff.delete(targetRegistryKey(target))
   extendKeepAlive({ config })
   refreshSessionState()
   if (config.desktopNotifications) {
@@ -87,16 +87,17 @@ monitorSession = new MonitorSession<ClaudeMonitorConfig>({
   log,
   onWatchChanged: ({ type, target, config }) => {
     if (type === WatchChangeType.started) extendKeepAlive({ config })
-    else handedOff.delete(targetKey(target))
+    else handedOff.delete(targetRegistryKey(target))
     refreshSessionState()
   },
   onTickSettled: refreshSessionState,
   onReadyChanged: ({ target, ready, watched }) => {
-    if (ready && watched) handedOff.add(targetKey(target))
-    if (!ready) handedOff.delete(targetKey(target))
+    if (ready && watched) handedOff.add(targetRegistryKey(target))
+    if (!ready) handedOff.delete(targetRegistryKey(target))
     refreshSessionState()
   },
-  statusSuffix: ({ target }) => (handedOff.has(targetKey(target)) ? ", handed off for human review" : ""),
+  statusSuffix: ({ target }) =>
+    handedOff.has(targetRegistryKey(target)) ? ", handed off for human review" : "",
 })
 
 const prepareStart = async (): Promise<string | undefined> => {

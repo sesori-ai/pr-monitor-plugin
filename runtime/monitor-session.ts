@@ -352,9 +352,11 @@ export class MonitorSession<TConfig extends MonitorConfig> {
       const text = ready
         ? await markReadyForHumanReview(this.deps.runGh, target, config.readyLabel)
         : await removeReadyForHumanReview(this.deps.runGh, target, config.readyLabel)
-      const watched = this.watches.has(key)
-      this.notifyReadyChanged({ target, ready, watched, config })
-      return { text, ready: { target, ready, watched } }
+      const watchedEntry = this.watches.get(key)
+      const watched = watchedEntry !== undefined
+      const eventTarget = watchedEntry?.watch.target ?? target
+      this.notifyReadyChanged({ target: eventTarget, ready, watched, config })
+      return { text, ready: { target: eventTarget, ready, watched } }
     } catch (error) {
       const action = ready
         ? `mark ${displayKey} as ready for human review`
