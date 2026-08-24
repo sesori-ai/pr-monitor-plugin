@@ -10,8 +10,8 @@ const source = fileURLToPath(new URL("../opencode/index.ts", import.meta.url))
 const output = fileURLToPath(new URL("../opencode/dist/index.js", import.meta.url))
 const declaration = fileURLToPath(new URL("../opencode/dist/index.d.ts", import.meta.url))
 const declarationDirectory = await mkdtemp(join(tmpdir(), "pr-monitor-opencode-types-"))
-await rm(new URL("../opencode/dist", import.meta.url), { recursive: true, force: true })
 try {
+  await rm(new URL("../opencode/dist", import.meta.url), { recursive: true, force: true })
   await build({
     entryPoints: [source],
     outfile: output,
