@@ -217,30 +217,40 @@ or fake adapter as proof of a packed host integration.
 
 ## Releasing
 
-A release uses one version for all targets: the annotated `vX.Y.Z` Git tag releases the Claude Code plugin, while the `opencode/` and `pi/` workspaces publish `@sesori/pr-monitor-opencode` and `@sesori/pr-monitor-pi`. The private root cannot be published accidentally. There is no separate GitHub Release step. Update `opencode/package.json`, `package-lock.json`, `claude-code/.claude-plugin/plugin.json`, and `CHANGELOG.md`, then run:
+A release uses one version for all targets. The OpenCode workspace publishes `@sesori/pr-monitor-opencode`; the
+Pi workspace publishes the shared Pi/OMP package `@sesori/pr-monitor-pi`; and the annotated `vX.Y.Z` tag marks the
+Claude Code Git-plugin release. The private root cannot be published, and there is no separate GitHub Release step.
+
+Update both workspace manifests and lock entries, `claude-code/.claude-plugin/plugin.json`, the MCP server version,
+and `CHANGELOG.md`. From a clean candidate commit, complete the full matrix before publishing:
 
 ```sh
 npm ci
-npm test
-npm run typecheck
-npm run build
-npm run version:check
-npm run pack:check
-npm run host:check    # requires Bun; exercises real Pi/OMP loaders and RPC discovery
+npm run release:check # tests, types, builds, versions, exact packs, Pi floor, OMP floor
+OPENCODE_CLI="$(command -v opencode)" npm run host:check:opencode
+OMP_VERSION=18.0.4 npm run host:check:omp
+# Also complete the live Claude release-host row documented in docs/regression/plugin-installation.md.
 git diff --exit-code -- claude-code/dist/mcp-server.mjs
 ```
 
-Commit any rebuilt bundle and the release metadata. From the clean release commit on `main`, publish before creating and pushing the tag; if npm rejects the package, there is no stale tag to announce a partial release:
+Use the current supported OpenCode/OMP versions for the two current-host rows; CI records Linux/macOS coverage while
+Windows runs the required package/loader smoke. After the candidate PR merges, use a clean checkout of that exact
+`main` commit. Publish both npm artifacts before creating the Claude tag, so an npm rejection cannot leave a stale
+cross-harness release marker:
 
 ```sh
-git push origin main
-npm publish --workspace @sesori/pr-monitor-opencode
-npm publish --workspace @sesori/pr-monitor-pi
+npm whoami
+npm publish --workspace @sesori/pr-monitor-opencode --access public
+npm publish --workspace @sesori/pr-monitor-pi --access public
+npm view @sesori/pr-monitor-opencode@X.Y.Z version
+npm view @sesori/pr-monitor-pi@X.Y.Z version
 git tag -a vX.Y.Z -m "vX.Y.Z — summary"
 git push origin vX.Y.Z
 ```
 
-The first publication requires an npm account with permission to create public packages in the `@sesori` scope (`npm login`). `publishConfig` already fixes the registry to npmjs.org and the access level to public. npm versions are immutable, so verify the package name, version, and `npm run pack:check` output before publishing.
+The first Pi/OMP publication requires permission to create public packages in the `@sesori` scope (`npm login` if
+needed). `publishConfig` already fixes npmjs.org and public access. npm versions are immutable: never tag Claude or
+retry a changed tarball under the same version until both npm registry checks above succeed.
 
 ## License
 

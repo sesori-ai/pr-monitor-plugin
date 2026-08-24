@@ -17,6 +17,8 @@
     "clean": "node scripts/clean.mjs",
     "pack:check": "npm run build:opencode && npm run build:pi && node scripts/check-pack.mjs",
     "host:check": "npm run build:pi && node scripts/check-pi-loader.mjs && node scripts/check-pi-package.mjs && node scripts/run-omp-loader-check.mjs",
+    "host:check:opencode": "npm run build:opencode && node scripts/check-opencode-loader.mjs",
+    "host:check:omp": "npm run build:pi && node scripts/run-omp-loader-check.mjs",
     "version:check": "node scripts/check-versions.mjs",
     "release:check": "npm test && npm run typecheck && npm run build && npm run version:check && npm run pack:check && npm run host:check"
   },

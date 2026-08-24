@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 
 const bun = process.platform === "win32" ? "bun.exe" : "bun"
 const configuredModule = process.env["OMP_LOADER_MODULE"]
+const ompVersion = process.env["OMP_VERSION"] ?? "18.0.3"
 const temporaryDirectory = configuredModule === undefined ? await mkdtemp(join(tmpdir(), "pr-monitor-omp-")) : undefined
 
 try {
@@ -13,7 +14,7 @@ try {
   let ompCli = process.env["OMP_CLI"]
   if (loaderModule === undefined) {
     await writeFile(join(temporaryDirectory, "package.json"), JSON.stringify({ private: true, type: "module" }))
-    execFileSync(bun, ["add", "--exact", "@oh-my-pi/pi-coding-agent@18.0.3"], {
+    execFileSync(bun, ["add", "--exact", `@oh-my-pi/pi-coding-agent@${ompVersion}`], {
       cwd: temporaryDirectory,
       stdio: "inherit",
     })
