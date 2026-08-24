@@ -3,12 +3,13 @@
 ## Status
 
 - **Plan slug:** `pi-omp-pr-monitor`
-- **Status:** Step 4/6 merged; Step 5/6 documentation ready for review
+- **Status:** Step 5/6 merged; Step 6/6 final verification and retirement in progress
 - **Plan date:** 2026-08-23
 - **Implementation base:** `origin/main` at `af612132995aac6e48b52c7c35dd3d133d08ce82`
 - **Host research baselines:** Pi `0.84.2`, OMP `18.0.3`, OpenCode `>=1.17.0`, and Claude Code plugin
   behavior already documented in this repository
 - **Repository:** `sesori-ai/opencode-pr-monitor`
+- **Release candidate:** keep every product artifact at `0.3.0`; publish only after Step 6 merges
 - **Delivery:** six sequential PRs: plan/skills, shared runtime, distribution workspaces, Pi/OMP adapter,
   regression documentation, and verification/retirement
 
