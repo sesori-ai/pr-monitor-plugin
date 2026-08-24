@@ -42,8 +42,9 @@ or platform proves only that matrix row unless the owning feature document expli
 5. Keep only privacy-safe evidence. Never commit credentials, prompts, transcripts, comment bodies, raw logs,
    account identifiers, tokens, or local host configuration.
 
-`Partial` means executed scope passed but required matrix rows did not run. `Blocked` means required infrastructure
-prevented execution. Neither is a pass. Clean up test PRs, labels, package installs, timers, sessions, and temporary
+`Partial` means some executed scope passed but required matrix rows did not run. `Blocked` means required
+infrastructure prevented an attempted row. `Not run` means no required row was attempted and therefore no pass/fail
+evidence exists. None is a pass. Clean up test PRs, labels, package installs, timers, sessions, and temporary
 configuration unless retained residue is explicitly recorded for diagnosis.
 
 ## Feature Maintenance
@@ -65,6 +66,6 @@ A durable plan records its highest required level and complete matrix before imp
 that exact coverage against the final merged source and records results in the tracker. Move a plan from
 `.plan/active/` to `.plan/completed/` only after all required rows pass.
 
-A reduction requires explicit user acceptance recorded in `PLAN.md`. Partial, blocked, failed, or unexecuted
+A reduction requires explicit user acceptance recorded in `PLAN.md`. `Partial`, `Blocked`, `Fail`, or `Not run`
 required coverage keeps the plan active. If verification finds a production defect, merge a separately tracked
 repair PR, rerun the affected checks plus the full retirement matrix, and retire only after both pass.

@@ -72,6 +72,8 @@ resumes only after its repair passes. Do not silently exceed the 1,500-line soft
 | 2026-08-23 | Codex: session replacement cleanup | Accepted with correction: upstream Pi emits shutdown only after successful replacement, while OMP emits post-success switch. The plan now uses separate thin entries and never clears on cancelable before-events. |
 | 2026-08-23 | Codex: regression guidance unavailable | Accepted: `docs/regression/README.md` now ships with the planning skills; Step 5 reconciles/completes it. |
 | 2026-08-23 | Codex: impossible late renumbering | Accepted: emergent defects use numbered repair PRs outside the fixed six milestones, followed by focused and full reruns. |
+| 2026-08-24 | Codex: Step 2 package omits runtime | Accepted: Step 2 now adds `runtime/` to the root allowlist and proves the packed import; Step 3 replaces it with bundled workspaces. |
+| 2026-08-24 | Cubic: undefined `Not run` result | Accepted: the regression baseline now distinguishes no attempted row from partial execution and makes every non-pass state block retirement. |
 
 ## Verification Log
 
@@ -83,13 +85,13 @@ resumes only after its repair passes. Do not silently exceed the 1,500-line soft
   maintenance, and plan-retirement rules required by the copied skills.
 - [x] Every referenced current source path exists; future paths are explicitly assigned to implementation steps.
 - [x] `git diff --check` passes.
-- [x] Changed lines: 1,059, within the revised 1,150-line Step 1 target.
+- [x] Changed lines: 1,065, within the revised 1,150-line Step 1 target.
 - [x] TypeScript, host, and bundle suites not run: this step changes only plans and agent skills.
 - [x] Commit `17b1562` pushed and [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) opened with the exact Step 1 title.
 - [x] User clarification incorporated: preserve reliable Claude ready-label handoff, discover the Pi/OMP skill once,
   and make autonomous notification/no-agent-delay behavior an explicit tested contract.
 - [x] PR review incorporated: available regression baseline, correct Pi-versus-OMP replacement lifecycles, canceled
-  transition retention, and a non-renumbering repair flow.
+  transition retention, a non-renumbering repair flow, independently packable Step 2, and complete result states.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/
 platform matrix required by `PLAN.md`.

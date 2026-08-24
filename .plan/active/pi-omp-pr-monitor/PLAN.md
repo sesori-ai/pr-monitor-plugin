@@ -360,8 +360,11 @@ because repository redirects and branding provide no implementation benefit to P
   must keep Claude active; an idempotent success may hand off. Preserve and extend existing core/OpenCode tests.
 - Centralize host-neutral tool wording: polling/delivery are automatic, and agents must never create delay jobs or
   polling loops. Preserve Claude's one narrow exception for the exact hook-issued event waiter.
+- In the same PR, temporarily add `runtime/` to the root OpenCode package allowlist and make `pack:check` assert the
+  packed source imports successfully. Step 3 replaces this transitional source package with the target bundle.
 - Rebuild the committed Claude Code bundle.
-- Verify with `npm test`, `npm run typecheck`, `npm run build`, source-focused tests, and `git diff --check`.
+- Verify with `npm test`, `npm run typecheck`, `npm run build`, `npm run pack:check`, source-focused tests, and
+  `git diff --check`.
 
 ### Step 3/6: Split harness distribution workspaces
 
