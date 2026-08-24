@@ -3,11 +3,11 @@
 ## Current State
 
 - **Plan slug:** `pi-omp-pr-monitor`
-- **Plan status:** Step 4/6 merged; Step 5/6 verified and ready to publish
+- **Plan status:** Step 4/6 merged; Step 5/6 open for review
 - **Current branch:** `pi-omp-pr-monitor-step-5`
-- **Current PR:** none; Step 5 is ready to open
+- **Current PR:** Step 5 [#15](https://github.com/sesori-ai/opencode-pr-monitor/pull/15)
 - **Implementation started:** yes
-- **Next action:** push and open Step 5, then begin the Step 6 verification successor locally
+- **Next action:** address Step 5 reports and begin the Step 6 verification successor locally
 - **Retirement:** blocked until every required row in `PLAN.md` passes
 
 ## Fixed Delivery Sequence
@@ -18,7 +18,7 @@
 | [x] | 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,100 | [PR #11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11) merged |
 | [x] | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 | [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12) merged |
 | [x] | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 3,500 | [PR #14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14) merged |
-| [ ] | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 | Complete and synced with `main`; ready to open |
+| [ ] | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 | [PR #15](https://github.com/sesori-ai/opencode-pr-monitor/pull/15) open |
 | [ ] | 6/6 | `⚙️ [pi-omp-pr-monitor] test: verify Pi and OMP and retire the plan [step 6/6]` | Moderate packaged, live-host, and external verification | 700 | Pending Step 5 |
 
 The six milestone titles and total are fixed. Emergent defects use separately tracked
@@ -129,7 +129,7 @@ incomplete host contract.
 - [x] Validate Markdown structure/references, source claims, line count, and `git diff --check`.
 - [x] Commit with the exact Step 5 title and keep local until Step 4 merges.
 - [x] Sync with merged Step 4 and current `main`.
-- [ ] Push and open Step 5.
+- [x] Push and open Step 5.
 
 ## Review Log
 
@@ -234,8 +234,9 @@ incomplete host contract.
 - [x] Feature index, local Markdown references, heading hierarchy, and code fences validate across 10 changed files.
 - [x] Monitoring and installation claims cross-checked against final adapters, manifests, package checks, and tests.
 - [x] Changed prose satisfies the 120-column limit and `git diff --check` passes.
-- [x] Diff: 459 textual changed lines within the 700-line target.
+- [x] Diff: 460 textual changed lines within the 700-line target.
 - [x] TypeScript/build suites not run: Step 5 changes documentation only; Step 4 verification remains unchanged.
+- [x] Implementation commit `3f09065` pushed and [PR #15](https://github.com/sesori-ai/opencode-pr-monitor/pull/15) opened.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/
 platform matrix required by `PLAN.md`.
