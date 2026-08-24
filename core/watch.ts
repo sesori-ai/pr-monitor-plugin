@@ -6,7 +6,7 @@
 // new CI failure, merge conflict, merge, or close — flush on the spot.
 
 import { detectActivity, hasNewCiFailure, hasNewMergeConflict } from "./activity"
-import type { MonitorConfig } from "./config"
+import type { WatchConfig } from "./config"
 import { ciPhase, PollError, type PrSnapshot } from "./github"
 import { buildReport } from "./report"
 import { targetKey, targetUrl, type Target } from "./target"
@@ -23,8 +23,7 @@ const MAX_CONSECUTIVE_FAILURES = 10
 
 export class PrWatch {
   readonly target: Target
-  readonly sessionID: string
-  readonly config: MonitorConfig
+  readonly config: WatchConfig
   private readonly deps: WatchDeps
   private readonly startedAt: number
 
@@ -62,9 +61,8 @@ export class PrWatch {
   private opQueue: Promise<unknown> = Promise.resolve()
   private pendingOps = 0
 
-  constructor(input: { target: Target; sessionID: string; config: MonitorConfig; deps: WatchDeps; initial: PrSnapshot }) {
+  constructor(input: { target: Target; config: WatchConfig; deps: WatchDeps; initial: PrSnapshot }) {
     this.target = input.target
-    this.sessionID = input.sessionID
     this.config = input.config
     this.deps = input.deps
     this.startedAt = input.deps.now()
@@ -235,12 +233,6 @@ export class PrWatch {
     if (this.stopped) return
     this.stopped = true
     this.deps.onStopped()
-  }
-
-  async stopWithNotice(reason: string): Promise<void> {
-    if (this.stopped) return
-    this.stop()
-    await this.deliverOrLog(`[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) — ${reason}`)
   }
 
   private handlePollFailure(error: unknown): void {

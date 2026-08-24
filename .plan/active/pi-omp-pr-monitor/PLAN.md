@@ -3,7 +3,7 @@
 ## Status
 
 - **Plan slug:** `pi-omp-pr-monitor`
-- **Status:** Step 1/6, planning PR
+- **Status:** Step 2/6, shared runtime implementation
 - **Plan date:** 2026-08-23
 - **Implementation base:** `origin/main` at `af612132995aac6e48b52c7c35dd3d133d08ce82`
 - **Host research baselines:** Pi `0.84.2`, OMP `18.0.3`, OpenCode `>=1.17.0`, and Claude Code plugin
@@ -160,8 +160,8 @@ optional shutdown-persistence delivery. This is necessary for OpenCode's agent/m
 endpoint, Claude's target/config-aware spool side effects, and Pi's native message delivery. The runtime does not
 know which host supplied a channel.
 
-The runtime returns structured start/ready results containing the target, config, initial snapshot, and factual
-base text. Adapters add only truthful host delivery/lifecycle wording. Claude's handed-off set and keep-alive
+The runtime returns structured start/ready results containing target/config/announcement or watched/handoff state,
+plus factual base text. Adapters add only truthful host delivery/lifecycle wording. Claude's handed-off set and keep-alive
 state stay in `claude-code/`; the shared session exposes target presence and a status-line decoration seam rather
 than owning Claude policy. The existing Claude invariant is locked: add the GitHub label first, record handoff only
 on success, and leave keep-alive armed on failure. Idempotent label addition remains success.
@@ -326,7 +326,7 @@ because repository redirects and branding provide no implementation benefit to P
 | Step | Exact PR title | Complexity | Soft line target |
 |---|---|---|---:|
 | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan, skill copy, and regression baseline | 1,150 |
-| 2/6 | `⚙️ [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Moderate shared-state and lifecycle refactor | 1,400 |
+| 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,100 |
 | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 |
 | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 1,500 |
 | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 |
@@ -346,6 +346,11 @@ because repository redirects and branding provide no implementation benefit to P
 
 ### Step 2/6: Centralize monitor session orchestration
 
+- Reassessed as complex because it moves concurrency and lifecycle ownership across both shipping adapters. The
+  approximately 2,100-line review diff exceeds the 1,500-line soft target: `MonitorSession`, both adapter migrations,
+  the transitional npm allowlist, and their contract tests must land atomically so every merged revision remains
+  installable and has one orchestration owner. Splitting only runners/config would create an intermediate API churn
+  PR without proving the boundary; splitting adapters would retain the duplication this step removes.
 - Add `runtime/monitor-session.ts`, `runtime/node-gh.ts`, and a small shared action/tool contract.
 - Make `MonitorSession` the single owner of common session watch state and operations described above.
 - Move the OpenCode shell runner to `opencode/gh.ts`; move the Node runner to `runtime/node-gh.ts`; remove all host

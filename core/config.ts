@@ -1,101 +1,122 @@
 // Monitor tuning, loaded from the first readable `pr-monitor.json` among the
-// candidate paths the host shell passes in (opencode: `.opencode/` in the
-// project directory then worktree; Claude Code: `.claude/` then `.opencode/`
-// in the project directory), falling back to defaults.
+// candidate paths supplied by the host. Common watch/action settings are kept
+// separate from Claude Code's passive-delivery settings.
 
 import { readFile } from "node:fs/promises"
 
-export type MonitorConfig = {
+export type WatchConfig = {
   debounceMinutes: number
   maxCiWaitMinutes: number
   pollIntervalSeconds: number
   ignoreCommentTag: string | undefined
   announceOnStart: boolean
-  // Deliver immediately when a check goes red, skipping the debounce window and
-  // any CI hold, so the session starts fixing CI without waiting out a timer
-  // that unrelated comment activity keeps resetting. At most one instant report
-  // per head commit; the next push re-arms it.
+  // Deliver immediately when a check goes red, skipping debounce and CI hold.
   flushOnCiFailure: boolean
-  // Claude Code shell only (delivery there is passive — reports are injected at
-  // the next hook event, so an idle session learns nothing until then; an OS
-  // notification closes that gap). The opencode shell ignores it.
-  desktopNotifications: boolean
+}
+
+export type MonitorConfig = WatchConfig & {
   // Label the mark_ready action applies to a PR on GitHub.
   readyLabel: string
-  // Claude Code shell only. While a monitored PR has not been handed off to a
-  // human (mark_ready), the Stop hook refuses turn-end and points the session
-  // at the waiter script, so a report that lands while the session is idle is
-  // still acted on. Without it delivery is passive: reports wait on disk until
-  // the user types. The opencode shell ignores both keys — there the plugin
-  // pushes a real message into the session instead.
+}
+
+export type ClaudeMonitorConfig = MonitorConfig & {
+  // Claude Code delivery is passive, so this optionally announces a spooled report out of band.
+  desktopNotifications: boolean
+  // Keep the session alive until a watched PR is handed off to a human.
   keepAlive: boolean
-  // Upper bound on how long the keep-alive loop may hold a session, refreshed
-  // on every delivered report (so it bounds *idle* time, not total work time).
+  // Rolling idle cap for keep-alive, refreshed whenever a report is delivered.
   keepAliveMaxMinutes: number
 }
 
-const DEFAULT_CONFIG: MonitorConfig = {
+const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
   debounceMinutes: 2,
   maxCiWaitMinutes: 30,
   pollIntervalSeconds: 60,
   ignoreCommentTag: undefined,
   announceOnStart: true,
   flushOnCiFailure: true,
-  desktopNotifications: false,
   readyLabel: "ready-for-human-review",
+}
+
+const DEFAULT_CLAUDE_CONFIG = {
+  desktopNotifications: false,
   keepAlive: true,
   keepAliveMaxMinutes: 120,
 }
 
 const MIN_POLL_INTERVAL_SECONDS = 30
-// The interval is handed to setInterval as milliseconds, and Node silently
-// coerces any delay past 2^31-1 ms to *1 ms* — so a value meant to slow polling
-// down (a milliseconds-style `3000000`, say) would instead spawn `gh` in a
-// tight loop. Cap it well short of that overflow; a day is longer than any
-// plausible poll interval for a PR that is actively being worked on.
+// Node coerces setInterval delays past 2^31-1 ms to 1 ms. A day is already
+// longer than a useful active-PR interval and remains comfortably below it.
 const MAX_POLL_INTERVAL_SECONDS = 86_400
 
-function resolveConfig(raw: unknown): MonitorConfig {
-  const cfg = { ...DEFAULT_CONFIG }
-  if (typeof raw !== "object" || raw === null) return cfg
-  const record = raw as Record<string, unknown>
-  const num = (key: string): number | undefined => {
-    const value = record[key]
-    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
-  }
-  cfg.debounceMinutes = num("debounceMinutes") ?? cfg.debounceMinutes
-  cfg.maxCiWaitMinutes = num("maxCiWaitMinutes") ?? cfg.maxCiWaitMinutes
-  const poll = num("pollIntervalSeconds") ?? cfg.pollIntervalSeconds
-  cfg.pollIntervalSeconds = Math.min(Math.max(poll, MIN_POLL_INTERVAL_SECONDS), MAX_POLL_INTERVAL_SECONDS)
-  const tag = record["ignoreCommentTag"]
-  cfg.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : undefined
-  const announce = record["announceOnStart"]
-  if (typeof announce === "boolean") cfg.announceOnStart = announce
-  const flushOnCiFailure = record["flushOnCiFailure"]
-  if (typeof flushOnCiFailure === "boolean") cfg.flushOnCiFailure = flushOnCiFailure
-  const notify = record["desktopNotifications"]
-  if (typeof notify === "boolean") cfg.desktopNotifications = notify
-  const label = record["readyLabel"]
-  if (typeof label === "string" && label.length > 0) cfg.readyLabel = label
-  const keepAlive = record["keepAlive"]
-  if (typeof keepAlive === "boolean") cfg.keepAlive = keepAlive
-  cfg.keepAliveMaxMinutes = num("keepAliveMaxMinutes") ?? cfg.keepAliveMaxMinutes
-  return cfg
+type LoadConfigInput<TConfig> = {
+  paths: readonly string[]
+  log: (message: string) => void
+  resolve: (raw: unknown) => TConfig
 }
 
-export async function loadConfig(paths: string[], log: (message: string) => void): Promise<MonitorConfig> {
+function positiveNumber(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key]
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
+}
+
+function resolveMonitorConfig(raw: unknown): MonitorConfig {
+  const config = { ...DEFAULT_MONITOR_CONFIG }
+  if (typeof raw !== "object" || raw === null) return config
+  const record = raw as Record<string, unknown>
+
+  config.debounceMinutes = positiveNumber(record, "debounceMinutes") ?? config.debounceMinutes
+  config.maxCiWaitMinutes = positiveNumber(record, "maxCiWaitMinutes") ?? config.maxCiWaitMinutes
+  const poll = positiveNumber(record, "pollIntervalSeconds") ?? config.pollIntervalSeconds
+  config.pollIntervalSeconds = Math.min(Math.max(poll, MIN_POLL_INTERVAL_SECONDS), MAX_POLL_INTERVAL_SECONDS)
+
+  const tag = record["ignoreCommentTag"]
+  config.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : undefined
+  const announce = record["announceOnStart"]
+  if (typeof announce === "boolean") config.announceOnStart = announce
+  const flushOnCiFailure = record["flushOnCiFailure"]
+  if (typeof flushOnCiFailure === "boolean") config.flushOnCiFailure = flushOnCiFailure
+  const label = record["readyLabel"]
+  if (typeof label === "string" && label.length > 0) config.readyLabel = label
+  return config
+}
+
+function resolveClaudeConfig(raw: unknown): ClaudeMonitorConfig {
+  const config: ClaudeMonitorConfig = { ...resolveMonitorConfig(raw), ...DEFAULT_CLAUDE_CONFIG }
+  if (typeof raw !== "object" || raw === null) return config
+  const record = raw as Record<string, unknown>
+
+  const notify = record["desktopNotifications"]
+  if (typeof notify === "boolean") config.desktopNotifications = notify
+  const keepAlive = record["keepAlive"]
+  if (typeof keepAlive === "boolean") config.keepAlive = keepAlive
+  config.keepAliveMaxMinutes = positiveNumber(record, "keepAliveMaxMinutes") ?? config.keepAliveMaxMinutes
+  return config
+}
+
+async function loadResolvedConfig<TConfig>({ paths, log, resolve }: LoadConfigInput<TConfig>): Promise<TConfig> {
   for (const path of paths) {
     let text: string
     try {
       text = await readFile(path, "utf8")
     } catch {
-      continue // missing/unreadable file at this path -> try next, else defaults
+      continue
     }
     try {
-      return resolveConfig(JSON.parse(text))
+      return resolve(JSON.parse(text))
     } catch (error) {
       log(`config file ${path} is not valid JSON, ignoring it: ${(error as Error).message}`)
     }
   }
-  return resolveConfig(undefined)
+  return resolve(undefined)
+}
+
+export function loadMonitorConfig(input: Omit<LoadConfigInput<MonitorConfig>, "resolve">): Promise<MonitorConfig> {
+  return loadResolvedConfig({ ...input, resolve: resolveMonitorConfig })
+}
+
+export function loadClaudeConfig(
+  input: Omit<LoadConfigInput<ClaudeMonitorConfig>, "resolve">,
+): Promise<ClaudeMonitorConfig> {
+  return loadResolvedConfig({ ...input, resolve: resolveClaudeConfig })
 }

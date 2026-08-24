@@ -9,4 +9,4 @@ PR to mark: $ARGUMENTS
 
 If no PR was given above, resolve the current branch's open PR with `gh pr view --json url -q .url` and mark that one. The pr argument passed to the tool must be explicit — `owner/repo#123` or a full PR URL.
 
-After marking, briefly confirm the label was added.
+Briefly confirm handoff only if the tool reports that the label was added. On failure, diagnose and retry; do not claim the PR is ready.

@@ -3,19 +3,19 @@
 ## Current State
 
 - **Plan slug:** `pi-omp-pr-monitor`
-- **Plan status:** Step 1/6 open for review
-- **Current branch:** `cross-harness-plugin-scaling`
-- **Current PR:** [#10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10)
-- **Implementation started:** no
-- **Next action:** pass review and merge Step 1; then start the shared-runtime Step 2
+- **Plan status:** Step 2/6 open for review
+- **Current branch:** `pi-omp-pr-monitor-step-2`
+- **Current PR:** [#11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11)
+- **Implementation started:** yes
+- **Next action:** address Step 2 review/monitor reports and merge; then advance Step 3 packaging
 - **Retirement:** blocked until every required row in `PLAN.md` passes
 
 ## Fixed Delivery Sequence
 
 | Done | Step | Exact PR title | Complexity | Soft line target | State |
 |---|---|---|---|---:|---|
-| [ ] | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan, exact skill copy, and regression baseline | 1,150 | [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) open |
-| [ ] | 2/6 | `⚙️ [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Moderate shared-state and lifecycle refactor | 1,400 | Pending Step 1 |
+| [x] | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan, exact skill copy, and regression baseline | 1,150 | [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) merged |
+| [ ] | 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,100 | [PR #11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11) open |
 | [ ] | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 | Pending Step 2 |
 | [ ] | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 1,500 | Pending Step 3 |
 | [ ] | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 | Pending Step 4 |
@@ -63,6 +63,25 @@ resumes only after its repair passes. Do not silently exceed the 1,500-line soft
 - [x] Validate fixed titles/totals, Markdown paths, changed-line count, and `git diff --check`.
 - [x] Commit with the exact Step 1 title, push, and open the planning PR with the required body sections.
 
+## Step 2 Checklist
+
+- [x] Sync from merged Step 1 and create `pi-omp-pr-monitor-step-2` in the existing worktree.
+- [x] Remove host SDK imports and runner construction from `core/`; remove `PrWatch.sessionID`.
+- [x] Split common and Claude-only config and add repository `.pr-monitor.json` precedence.
+- [x] Add `MonitorSession`, shared Node runner, action enum, and autonomous-delivery/no-delay wording.
+- [x] Adapt OpenCode and Claude Code while preserving delivery, reload, handoff, keep-alive, and shutdown channels.
+- [x] Keep label success before Claude handoff and retain keep-alive after label failure.
+- [x] Add `runtime/` to the transitional npm allowlist and validate the packed OpenCode import graph.
+- [x] Add shared-runtime/config/lifecycle/label tests and update the Claude `monitor-pr` skill.
+- [x] Rebuild the committed Claude Code bundle and update current architecture/config documentation.
+- [x] Complete final tests, direct source review, dependency/line-width checks, and diff/line-count checks.
+- [x] Commit `a1d0e2e`, push, and open [PR #11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11).
+
+The Step 2 diff is expected near 2,100 changed lines and is intentionally above the 1,500-line soft cap. The runtime,
+both shipping adapters, transitional package allowlist, and tests form one atomic ownership migration; splitting an
+adapter or package would leave a merged revision duplicated or unpublishable. Complexity is reassessed from ⚙️ to 🚧
+because the implementation moves concurrency and lifecycle ownership.
+
 ## Review Log
 
 | Date | Review | Result |
@@ -74,6 +93,13 @@ resumes only after its repair passes. Do not silently exceed the 1,500-line soft
 | 2026-08-23 | Codex: impossible late renumbering | Accepted: emergent defects use numbered repair PRs outside the fixed six milestones, followed by focused and full reruns. |
 | 2026-08-24 | Codex: Step 2 package omits runtime | Accepted: Step 2 now adds `runtime/` to the root allowlist and proves the packed import; Step 3 replaces it with bundled workspaces. |
 | 2026-08-24 | Cubic: undefined `Not run` result | Accepted: the regression baseline now distinguishes no attempted row from partial execution and makes every non-pass state block retirement. |
+| 2026-08-24 | Step 2 implementation review applicability | No repository-local `architecture-implementation-review` skill is available; perform direct source/diff review plus the planned automated/build/pack checks. |
+| 2026-08-24 | Cubic: bundle rebuild trigger | Accepted: AGENTS and `.gitattributes` now name runtime alongside core/Claude source. |
+| 2026-08-24 | Cubic: pack graph portability/completeness | Accepted: normalize Windows separators and include side-effect imports in graph traversal. |
+| 2026-08-24 | Cubic: case-variant targets | Accepted: registry keys normalize owner/repo casing while reports retain caller casing; duplicate/start/stop test added. |
+| 2026-08-24 | Cubic: in-flight start after cleanup | Accepted: lifecycle generation invalidates starts crossing `stopAll`; dedicated timer/map test added. |
+| 2026-08-24 | Cubic: unconditional CI/label wording | Accepted: tool text names `flushOnCiFailure` and the configured ready label; assertions added. |
+| 2026-08-24 | Cubic/Codex: case-variant Claude handoff | Accepted: ready events use the watched target identity and Claude stores normalized registry keys; the handoff test marks and unmarks through variant casing. |
 
 ## Verification Log
 
@@ -92,6 +118,17 @@ resumes only after its repair passes. Do not silently exceed the 1,500-line soft
   and make autonomous notification/no-agent-delay behavior an explicit tested contract.
 - [x] PR review incorporated: available regression baseline, correct Pi-versus-OMP replacement lifecycles, canceled
   transition retention, a non-renumbering repair flow, independently packable Step 2, and complete result states.
+
+### Step 2/6
+
+- [x] `npm test` — 24 tests pass, including lifecycle cleanup and case-insensitive registry and ready-handoff behavior.
+- [x] `npm run typecheck`.
+- [x] `npm run pack:check` — packed OpenCode graph includes all 11 reachable local imports.
+- [x] `npm run build` — Claude Code bundle rebuilt twice with SHA-256
+  `df5c43e28a05cbe0baeb445b9c725ec878aa7bd0591047cbcfa571581ac718d4` both times.
+- [x] Packed OpenCode entry imports with sole export `PrMonitorPlugin`; Claude bundle starts and shuts down over stdio.
+- [x] Core/runtime host-import scans, rewritten-source 120-column check, and `git diff --check` pass.
+- [x] Diff: 2,028 textual changed lines including review fixes, within the recorded 2,100-line target.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/
 platform matrix required by `PLAN.md`.

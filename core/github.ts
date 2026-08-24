@@ -3,7 +3,6 @@
 // into a PrSnapshot. Comments authored by the authenticated gh user containing
 // the configured ignore tag are invisible to the plugin.
 
-import type { PluginInput } from "@opencode-ai/plugin"
 import type { Target } from "./target"
 
 export type CommentMeta = { id: string; author: string; isBot: boolean; createdAt: string }
@@ -42,18 +41,6 @@ export class PollError extends Error {
 }
 
 export type GhRunner = (args: string[]) => Promise<string>
-
-export function createGhRunner($: PluginInput["$"]): GhRunner {
-  return async (args) => {
-    const result = await $`gh ${args}`.quiet().nothrow()
-    if (result.exitCode !== 0) {
-      const stderr = result.stderr.toString().trim()
-      const notFound = /could not resolve to|not found|404/i.test(stderr) && !/could not resolve host/i.test(stderr)
-      throw new PollError(stderr || `gh exited with code ${result.exitCode}`, { notFound })
-    }
-    return result.stdout.toString()
-  }
-}
 
 const PR_QUERY = `
 query($owner: String!, $repo: String!, $number: Int!) {

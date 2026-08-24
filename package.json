@@ -11,6 +11,7 @@
   },
   "files": [
     "core",
+    "runtime",
     "opencode"
   ],
   "repository": {
@@ -39,7 +40,7 @@
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "build": "esbuild claude-code/src/mcp-server.ts --bundle --platform=node --format=esm --target=node18 --outfile=claude-code/dist/mcp-server.mjs --log-level=warning --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
-    "pack:check": "npm pack --dry-run --ignore-scripts",
+    "pack:check": "node scripts/check-pack.mjs",
     "prepublishOnly": "npm test && npm run typecheck && npm run pack:check"
   },
   "publishConfig": {

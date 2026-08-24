@@ -23,6 +23,10 @@ export function targetKey(target: Target): string {
   return `${target.owner}/${target.repo}#${target.number}`
 }
 
+export function targetRegistryKey(target: Target): string {
+  return `${target.owner.toLowerCase()}/${target.repo.toLowerCase()}#${target.number}`
+}
+
 export function targetUrl(target: Target): string {
   return `https://github.com/${target.owner}/${target.repo}/pull/${target.number}`
 }
