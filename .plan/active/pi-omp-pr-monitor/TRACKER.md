@@ -159,7 +159,7 @@ because the implementation moves concurrency and lifecycle ownership.
 - [x] `npm run pack:check` — exact five-file tarball; temporary install; typed `.`/`./server` imports and package metadata export.
 - [x] `npm run release:check`; workspace prepack rebuild; OpenCode clean/build cycle.
 - [x] Claude committed bundle unchanged; root/target licenses byte-identical; `actionlint` and `git diff --check` pass.
-- [ ] Windows CI rerun after the shell-independent npm fix; Linux/macOS already pass.
+- [x] Linux, macOS, and Windows CI pass after the shell-independent npm fix.
 - [x] Review-fixed diff: 600 textual changed lines including PR/plan bookkeeping, within the 1,200-line target.
 - [x] Commit `38122df` pushed and [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12) opened with the exact Step 3 title.
 
