@@ -3,11 +3,11 @@
 ## Current State
 
 - **Plan slug:** `pi-omp-pr-monitor`
-- **Plan status:** Step 2/6 implementation and verification
+- **Plan status:** Step 2/6 open for review
 - **Current branch:** `pi-omp-pr-monitor-step-2`
-- **Current PR:** not opened yet; Step 1 [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) merged
+- **Current PR:** [#11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11)
 - **Implementation started:** yes
-- **Next action:** finish Step 2 verification, commit, push, and open its PR
+- **Next action:** address Step 2 review/monitor reports and merge; then advance Step 3 packaging
 - **Retirement:** blocked until every required row in `PLAN.md` passes
 
 ## Fixed Delivery Sequence
@@ -15,7 +15,7 @@
 | Done | Step | Exact PR title | Complexity | Soft line target | State |
 |---|---|---|---|---:|---|
 | [x] | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan, exact skill copy, and regression baseline | 1,150 | [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) merged |
-| [ ] | 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,000 | In progress |
+| [ ] | 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,000 | [PR #11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11) open |
 | [ ] | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 | Pending Step 2 |
 | [ ] | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 1,500 | Pending Step 3 |
 | [ ] | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 | Pending Step 4 |
@@ -75,7 +75,7 @@ resumes only after its repair passes. Do not silently exceed the 1,500-line soft
 - [x] Add shared-runtime/config/lifecycle/label tests and update the Claude `monitor-pr` skill.
 - [x] Rebuild the committed Claude Code bundle and update current architecture/config documentation.
 - [x] Complete final tests, direct source review, dependency/line-width checks, and diff/line-count checks.
-- [ ] Commit, push, and open the Step 2 PR.
+- [x] Commit `a1d0e2e`, push, and open [PR #11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11).
 
 The Step 2 diff is expected near 2,000 changed lines and is intentionally above the 1,500-line soft cap. The runtime,
 both shipping adapters, transitional package allowlist, and tests form one atomic ownership migration; splitting an
@@ -122,7 +122,7 @@ because the implementation moves concurrency and lifecycle ownership.
   `9b425ac83c8f36f71ead17e19bc121cb98dd0ae6b223b60da0b14f88ce1565d0` both times.
 - [x] Packed OpenCode entry imports with sole export `PrMonitorPlugin`; Claude bundle starts and shuts down over stdio.
 - [x] Core/runtime host-import scans, rewritten-source 120-column check, and `git diff --check` pass.
-- [x] Diff: 1,949 textual changed lines before PR-link bookkeeping, within the recorded 2,000-line target.
+- [x] Diff: 1,949 textual changed lines including PR-link bookkeeping, within the recorded 2,000-line target.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/
 platform matrix required by `PLAN.md`.
