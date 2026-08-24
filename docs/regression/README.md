@@ -32,6 +32,21 @@ Use the shortest boundary that observes the complete invariant:
 A source import does not prove a packed artifact. A fake host does not prove actual loader compatibility. One host
 or platform proves only that matrix row unless the owning feature document explicitly names it representative.
 
+## Matrix Vocabulary
+
+Every required row names the dimensions that affect its claim:
+
+- **boundary:** automated, adapter contract, actual host, or packaged/external;
+- **artifact:** source tree, generated bundle, npm tarball/install, or Claude Git plugin root;
+- **host/version:** OpenCode, Claude Code, Pi, OMP, GitHub CLI, and every minimum/current version the feature names;
+- **platform/runtime:** operating system plus Node/Bun/host runtime where behavior can differ;
+- **variation:** normal, failure, lifecycle, race, recovery, trust, config, or compatibility path; and
+- **external fixture:** disposable GitHub repository/PR, authenticated identity, labels, CI, and cleanup state.
+
+Result states are fixed: `Pass` completed every named dimension; `Partial` ran some but not all required dimensions;
+`Fail` observed a divergent result; `Blocked` attempted the row but required infrastructure prevented completion;
+`Not run` means no required part was attempted. Only `Pass` satisfies a required row.
+
 ## Running And Recording Coverage
 
 1. Collect every applicable requirement through the requested level from each affected feature document.
@@ -42,10 +57,9 @@ or platform proves only that matrix row unless the owning feature document expli
 5. Keep only privacy-safe evidence. Never commit credentials, prompts, transcripts, comment bodies, raw logs,
    account identifiers, tokens, or local host configuration.
 
-`Partial` means some executed scope passed but required matrix rows did not run. `Blocked` means required
-infrastructure prevented an attempted row. `Not run` means no required row was attempted and therefore no pass/fail
-evidence exists. None is a pass. Clean up test PRs, labels, package installs, timers, sessions, and temporary
-configuration unless retained residue is explicitly recorded for diagnosis.
+Clean up test PRs, labels, package installs, timers, sessions, and temporary configuration unless retained residue
+is explicitly recorded for diagnosis. A summary such as "tests pass" is not evidence unless it identifies the
+feature requirements and matrix row that those tests prove.
 
 ## Feature Maintenance
 
@@ -53,12 +67,17 @@ Add or update a feature file when product behavior, delivery, lifecycle, package
 limitation changes. Keep acceptance criteria fixed but avoid brittle click-by-click scripts. Feature files should
 name the owning source/tests, highest level, proof boundary, and required host/platform matrix.
 
-The planned initial feature documents are:
+## Feature Index
 
-- `pull-request-monitoring.md` for shared watch semantics and host delivery/lifecycle;
-- `plugin-installation.md` for npm and Claude Code artifacts, loaders, and release metadata.
+- [`pull-request-monitoring.md`](pull-request-monitoring.md) — shared watch/activity/report semantics, autonomous
+  ownership, ready-label handoff, host delivery/lifecycle, and configuration. Highest level: L5; primary boundaries:
+  automated through packaged/external.
+- [`plugin-installation.md`](plugin-installation.md) — OpenCode and Pi/OMP npm archives, Claude Git plugin root,
+  exactly-once skill discovery, loader compatibility, release metadata, and publish order. Highest level: L5;
+  primary boundaries: packaged/actual-host/external.
 
-They are created and reconciled in the penultimate documentation step of the active Pi/OMP plan.
+A behavior appearing in both files is not duplicate evidence: monitoring proves the runtime outcome, while
+installation proves that the released artifact exposes the path capable of producing it.
 
 ## Durable Plan Retirement
 

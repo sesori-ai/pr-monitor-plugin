@@ -29,6 +29,8 @@ runtime/             # Host-neutral application/session layer.
 
 skills/              # Canonical monitor-pr skill copied into push-host npm artifacts at build time.
 
+docs/regression/     # Durable monitoring and installation acceptance matrices used for release/plan evidence.
+
 opencode/            # OpenCode source plus publishable npm workspace.
   index.ts     # Sole source export PrMonitorPlugin (loader invokes EVERY export — keep it the only one).
   gh.ts        # OpenCode's injected Bun-shell GhRunner.
@@ -109,6 +111,15 @@ compatibility shim resolves that imported constant to `.omp`; do not replace it 
 - Injected `GhRunner`: OpenCode wraps Bun `$` in `opencode/gh.ts`; Node adapters use `runtime/node-gh.ts`. Both throw `PollError(msg, { notFound })` on failure; `core/github.ts` imports neither host.
 - `PR_QUERY` (`core/github.ts`) fetches title, url, state, mergeable, head SHA, latest commit's check rollup, review requests/latestReviews, the first review-thread page + comments, issue comment count, and labels. `REVIEW_THREADS_PAGE_QUERY` fetches every remaining thread page only when the connection exceeds 100, so follow-ups cannot disappear beyond the first page.
 - `normalizeSnapshot` → `PrSnapshot`; `ciPhase` → `none|running|concluded`.
+
+## Regression catalog
+
+- `docs/regression/pull-request-monitoring.md` owns shared watch/report/label behavior plus host delivery, lifecycle,
+  config, and autonomous-waiting requirements.
+- `docs/regression/plugin-installation.md` owns exact npm/Claude artifacts, host floors, loader/skill discovery, and
+  lockstep release behavior.
+- `docs/regression/README.md` defines cumulative L1-L5 boundaries and `Pass`/`Partial`/`Fail`/`Blocked`/`Not run`.
+  Actual-host, platform, and external rows are not satisfied by source imports or fake adapters.
 
 ## Building / releasing
 

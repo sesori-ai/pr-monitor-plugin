@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `@sesori/pr-monitor-pi`, one package for upstream Pi and OMP with native steering delivery, session-safe lifecycle cleanup, trusted project config, and real-loader checks.
 - Added a packaged `monitor-pr` skill for every harness. OpenCode, Pi, and OMP share one generated push-host skill; Claude Code retains its keep-alive-aware variant. Consuming repositories no longer need to copy OpenCode guidance into `.opencode/skills/`.
+- Added durable L1-L5 regression catalogs for cross-host monitoring behavior, exact installation artifacts, loader
+  compatibility, and release metadata.
 
 ### Changed
 

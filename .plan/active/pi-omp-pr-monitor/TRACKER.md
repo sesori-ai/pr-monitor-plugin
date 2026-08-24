@@ -3,11 +3,11 @@
 ## Current State
 
 - **Plan slug:** `pi-omp-pr-monitor`
-- **Plan status:** Step 3/6 merged; Step 4/6 open for review
-- **Current branch:** `pi-omp-pr-monitor-step-4`
-- **Current PR:** Step 4 [#14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14)
+- **Plan status:** Step 4/6 merged; Step 5/6 verified and ready to publish
+- **Current branch:** `pi-omp-pr-monitor-step-5`
+- **Current PR:** none; Step 5 is ready to open
 - **Implementation started:** yes
-- **Next action:** address Step 4 reports; the verified Step 5 successor remains local
+- **Next action:** push and open Step 5, then begin the Step 6 verification successor locally
 - **Retirement:** blocked until every required row in `PLAN.md` passes
 
 ## Fixed Delivery Sequence
@@ -17,8 +17,8 @@
 | [x] | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan, exact skill copy, and regression baseline | 1,150 | [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) merged |
 | [x] | 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,100 | [PR #11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11) merged |
 | [x] | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 | [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12) merged |
-| [ ] | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 3,500 | [PR #14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14) open |
-| [ ] | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 | Pending Step 4 |
+| [x] | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 3,500 | [PR #14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14) merged |
+| [ ] | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 | Complete and synced with `main`; ready to open |
 | [ ] | 6/6 | `⚙️ [pi-omp-pr-monitor] test: verify Pi and OMP and retire the plan [step 6/6]` | Moderate packaged, live-host, and external verification | 700 | Pending Step 5 |
 
 The six milestone titles and total are fixed. Emergent defects use separately tracked
@@ -118,6 +118,19 @@ pinned Pi floor, while non-lockfile source, skills, tests, scripts, docs, and re
 Splitting the package metadata from its adapter, generated skill, or loader checks would publish or merge an
 incomplete host contract.
 
+## Step 5 Checklist
+
+- [x] Create the Step 5 successor from the complete Step 4 head without publishing it.
+- [x] Finalize regression levels, proof boundaries, matrix dimensions, result states, feature index, and retirement
+  rules.
+- [x] Add shared monitoring semantics, handoff, autonomous-delivery, host lifecycle, and config acceptance coverage.
+- [x] Add exact npm/Claude artifact, loader compatibility, skill discovery, and release metadata coverage.
+- [x] Reconcile root/target READMEs, `AGENTS.md`, `CHANGELOG.md`, this plan, and tracker with final behavior.
+- [x] Validate Markdown structure/references, source claims, line count, and `git diff --check`.
+- [x] Commit with the exact Step 5 title and keep local until Step 4 merges.
+- [x] Sync with merged Step 4 and current `main`.
+- [ ] Push and open Step 5.
+
 ## Review Log
 
 | Date | Review | Result |
@@ -156,6 +169,7 @@ incomplete host contract.
 | 2026-08-24 | Codex: OMP config resolves `.pi` | Declined with actual-loader proof: OMP rewrites the host import to its shim, where `CONFIG_DIR_NAME` is `.omp`; loader assertion added. |
 | 2026-08-24 | Codex: Pi retains the first invocation context | Accepted: per-execute config loaders now use the current cwd/trust context without splitting session ownership. |
 | 2026-08-24 | Codex: skills promise CI-less push reports | Accepted: both skills now promise takeback only for reportable comments/review changes, not a bare head push. |
+| 2026-08-24 | Step 5 implementation review applicability | Not run: documentation-only reconciliation changes no production architecture; source and artifact contracts are reviewed directly. |
 
 ## Verification Log
 
@@ -197,7 +211,7 @@ incomplete host contract.
 - [x] Review-fixed diff: 601 textual changed lines including PR/plan bookkeeping, within the 1,200-line target.
 - [x] Final head `4ca99b1` merged as `e7a725c` through [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12).
 
-### Step 4/6 (local successor)
+### Step 4/6
 
 - [x] `npm test` — 32/32 pass, including per-invocation Pi/OMP config, delivery, lifecycle, trust, and skill contracts.
 - [x] `npm run typecheck`; changed TypeScript/JavaScript files satisfy the 120-column limit.
@@ -213,7 +227,15 @@ incomplete host contract.
   `git diff --check` pass.
 - [x] Diff: 3,419 textual changed lines within the revised 3,500 target; 1,845 are generated lockfile changes and
   1,574 are source, skills, tests, scripts, docs, bundle, and tracker evidence.
-- [x] Implementation commit `07fa318` pushed and [PR #14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14) opened.
+- [x] Final head `6a14ac6` merged as `429068d` through [PR #14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14).
+
+### Step 5/6 (local successor)
+
+- [x] Feature index, local Markdown references, heading hierarchy, and code fences validate across 10 changed files.
+- [x] Monitoring and installation claims cross-checked against final adapters, manifests, package checks, and tests.
+- [x] Changed prose satisfies the 120-column limit and `git diff --check` passes.
+- [x] Diff: 459 textual changed lines within the 700-line target.
+- [x] TypeScript/build suites not run: Step 5 changes documentation only; Step 4 verification remains unchanged.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/
 platform matrix required by `PLAN.md`.

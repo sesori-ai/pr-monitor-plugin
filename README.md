@@ -203,6 +203,18 @@ claude-code/     Claude Code shell — this directory is the plugin root (${CLAU
 
 Dependency flows adapter → `runtime/` → `core/`; core imports no host SDK and runtime owns common session orchestration. The root is a private npm workspace coordinator. OpenCode source stays in `opencode/`, but publication bundles it with private core/runtime into `opencode/dist/index.js`; both `.` and `./server` resolve to that sole-export bundle. Its tarball contains only the bundle and declaration, target README/license, and manifest; generated OpenCode output stays uncommitted. The Claude Code shell is bundled with esbuild into the committed `claude-code/dist/mcp-server.mjs`, since Git plugin installs run no build step; `claude-code/hooks/drain-spool.mjs` is the dependency-free hook that injects spooled reports and runs the keep-alive loop, and `claude-code/hooks/await-activity.mjs` is the blocking waiter it hands to the session; `claude-code/skills/monitor-pr/` is the behavior — when to start a monitor, what to do with each report, when to hand off; `claude-code/.mcp.json` declares the MCP server (plugin-root convention — an inline `mcpServers` field in plugin.json is not picked up).
 
+## Regression coverage
+
+Durable acceptance criteria live in [`docs/regression/`](docs/regression/README.md):
+
+- [`pull-request-monitoring.md`](docs/regression/pull-request-monitoring.md) covers shared watch semantics,
+  ready-label handoff, autonomous delivery, host lifecycle, and configuration.
+- [`plugin-installation.md`](docs/regression/plugin-installation.md) covers exact npm/Claude artifacts, host floors,
+  skill discovery, loader compatibility, and lockstep release metadata.
+
+The catalogs distinguish automated, adapter, actual-host, and packaged/external proof. Do not treat a source import
+or fake adapter as proof of a packed host integration.
+
 ## Releasing
 
 A release uses one version for all targets: the annotated `vX.Y.Z` Git tag releases the Claude Code plugin, while the `opencode/` and `pi/` workspaces publish `@sesori/pr-monitor-opencode` and `@sesori/pr-monitor-pi`. The private root cannot be published accidentally. There is no separate GitHub Release step. Update `opencode/package.json`, `package-lock.json`, `claude-code/.claude-plugin/plugin.json`, and `CHANGELOG.md`, then run:

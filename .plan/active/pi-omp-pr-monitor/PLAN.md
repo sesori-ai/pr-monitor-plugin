@@ -3,7 +3,7 @@
 ## Status
 
 - **Plan slug:** `pi-omp-pr-monitor`
-- **Status:** Step 3/6 merged; Step 4/6 Pi/OMP support open in PR #14
+- **Status:** Step 4/6 merged; Step 5/6 documentation ready for review
 - **Plan date:** 2026-08-23
 - **Implementation base:** `origin/main` at `af612132995aac6e48b52c7c35dd3d133d08ce82`
 - **Host research baselines:** Pi `0.84.2`, OMP `18.0.3`, OpenCode `>=1.17.0`, and Claude Code plugin

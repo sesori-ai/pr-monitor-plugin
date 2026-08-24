@@ -54,7 +54,9 @@ the project is trusted. Available settings:
 - `readyLabel`
 
 See the [repository README](https://github.com/sesori-ai/opencode-pr-monitor#readme)
-for action semantics, defaults, and development/release instructions.
+for action semantics, defaults, and development/release instructions. Durable behavior and artifact checks are in
+the repository's [regression catalog](https://github.com/sesori-ai/opencode-pr-monitor/tree/main/docs/regression):
+`pull-request-monitoring.md` and `plugin-installation.md`.
 
 ## License
 
