@@ -1,6 +1,6 @@
 ---
 name: monitor-pr
-description: Drive a GitHub PR to ready-for-human-review without supervision. Start a background monitor with the pr_monitor tool immediately after opening a PR, act on every incoming "[PR Monitor]" report (review comments, failing CI, merge conflicts), label the PR ready when everything is green, and pick the work back up when a human responds. Use right after `gh pr create`, when asked to monitor/watch a PR, and whenever a "[PR Monitor]" report or "[PR Monitor keep-alive]" message appears.
+description: Drive a GitHub PR to ready-for-human-review without supervision. Start pr_monitor immediately after opening a PR and act on every automatic report; the monitor owns polling, so never create sleeps, scheduled checks, or polling loops. Address review comments, failing CI, and conflicts, label the PR ready only after mark_ready confirms success, and take work back when a human responds. Use after `gh pr create`, when asked to watch a PR, and whenever a "[PR Monitor]" or "[PR Monitor keep-alive]" message appears.
 ---
 
 # monitor-pr
@@ -8,9 +8,9 @@ description: Drive a GitHub PR to ready-for-human-review without supervision. St
 Own a PR from the moment it is opened until a human needs to look at it, then
 hand it over — and take it back if the human responds.
 
-The `pr_monitor` tool watches the PR in the background and delivers factual
-`[PR Monitor]` reports into this session. This skill is what turns those
-reports into work.
+The `pr_monitor` tool owns GitHub polling and delivers factual `[PR Monitor]`
+reports into this session automatically. This skill turns those reports into
+work; it must never create a second waiting or polling mechanism.
 
 ## The loop
 
@@ -95,31 +95,37 @@ pr_monitor(action: "mark_ready", pr: "owner/repo#123")
 ```
 
 This adds the `readyLabel` (default `ready-for-human-review`) on GitHub and is
-the **handoff**: monitoring continues, but the PR stops holding this session
-open. Report it to the user in one line and finish.
+the **handoff** only after the tool confirms success. Monitoring continues, but
+the PR stops holding this session open. Report it to the user in one line and
+finish. If `mark_ready` fails, do not claim handoff or finish: diagnose the
+GitHub/config error and retry; keep-alive remains armed.
 
 Do not hand off early. A PR with CI still running, an unanswered thread, or a
 reviewer that has not reported yet is not ready — wait instead (step 4).
 
-## 4. Waiting is the job
+## 4. Never invent a wait
 
-Between events there is nothing to do but wait, and waiting is expected — a
-quiet PR is not a reason to finish. When a turn would end while a monitored PR
-is still yours, a `[PR Monitor keep-alive]` message asks you to keep going. It
-carries the exact command to run:
+The monitor owns polling and notifications arrive automatically. **NEVER** run
+`sleep`, delayed Bash, a scheduled/cron job, a background polling loop, repeated
+`gh pr checks`, or routine `pr_monitor status`/`flush` calls while waiting for
+CI or review. Do not proactively run a waiter immediately after `start`.
+
+When a turn would end while a monitored PR is still yours, the plugin may inject
+a `[PR Monitor keep-alive]` message containing this exact event waiter:
 
 ```
 node "<plugin>/hooks/await-activity.mjs" --session <pid> --timeout 540
 ```
 
-Run it with the Bash tool and `timeout: 600000`. It blocks until a report lands
-(the report is injected automatically right after), until monitoring finishes,
-or until it times out — then reassess and, if there is still nothing to do, wait
-again.
+That hook-issued command is the **only** allowed waiting mechanism. Run it only
+when the keep-alive message asks, with the Bash tool and `timeout: 600000`. It
+blocks until a report is ready (and the next hook injects it), monitoring ends,
+or it times out. Never substitute or layer another delay around it.
 
-If the user asks you to stop, or wants your attention elsewhere, call
-`pr_monitor(action: "stop", pr: "all")` and follow the user. The user always
-wins over the loop.
+If no keep-alive message asks for that command, end the turn; do not manufacture
+work while the monitor waits. If the user asks you to stop or wants your
+attention elsewhere, call `pr_monitor(action: "stop", pr: "all")` and follow
+the user. The user always wins over the loop.
 
 ## 5. Taking the PR back
 

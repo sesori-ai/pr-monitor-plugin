@@ -10,5 +10,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["core", "opencode", "claude-code/src", "test"]
+  "include": ["core", "runtime", "opencode", "claude-code/src", "test"]
 }

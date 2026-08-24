@@ -1,0 +1,386 @@
+// Session-scoped application runtime shared by host adapters. It owns watch
+// deduplication, GitHub identity, timers, common actions, and label operations;
+// adapters own transport, lifecycle policy, and truthful host wording.
+
+import type { MonitorConfig } from "../core/config"
+import { fetchPrSnapshot, type GhRunner, type PrSnapshot } from "../core/github"
+import { markReadyForHumanReview, removeReadyForHumanReview } from "../core/label"
+import { parseTarget, targetKey, targetUrl, type Target } from "../core/target"
+import { PrWatch } from "../core/watch"
+import { MonitorAction } from "./tool"
+
+export enum InitialAnnouncementMode {
+  background = "background",
+  awaitDelivery = "await_delivery",
+}
+
+export enum StopNoticeChannel {
+  normal = "normal",
+  persistent = "persistent",
+}
+
+export enum InitialAnnouncementState {
+  disabled = "disabled",
+  pending = "pending",
+  delivered = "delivered",
+  retrying = "retrying",
+}
+
+export enum WatchChangeType {
+  started = "started",
+  stopped = "stopped",
+}
+
+export type ReportChannel = {
+  deliver: (input: { report: string }) => Promise<void>
+  persist?: (input: { report: string }) => Promise<void>
+}
+
+export type WatchView<TConfig extends MonitorConfig> = {
+  target: Target
+  config: TConfig
+  statusLine: string
+}
+
+export type StartDetails<TConfig extends MonitorConfig> = {
+  target: Target
+  config: TConfig
+  announcement: InitialAnnouncementState
+}
+
+export type ReadyDetails = {
+  target: Target
+  ready: boolean
+  watched: boolean
+}
+
+export type MonitorActionResult<TConfig extends MonitorConfig> = {
+  text: string
+  start?: StartDetails<TConfig>
+  ready?: ReadyDetails
+}
+
+type WatchEntry<TConfig extends MonitorConfig> = {
+  watch: PrWatch
+  timer: unknown
+  config: TConfig
+  channel: ReportChannel
+}
+
+type MonitorSessionDeps<TConfig extends MonitorConfig> = {
+  runGh: GhRunner
+  loadConfig: () => Promise<TConfig>
+  log: (message: string) => void
+  now?: () => number
+  schedule?: (input: { callback: () => void; intervalMs: number }) => unknown
+  cancel?: (input: { timer: unknown }) => void
+  onWatchChanged?: (event: { type: WatchChangeType; target: Target; config: TConfig }) => void
+  onTickSettled?: (event: { target: Target; config: TConfig }) => void
+  onReadyChanged?: (event: { target: Target; ready: boolean; watched: boolean; config: TConfig }) => void
+  statusSuffix?: (input: { target: Target; config: TConfig }) => string
+}
+
+type StartOptions<TConfig extends MonitorConfig> = {
+  prepare?: () => Promise<string | undefined>
+  createChannel: (input: { target: Target; config: TConfig }) => ReportChannel
+  announcementMode: InitialAnnouncementMode
+}
+
+export class MonitorSession<TConfig extends MonitorConfig> {
+  private readonly deps: Required<Pick<MonitorSessionDeps<TConfig>, "now" | "schedule" | "cancel">> &
+    Omit<MonitorSessionDeps<TConfig>, "now" | "schedule" | "cancel">
+  private readonly watches = new Map<string, WatchEntry<TConfig>>()
+  private selfLogin: string | undefined
+  private selfLoginPromise: Promise<string> | undefined
+
+  constructor(deps: MonitorSessionDeps<TConfig>) {
+    this.deps = {
+      ...deps,
+      now: deps.now ?? Date.now,
+      schedule: deps.schedule ?? (({ callback, intervalMs }) => setInterval(callback, intervalMs)),
+      cancel:
+        deps.cancel ??
+        (({ timer }) => {
+          clearInterval(timer as ReturnType<typeof setInterval>)
+        }),
+    }
+  }
+
+  list(): WatchView<TConfig>[] {
+    return [...this.watches.values()].map(({ watch, config }) => ({
+      target: watch.target,
+      config,
+      statusLine: watch.statusLine(),
+    }))
+  }
+
+  async execute({
+    action,
+    pr,
+    start,
+  }: {
+    action: MonitorAction
+    pr: string | undefined
+    start?: StartOptions<TConfig>
+  }): Promise<MonitorActionResult<TConfig>> {
+    switch (action) {
+      case MonitorAction.start:
+        if (!pr || pr === "all") {
+          return { text: "action 'start' requires a single explicit pr: 'owner/repo#123' or a PR URL." }
+        }
+        if (start === undefined) return { text: "Cannot start monitor: this host did not provide a report channel." }
+        return await this.start({ pr, options: start })
+      case MonitorAction.stop:
+        if (!pr) return { text: "action 'stop' requires pr: 'owner/repo#123', a PR URL, or 'all'." }
+        return this.stop({ pr })
+      case MonitorAction.flush:
+        if (!pr) return { text: "action 'flush' requires pr: 'owner/repo#123', a PR URL, or 'all'." }
+        return await this.flush({ pr })
+      case MonitorAction.status:
+        return { text: this.status() }
+      case MonitorAction.markReady:
+        if (!pr || pr === "all") {
+          return { text: "action 'mark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL." }
+        }
+        return await this.changeReady({ pr, ready: true })
+      case MonitorAction.unmarkReady:
+        if (!pr || pr === "all") {
+          return { text: "action 'unmark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL." }
+        }
+        return await this.changeReady({ pr, ready: false })
+    }
+  }
+
+  async stopAll({
+    notice,
+    channel = StopNoticeChannel.normal,
+  }: {
+    notice?: string
+    channel?: StopNoticeChannel
+  }): Promise<void> {
+    const entries = [...this.watches.values()]
+    for (const entry of entries) entry.watch.stop()
+    if (notice === undefined) return
+
+    await Promise.all(
+      entries.map(async (entry) => {
+        const report = `[PR Monitor] [${targetKey(entry.watch.target)}](${targetUrl(entry.watch.target)}) — ${notice}`
+        const send =
+          channel === StopNoticeChannel.persistent
+            ? (entry.channel.persist ?? entry.channel.deliver)
+            : entry.channel.deliver
+        try {
+          await send({ report })
+        } catch (error) {
+          this.deps.log(`stop notice delivery failed for ${targetKey(entry.watch.target)}: ${error}`)
+        }
+      }),
+    )
+  }
+
+  private async start({
+    pr,
+    options,
+  }: {
+    pr: string
+    options: StartOptions<TConfig>
+  }): Promise<MonitorActionResult<TConfig>> {
+    const target = parseTarget(pr)
+    if ("error" in target) return { text: target.error }
+    const key = targetKey(target)
+    const existing = this.watches.get(key)
+    if (existing) return { text: `Already monitoring ${key} in this session.\n${existing.watch.statusLine()}` }
+
+    const preparationError = await options.prepare?.()
+    if (preparationError !== undefined) return { text: preparationError }
+
+    let config: TConfig
+    try {
+      config = await this.deps.loadConfig()
+    } catch (error) {
+      return { text: `Cannot start monitor for ${key}: loading configuration failed (${(error as Error).message}).` }
+    }
+    if (config.ignoreCommentTag !== undefined && this.selfLogin === undefined) {
+      try {
+        this.selfLoginPromise ??= this.deps.runGh(["api", "user", "--jq", ".login"]).then((login) => login.trim())
+        this.selfLogin = await this.selfLoginPromise
+      } catch (error) {
+        this.selfLoginPromise = undefined
+        return {
+          text:
+            `Cannot start monitor: ignoreCommentTag is configured but resolving the authenticated gh user failed ` +
+            `(${(error as Error).message}). Run \`gh auth status\` to check.`,
+        }
+      }
+    }
+
+    let initial: PrSnapshot
+    try {
+      initial = await this.fetchSnapshot({ target, config })
+    } catch (error) {
+      return { text: `Cannot start monitor for ${key}: ${(error as Error).message}` }
+    }
+    if (initial.state !== "OPEN") return { text: `Cannot start monitor: ${key} is already ${initial.state}.` }
+
+    const raced = this.watches.get(key)
+    if (raced) return { text: `Already monitoring ${key} in this session.\n${raced.watch.statusLine()}` }
+
+    const reportChannel = options.createChannel({ target, config })
+    let timer: unknown
+    const watch = new PrWatch({
+      target,
+      config,
+      initial,
+      deps: {
+        now: this.deps.now,
+        fetchSnapshot: () => this.fetchSnapshot({ target, config }),
+        deliver: (report) => reportChannel.deliver({ report }),
+        log: this.deps.log,
+        onStopped: () => {
+          this.deps.cancel({ timer })
+          const entry = this.watches.get(key)
+          if (entry?.watch === watch) {
+            this.watches.delete(key)
+            this.notifyWatchChanged({ type: WatchChangeType.stopped, target, config })
+          }
+        },
+      },
+    })
+    timer = this.deps.schedule({
+      intervalMs: config.pollIntervalSeconds * 1000,
+      callback: () => {
+        void watch.tick().finally(() => this.notifyTickSettled({ target, config }))
+      },
+    })
+    this.watches.set(key, { watch, timer, config, channel: reportChannel })
+    this.notifyWatchChanged({ type: WatchChangeType.started, target, config })
+
+    let announcement = InitialAnnouncementState.disabled
+    if (config.announceOnStart) {
+      if (options.announcementMode === InitialAnnouncementMode.awaitDelivery) {
+        announcement = (await watch.announceInitial())
+          ? InitialAnnouncementState.delivered
+          : InitialAnnouncementState.retrying
+        if (watch.isStopped) {
+          return { text: `Monitor for ${key} stopped before startup completed; no active monitor remains.` }
+        }
+      } else {
+        announcement = InitialAnnouncementState.pending
+        void watch.announceInitial()
+      }
+    }
+
+    this.deps.log(`started monitoring ${key}`)
+    return {
+      text: `Started monitoring ${key} — "${initial.title}".`,
+      start: { target, config, announcement },
+    }
+  }
+
+  private select({ pr }: { pr: string }): WatchEntry<TConfig>[] | { error: string } {
+    if (pr === "all") return [...this.watches.values()]
+    const target = parseTarget(pr)
+    if ("error" in target) return target
+    const entry = this.watches.get(targetKey(target))
+    if (!entry) {
+      return {
+        error: `No monitor for ${targetKey(target)} in this session. Use action "status" to list active monitors.`,
+      }
+    }
+    return [entry]
+  }
+
+  private stop({ pr }: { pr: string }): MonitorActionResult<TConfig> {
+    const selected = this.select({ pr })
+    if ("error" in selected) return { text: selected.error }
+    if (selected.length === 0) return { text: "No active monitors in this session." }
+    for (const entry of selected) entry.watch.stop()
+    return {
+      text:
+        `Stopped ${selected.length} monitor(s): ` +
+        `${selected.map((entry) => targetKey(entry.watch.target)).join(", ")}.`,
+    }
+  }
+
+  private async flush({ pr }: { pr: string }): Promise<MonitorActionResult<TConfig>> {
+    const selected = this.select({ pr })
+    if ("error" in selected) return { text: selected.error }
+    if (selected.length === 0) return { text: "No active monitors in this session." }
+    const reports = await Promise.all(selected.map((entry) => entry.watch.manualFlush()))
+    return { text: reports.join("\n\n") }
+  }
+
+  private status(): string {
+    if (this.watches.size === 0) return "No active monitors in this session."
+    return [...this.watches.values()]
+      .map(({ watch, config }) => {
+        let suffix = ""
+        try {
+          suffix = this.deps.statusSuffix?.({ target: watch.target, config }) ?? ""
+        } catch (error) {
+          this.deps.log(`status decoration failed for ${targetKey(watch.target)}: ${error}`)
+        }
+        return `${watch.statusLine()}${suffix}`
+      })
+      .join("\n")
+  }
+
+  private async changeReady({
+    pr,
+    ready,
+  }: {
+    pr: string
+    ready: boolean
+  }): Promise<MonitorActionResult<TConfig>> {
+    const target = parseTarget(pr)
+    if ("error" in target) return { text: target.error }
+    const key = targetKey(target)
+    try {
+      const config = await this.deps.loadConfig()
+      const text = ready
+        ? await markReadyForHumanReview(this.deps.runGh, target, config.readyLabel)
+        : await removeReadyForHumanReview(this.deps.runGh, target, config.readyLabel)
+      const watched = this.watches.has(key)
+      this.notifyReadyChanged({ target, ready, watched, config })
+      return { text, ready: { target, ready, watched } }
+    } catch (error) {
+      const action = ready
+        ? `mark ${key} as ready for human review`
+        : `withdraw the ready-for-human-review label from ${key}`
+      return { text: `Cannot ${action}: ${(error as Error).message}` }
+    }
+  }
+
+  private fetchSnapshot({ target, config }: { target: Target; config: TConfig }): Promise<PrSnapshot> {
+    return fetchPrSnapshot({
+      runGh: this.deps.runGh,
+      target,
+      ignoreTag: config.ignoreCommentTag,
+      selfLogin: this.selfLogin,
+    })
+  }
+
+  private notifyWatchChanged(event: { type: WatchChangeType; target: Target; config: TConfig }): void {
+    try {
+      this.deps.onWatchChanged?.(event)
+    } catch (error) {
+      this.deps.log(`watch ${event.type} observer failed for ${targetKey(event.target)}: ${error}`)
+    }
+  }
+
+  private notifyTickSettled(event: { target: Target; config: TConfig }): void {
+    try {
+      this.deps.onTickSettled?.(event)
+    } catch (error) {
+      this.deps.log(`tick observer failed for ${targetKey(event.target)}: ${error}`)
+    }
+  }
+
+  private notifyReadyChanged(event: { target: Target; ready: boolean; watched: boolean; config: TConfig }): void {
+    try {
+      this.deps.onReadyChanged?.(event)
+    } catch (error) {
+      this.deps.log(`ready-state observer failed for ${targetKey(event.target)}: ${error}`)
+    }
+  }
+}

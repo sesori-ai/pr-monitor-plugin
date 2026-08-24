@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { detectActivity, hasNewMergeConflict } from "../core/activity"
-import { loadConfig, type MonitorConfig } from "../core/config"
+import { loadMonitorConfig, type WatchConfig } from "../core/config"
 import { fetchPrSnapshot, normalizeSnapshot, type CommentMeta, type PrSnapshot, type ReviewThreadInfo } from "../core/github"
 import { buildReport } from "../core/report"
 import type { Target } from "../core/target"
@@ -40,7 +40,7 @@ function thread(
   }
 }
 
-function config(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
+function config(overrides: Partial<WatchConfig> = {}): WatchConfig {
   return {
     debounceMinutes: 2,
     maxCiWaitMinutes: 30,
@@ -48,10 +48,6 @@ function config(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
     ignoreCommentTag: undefined,
     announceOnStart: true,
     flushOnCiFailure: true,
-    desktopNotifications: false,
-    readyLabel: "ready-for-human-review",
-    keepAlive: true,
-    keepAliveMaxMinutes: 120,
     ...overrides,
   }
 }
@@ -59,7 +55,7 @@ function config(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
 function watchHarness(
   initial: PrSnapshot,
   polled: PrSnapshot[],
-  cfg: MonitorConfig = config({ announceOnStart: false }),
+  cfg: WatchConfig = config({ announceOnStart: false }),
   opts: { deliveryFailures?: number } = {},
 ) {
   let now = Date.parse("2026-08-03T12:00:00Z")
@@ -69,7 +65,6 @@ function watchHarness(
   const reports: string[] = []
   const watch = new PrWatch({
     target,
-    sessionID: "session-1",
     config: cfg,
     initial,
     deps: {
@@ -100,7 +95,7 @@ function watchHarness(
 }
 
 test("the default debounce is two minutes", async () => {
-  const loaded = await loadConfig([], () => {})
+  const loaded = await loadMonitorConfig({ paths: [], log: () => {} })
   assert.equal(loaded.debounceMinutes, 2)
 })
 

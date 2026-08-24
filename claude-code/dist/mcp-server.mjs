@@ -30964,48 +30964,56 @@ var StdioServerTransport = class {
 
 // core/config.ts
 import { readFile } from "node:fs/promises";
-var DEFAULT_CONFIG = {
+var DEFAULT_MONITOR_CONFIG = {
   debounceMinutes: 2,
   maxCiWaitMinutes: 30,
   pollIntervalSeconds: 60,
   ignoreCommentTag: void 0,
   announceOnStart: true,
   flushOnCiFailure: true,
+  readyLabel: "ready-for-human-review"
+};
+var DEFAULT_CLAUDE_CONFIG = {
   desktopNotifications: false,
-  readyLabel: "ready-for-human-review",
   keepAlive: true,
   keepAliveMaxMinutes: 120
 };
 var MIN_POLL_INTERVAL_SECONDS = 30;
 var MAX_POLL_INTERVAL_SECONDS = 86400;
-function resolveConfig(raw) {
-  const cfg = { ...DEFAULT_CONFIG };
-  if (typeof raw !== "object" || raw === null) return cfg;
-  const record2 = raw;
-  const num = (key) => {
-    const value = record2[key];
-    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : void 0;
-  };
-  cfg.debounceMinutes = num("debounceMinutes") ?? cfg.debounceMinutes;
-  cfg.maxCiWaitMinutes = num("maxCiWaitMinutes") ?? cfg.maxCiWaitMinutes;
-  const poll = num("pollIntervalSeconds") ?? cfg.pollIntervalSeconds;
-  cfg.pollIntervalSeconds = Math.min(Math.max(poll, MIN_POLL_INTERVAL_SECONDS), MAX_POLL_INTERVAL_SECONDS);
-  const tag = record2["ignoreCommentTag"];
-  cfg.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : void 0;
-  const announce = record2["announceOnStart"];
-  if (typeof announce === "boolean") cfg.announceOnStart = announce;
-  const flushOnCiFailure = record2["flushOnCiFailure"];
-  if (typeof flushOnCiFailure === "boolean") cfg.flushOnCiFailure = flushOnCiFailure;
-  const notify = record2["desktopNotifications"];
-  if (typeof notify === "boolean") cfg.desktopNotifications = notify;
-  const label = record2["readyLabel"];
-  if (typeof label === "string" && label.length > 0) cfg.readyLabel = label;
-  const keepAlive = record2["keepAlive"];
-  if (typeof keepAlive === "boolean") cfg.keepAlive = keepAlive;
-  cfg.keepAliveMaxMinutes = num("keepAliveMaxMinutes") ?? cfg.keepAliveMaxMinutes;
-  return cfg;
+function positiveNumber(record2, key) {
+  const value = record2[key];
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : void 0;
 }
-async function loadConfig(paths, log2) {
+function resolveMonitorConfig(raw) {
+  const config2 = { ...DEFAULT_MONITOR_CONFIG };
+  if (typeof raw !== "object" || raw === null) return config2;
+  const record2 = raw;
+  config2.debounceMinutes = positiveNumber(record2, "debounceMinutes") ?? config2.debounceMinutes;
+  config2.maxCiWaitMinutes = positiveNumber(record2, "maxCiWaitMinutes") ?? config2.maxCiWaitMinutes;
+  const poll = positiveNumber(record2, "pollIntervalSeconds") ?? config2.pollIntervalSeconds;
+  config2.pollIntervalSeconds = Math.min(Math.max(poll, MIN_POLL_INTERVAL_SECONDS), MAX_POLL_INTERVAL_SECONDS);
+  const tag = record2["ignoreCommentTag"];
+  config2.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : void 0;
+  const announce = record2["announceOnStart"];
+  if (typeof announce === "boolean") config2.announceOnStart = announce;
+  const flushOnCiFailure = record2["flushOnCiFailure"];
+  if (typeof flushOnCiFailure === "boolean") config2.flushOnCiFailure = flushOnCiFailure;
+  const label = record2["readyLabel"];
+  if (typeof label === "string" && label.length > 0) config2.readyLabel = label;
+  return config2;
+}
+function resolveClaudeConfig(raw) {
+  const config2 = { ...resolveMonitorConfig(raw), ...DEFAULT_CLAUDE_CONFIG };
+  if (typeof raw !== "object" || raw === null) return config2;
+  const record2 = raw;
+  const notify = record2["desktopNotifications"];
+  if (typeof notify === "boolean") config2.desktopNotifications = notify;
+  const keepAlive = record2["keepAlive"];
+  if (typeof keepAlive === "boolean") config2.keepAlive = keepAlive;
+  config2.keepAliveMaxMinutes = positiveNumber(record2, "keepAliveMaxMinutes") ?? config2.keepAliveMaxMinutes;
+  return config2;
+}
+async function loadResolvedConfig({ paths, log: log2, resolve }) {
   for (const path of paths) {
     let text;
     try {
@@ -31014,12 +31022,35 @@ async function loadConfig(paths, log2) {
       continue;
     }
     try {
-      return resolveConfig(JSON.parse(text));
+      return resolve(JSON.parse(text));
     } catch (error51) {
       log2(`config file ${path} is not valid JSON, ignoring it: ${error51.message}`);
     }
   }
-  return resolveConfig(void 0);
+  return resolve(void 0);
+}
+function loadClaudeConfig(input) {
+  return loadResolvedConfig({ ...input, resolve: resolveClaudeConfig });
+}
+
+// core/target.ts
+var SHORT_RE = /^([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+)#(\d+)$/;
+var URL_RE = /^https:\/\/github\.com\/([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+)\/pull\/(\d+)(?:[/?#].*)?$/;
+function parseTarget(input) {
+  const trimmed = input.trim();
+  const match = SHORT_RE.exec(trimmed) ?? URL_RE.exec(trimmed);
+  if (!match) {
+    return {
+      error: `Invalid PR identifier: "${input}". Use "owner/repo#123" or a full PR URL (https://github.com/owner/repo/pull/123). The repo must always be explicit.`
+    };
+  }
+  return { owner: match[1], repo: match[2], number: Number(match[3]) };
+}
+function targetKey(target) {
+  return `${target.owner}/${target.repo}#${target.number}`;
+}
+function targetUrl(target) {
+  return `https://github.com/${target.owner}/${target.repo}/pull/${target.number}`;
 }
 
 // core/github.ts
@@ -31179,26 +31210,6 @@ function normalizeSnapshot(payload, opts) {
 function ciPhase(snapshot) {
   if (snapshot.checks.length === 0) return "none";
   return snapshot.checks.some((check2) => check2.outcome === "pending") ? "running" : "concluded";
-}
-
-// core/target.ts
-var SHORT_RE = /^([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+)#(\d+)$/;
-var URL_RE = /^https:\/\/github\.com\/([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+)\/pull\/(\d+)(?:[/?#].*)?$/;
-function parseTarget(input) {
-  const trimmed = input.trim();
-  const match = SHORT_RE.exec(trimmed) ?? URL_RE.exec(trimmed);
-  if (!match) {
-    return {
-      error: `Invalid PR identifier: "${input}". Use "owner/repo#123" or a full PR URL (https://github.com/owner/repo/pull/123). The repo must always be explicit.`
-    };
-  }
-  return { owner: match[1], repo: match[2], number: Number(match[3]) };
-}
-function targetKey(target) {
-  return `${target.owner}/${target.repo}#${target.number}`;
-}
-function targetUrl(target) {
-  return `https://github.com/${target.owner}/${target.repo}/pull/${target.number}`;
 }
 
 // core/label.ts
@@ -31389,7 +31400,6 @@ function buildReport(target, snapshot, opts) {
 var MAX_CONSECUTIVE_FAILURES = 10;
 var PrWatch = class {
   target;
-  sessionID;
   config;
   deps;
   startedAt;
@@ -31428,7 +31438,6 @@ var PrWatch = class {
   pendingOps = 0;
   constructor(input) {
     this.target = input.target;
-    this.sessionID = input.sessionID;
     this.config = input.config;
     this.deps = input.deps;
     this.startedAt = input.deps.now();
@@ -31577,11 +31586,6 @@ var PrWatch = class {
     this.stopped = true;
     this.deps.onStopped();
   }
-  async stopWithNotice(reason) {
-    if (this.stopped) return;
-    this.stop();
-    await this.deliverOrLog(`[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) \u2014 ${reason}`);
-  }
   handlePollFailure(error51) {
     const message = error51 instanceof Error ? error51.message : String(error51);
     if (error51 instanceof PollError && error51.notFound) {
@@ -31673,7 +31677,274 @@ var PrWatch = class {
   }
 };
 
-// claude-code/src/gh.ts
+// runtime/tool.ts
+var MONITOR_ACTION_VALUES = [
+  "start" /* start */,
+  "stop" /* stop */,
+  "flush" /* flush */,
+  "status" /* status */,
+  "mark_ready" /* markReady */,
+  "unmark_ready" /* unmarkReady */
+];
+function buildMonitorToolDescription({
+  delivery,
+  configPath,
+  lifecycle,
+  waiting
+}) {
+  return `Monitor a GitHub PR in the background. Detects CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports state facts only. A newly failing check, merge conflict, or terminal PR state skips debounce and is reported at the next poll. The monitor itself owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting for CI or review. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (add the ready-for-human-review label only after CI/review is clean; never claim handoff unless it confirms success), and unmark_ready (withdraw it before handling later feedback). Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Tuning lives in ${configPath}. ${lifecycle}`;
+}
+
+// runtime/monitor-session.ts
+var MonitorSession = class {
+  deps;
+  watches = /* @__PURE__ */ new Map();
+  selfLogin;
+  selfLoginPromise;
+  constructor(deps) {
+    this.deps = {
+      ...deps,
+      now: deps.now ?? Date.now,
+      schedule: deps.schedule ?? (({ callback, intervalMs }) => setInterval(callback, intervalMs)),
+      cancel: deps.cancel ?? (({ timer }) => {
+        clearInterval(timer);
+      })
+    };
+  }
+  list() {
+    return [...this.watches.values()].map(({ watch, config: config2 }) => ({
+      target: watch.target,
+      config: config2,
+      statusLine: watch.statusLine()
+    }));
+  }
+  async execute({
+    action,
+    pr,
+    start
+  }) {
+    switch (action) {
+      case "start" /* start */:
+        if (!pr || pr === "all") {
+          return { text: "action 'start' requires a single explicit pr: 'owner/repo#123' or a PR URL." };
+        }
+        if (start === void 0) return { text: "Cannot start monitor: this host did not provide a report channel." };
+        return await this.start({ pr, options: start });
+      case "stop" /* stop */:
+        if (!pr) return { text: "action 'stop' requires pr: 'owner/repo#123', a PR URL, or 'all'." };
+        return this.stop({ pr });
+      case "flush" /* flush */:
+        if (!pr) return { text: "action 'flush' requires pr: 'owner/repo#123', a PR URL, or 'all'." };
+        return await this.flush({ pr });
+      case "status" /* status */:
+        return { text: this.status() };
+      case "mark_ready" /* markReady */:
+        if (!pr || pr === "all") {
+          return { text: "action 'mark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL." };
+        }
+        return await this.changeReady({ pr, ready: true });
+      case "unmark_ready" /* unmarkReady */:
+        if (!pr || pr === "all") {
+          return { text: "action 'unmark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL." };
+        }
+        return await this.changeReady({ pr, ready: false });
+    }
+  }
+  async stopAll({
+    notice,
+    channel = "normal" /* normal */
+  }) {
+    const entries = [...this.watches.values()];
+    for (const entry of entries) entry.watch.stop();
+    if (notice === void 0) return;
+    await Promise.all(
+      entries.map(async (entry) => {
+        const report = `[PR Monitor] [${targetKey(entry.watch.target)}](${targetUrl(entry.watch.target)}) \u2014 ${notice}`;
+        const send = channel === "persistent" /* persistent */ ? entry.channel.persist ?? entry.channel.deliver : entry.channel.deliver;
+        try {
+          await send({ report });
+        } catch (error51) {
+          this.deps.log(`stop notice delivery failed for ${targetKey(entry.watch.target)}: ${error51}`);
+        }
+      })
+    );
+  }
+  async start({
+    pr,
+    options
+  }) {
+    const target = parseTarget(pr);
+    if ("error" in target) return { text: target.error };
+    const key = targetKey(target);
+    const existing = this.watches.get(key);
+    if (existing) return { text: `Already monitoring ${key} in this session.
+${existing.watch.statusLine()}` };
+    const preparationError = await options.prepare?.();
+    if (preparationError !== void 0) return { text: preparationError };
+    let config2;
+    try {
+      config2 = await this.deps.loadConfig();
+    } catch (error51) {
+      return { text: `Cannot start monitor for ${key}: loading configuration failed (${error51.message}).` };
+    }
+    if (config2.ignoreCommentTag !== void 0 && this.selfLogin === void 0) {
+      try {
+        this.selfLoginPromise ??= this.deps.runGh(["api", "user", "--jq", ".login"]).then((login) => login.trim());
+        this.selfLogin = await this.selfLoginPromise;
+      } catch (error51) {
+        this.selfLoginPromise = void 0;
+        return {
+          text: `Cannot start monitor: ignoreCommentTag is configured but resolving the authenticated gh user failed (${error51.message}). Run \`gh auth status\` to check.`
+        };
+      }
+    }
+    let initial;
+    try {
+      initial = await this.fetchSnapshot({ target, config: config2 });
+    } catch (error51) {
+      return { text: `Cannot start monitor for ${key}: ${error51.message}` };
+    }
+    if (initial.state !== "OPEN") return { text: `Cannot start monitor: ${key} is already ${initial.state}.` };
+    const raced = this.watches.get(key);
+    if (raced) return { text: `Already monitoring ${key} in this session.
+${raced.watch.statusLine()}` };
+    const reportChannel = options.createChannel({ target, config: config2 });
+    let timer;
+    const watch = new PrWatch({
+      target,
+      config: config2,
+      initial,
+      deps: {
+        now: this.deps.now,
+        fetchSnapshot: () => this.fetchSnapshot({ target, config: config2 }),
+        deliver: (report) => reportChannel.deliver({ report }),
+        log: this.deps.log,
+        onStopped: () => {
+          this.deps.cancel({ timer });
+          const entry = this.watches.get(key);
+          if (entry?.watch === watch) {
+            this.watches.delete(key);
+            this.notifyWatchChanged({ type: "stopped" /* stopped */, target, config: config2 });
+          }
+        }
+      }
+    });
+    timer = this.deps.schedule({
+      intervalMs: config2.pollIntervalSeconds * 1e3,
+      callback: () => {
+        void watch.tick().finally(() => this.notifyTickSettled({ target, config: config2 }));
+      }
+    });
+    this.watches.set(key, { watch, timer, config: config2, channel: reportChannel });
+    this.notifyWatchChanged({ type: "started" /* started */, target, config: config2 });
+    let announcement = "disabled" /* disabled */;
+    if (config2.announceOnStart) {
+      if (options.announcementMode === "await_delivery" /* awaitDelivery */) {
+        announcement = await watch.announceInitial() ? "delivered" /* delivered */ : "retrying" /* retrying */;
+        if (watch.isStopped) {
+          return { text: `Monitor for ${key} stopped before startup completed; no active monitor remains.` };
+        }
+      } else {
+        announcement = "pending" /* pending */;
+        void watch.announceInitial();
+      }
+    }
+    this.deps.log(`started monitoring ${key}`);
+    return {
+      text: `Started monitoring ${key} \u2014 "${initial.title}".`,
+      start: { target, config: config2, announcement }
+    };
+  }
+  select({ pr }) {
+    if (pr === "all") return [...this.watches.values()];
+    const target = parseTarget(pr);
+    if ("error" in target) return target;
+    const entry = this.watches.get(targetKey(target));
+    if (!entry) {
+      return {
+        error: `No monitor for ${targetKey(target)} in this session. Use action "status" to list active monitors.`
+      };
+    }
+    return [entry];
+  }
+  stop({ pr }) {
+    const selected = this.select({ pr });
+    if ("error" in selected) return { text: selected.error };
+    if (selected.length === 0) return { text: "No active monitors in this session." };
+    for (const entry of selected) entry.watch.stop();
+    return {
+      text: `Stopped ${selected.length} monitor(s): ${selected.map((entry) => targetKey(entry.watch.target)).join(", ")}.`
+    };
+  }
+  async flush({ pr }) {
+    const selected = this.select({ pr });
+    if ("error" in selected) return { text: selected.error };
+    if (selected.length === 0) return { text: "No active monitors in this session." };
+    const reports = await Promise.all(selected.map((entry) => entry.watch.manualFlush()));
+    return { text: reports.join("\n\n") };
+  }
+  status() {
+    if (this.watches.size === 0) return "No active monitors in this session.";
+    return [...this.watches.values()].map(({ watch, config: config2 }) => {
+      let suffix = "";
+      try {
+        suffix = this.deps.statusSuffix?.({ target: watch.target, config: config2 }) ?? "";
+      } catch (error51) {
+        this.deps.log(`status decoration failed for ${targetKey(watch.target)}: ${error51}`);
+      }
+      return `${watch.statusLine()}${suffix}`;
+    }).join("\n");
+  }
+  async changeReady({
+    pr,
+    ready
+  }) {
+    const target = parseTarget(pr);
+    if ("error" in target) return { text: target.error };
+    const key = targetKey(target);
+    try {
+      const config2 = await this.deps.loadConfig();
+      const text = ready ? await markReadyForHumanReview(this.deps.runGh, target, config2.readyLabel) : await removeReadyForHumanReview(this.deps.runGh, target, config2.readyLabel);
+      const watched = this.watches.has(key);
+      this.notifyReadyChanged({ target, ready, watched, config: config2 });
+      return { text, ready: { target, ready, watched } };
+    } catch (error51) {
+      const action = ready ? `mark ${key} as ready for human review` : `withdraw the ready-for-human-review label from ${key}`;
+      return { text: `Cannot ${action}: ${error51.message}` };
+    }
+  }
+  fetchSnapshot({ target, config: config2 }) {
+    return fetchPrSnapshot({
+      runGh: this.deps.runGh,
+      target,
+      ignoreTag: config2.ignoreCommentTag,
+      selfLogin: this.selfLogin
+    });
+  }
+  notifyWatchChanged(event) {
+    try {
+      this.deps.onWatchChanged?.(event);
+    } catch (error51) {
+      this.deps.log(`watch ${event.type} observer failed for ${targetKey(event.target)}: ${error51}`);
+    }
+  }
+  notifyTickSettled(event) {
+    try {
+      this.deps.onTickSettled?.(event);
+    } catch (error51) {
+      this.deps.log(`tick observer failed for ${targetKey(event.target)}: ${error51}`);
+    }
+  }
+  notifyReadyChanged(event) {
+    try {
+      this.deps.onReadyChanged?.(event);
+    } catch (error51) {
+      this.deps.log(`ready-state observer failed for ${targetKey(event.target)}: ${error51}`);
+    }
+  }
+};
+
+// runtime/node-gh.ts
 import { execFile } from "node:child_process";
 function createNodeGhRunner() {
   return (args) => new Promise((resolve, reject) => {
@@ -31839,205 +32110,124 @@ function writeSessionState(claudePid2, state) {
 // claude-code/src/mcp-server.ts
 var claudePid = process4.ppid;
 var projectDir = process4.env["CLAUDE_PROJECT_DIR"] ?? process4.cwd();
-var watches = /* @__PURE__ */ new Map();
+var configPaths = [
+  join3(projectDir, ".pr-monitor.json"),
+  join3(projectDir, ".claude", "pr-monitor.json"),
+  join3(projectDir, ".opencode", "pr-monitor.json")
+];
 var handedOff = /* @__PURE__ */ new Set();
-var selfLogin;
 var keepAliveUntilMs = 0;
 var STATE_LIVENESS_FLOOR_MS = 5 * 6e4;
-var refreshSessionState = () => {
-  const active = [...watches.entries()].filter(([key]) => !handedOff.has(key));
-  const pollMs = Math.max(...[...watches.values()].map((entry) => entry.config.pollIntervalSeconds * 1e3), 0);
-  writeSessionState(claudePid, {
-    version: 1,
-    keepAlive: active.some(([, entry]) => entry.config.keepAlive),
-    expiresAtMs: Date.now() + Math.max(pollMs * 3 + 6e4, STATE_LIVENESS_FLOOR_MS),
-    keepAliveUntilMs,
-    monitors: active.map(([key]) => key)
-  });
-};
-var extendKeepAlive = (config2) => {
-  keepAliveUntilMs = Math.max(keepAliveUntilMs, Date.now() + config2.keepAliveMaxMinutes * 6e4);
-};
 var log = (message) => {
   console.error(`[pr-monitor] ${message}`);
 };
 var runGh = createNodeGhRunner();
-var fetchSnapshot = (target, config2) => fetchPrSnapshot({ runGh, target, ignoreTag: config2.ignoreCommentTag, selfLogin });
-var deliver = (target, config2) => async (report) => {
+var monitorSession;
+var refreshSessionState = () => {
+  const watches = monitorSession.list();
+  const active = watches.filter(({ target }) => !handedOff.has(targetKey(target)));
+  const pollMs = Math.max(...watches.map(({ config: config2 }) => config2.pollIntervalSeconds * 1e3), 0);
+  writeSessionState(claudePid, {
+    version: 1,
+    keepAlive: active.some(({ config: config2 }) => config2.keepAlive),
+    expiresAtMs: Date.now() + Math.max(pollMs * 3 + 6e4, STATE_LIVENESS_FLOOR_MS),
+    keepAliveUntilMs,
+    monitors: active.map(({ target }) => targetKey(target))
+  });
+};
+var extendKeepAlive = ({ config: config2 }) => {
+  keepAliveUntilMs = Math.max(keepAliveUntilMs, Date.now() + config2.keepAliveMaxMinutes * 6e4);
+};
+var deliver = ({
+  target,
+  config: config2,
+  report
+}) => {
   spoolReport(claudePid, report);
   handedOff.delete(targetKey(target));
-  extendKeepAlive(config2);
+  extendKeepAlive({ config: config2 });
   refreshSessionState();
   if (config2.desktopNotifications) {
     notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, "New report waiting in your Claude Code session");
   }
+  return Promise.resolve();
 };
-var selectWatches = (pr) => {
-  if (pr === "all") return [...watches.values()].map((entry2) => entry2.watch);
-  const target = parseTarget(pr);
-  if ("error" in target) return target;
-  const entry = watches.get(targetKey(target));
-  if (!entry) return { error: `No monitor for ${targetKey(target)} in this session. Use action "status" to list active monitors.` };
-  return [entry.watch];
-};
-var startWatch = async (pr) => {
-  const target = parseTarget(pr);
-  if ("error" in target) return target.error;
-  const key = targetKey(target);
-  const existing = watches.get(key);
-  if (existing) return `Already monitoring ${key} in this session.
-${existing.watch.statusLine()}`;
+monitorSession = new MonitorSession({
+  runGh,
+  loadConfig: () => loadClaudeConfig({ paths: configPaths, log }),
+  log,
+  onWatchChanged: ({ type, target, config: config2 }) => {
+    if (type === "started" /* started */) extendKeepAlive({ config: config2 });
+    else handedOff.delete(targetKey(target));
+    refreshSessionState();
+  },
+  onTickSettled: refreshSessionState,
+  onReadyChanged: ({ target, ready, watched }) => {
+    if (ready && watched) handedOff.add(targetKey(target));
+    if (!ready) handedOff.delete(targetKey(target));
+    refreshSessionState();
+  },
+  statusSuffix: ({ target }) => handedOff.has(targetKey(target)) ? ", handed off for human review" : ""
+});
+var prepareStart = async () => {
   try {
     probeSpool(claudePid);
+    return void 0;
   } catch (error51) {
     return `Cannot start monitor: the report spool is not writable (${error51.message}). Reports could not be delivered. Check permissions on ~/.claude/pr-monitor.`;
   }
-  const config2 = await loadConfig(
-    [join3(projectDir, ".claude", "pr-monitor.json"), join3(projectDir, ".opencode", "pr-monitor.json")],
-    log
-  );
-  if (config2.ignoreCommentTag !== void 0 && selfLogin === void 0) {
-    try {
-      selfLogin = (await runGh(["api", "user", "--jq", ".login"])).trim();
-    } catch (error51) {
-      return `Cannot start monitor: ignoreCommentTag is configured but resolving the authenticated gh user failed (${error51.message}). Run \`gh auth status\` to check.`;
-    }
+};
+var formatResult = ({ result }) => {
+  if (result.start !== void 0) {
+    const { config: config2, announcement } = result.start;
+    return `${result.text}
+` + (config2.announceOnStart ? announcement === "delivered" /* delivered */ ? "An initial [PR Monitor] report is spooled for the next hook event. " : "Initial delivery failed and will retry at the next poll without losing its baseline. " : "") + `Polling every ${config2.pollIntervalSeconds}s; settled activity is injected automatically at the next tool call, user message, or turn end after ${config2.debounceMinutes} quiet minutes. ` + (config2.flushOnCiFailure ? "A failing check is reported at the next poll without waiting for the quiet window or the rest of CI. " : "") + "A new merge conflict or terminal state is also immediate. Never invent sleeps, scheduled checks, polling loops, repeated CI checks, or routine status/flush calls. The monitor stops on merge/close and does not survive this Claude Code session." + (config2.keepAlive ? "\nKeep-alive is on until mark_ready succeeds. Run only the exact await-activity command supplied by a [PR Monitor keep-alive] message; do not create another waiting mechanism." : "");
   }
-  let initial;
-  try {
-    initial = await fetchSnapshot(target, config2);
-  } catch (error51) {
-    return `Cannot start monitor for ${key}: ${error51.message}`;
+  if (result.ready?.ready && result.ready.watched) {
+    return `${result.text}
+Still monitoring it, but it no longer holds this session open; new activity re-opens the work loop.`;
   }
-  if (initial.state !== "OPEN") return `Cannot start monitor: ${key} is already ${initial.state}.`;
-  const raced = watches.get(key);
-  if (raced) return `Already monitoring ${key} in this session.
-${raced.watch.statusLine()}`;
-  const watch = new PrWatch({
-    target,
-    sessionID: String(claudePid),
-    config: config2,
-    initial,
-    deps: {
-      now: Date.now,
-      fetchSnapshot: () => fetchSnapshot(target, config2),
-      deliver: deliver(target, config2),
-      log,
-      onStopped: () => {
-        clearInterval(timer);
-        const entry = watches.get(key);
-        if (entry?.watch === watch) {
-          watches.delete(key);
-          handedOff.delete(key);
-          refreshSessionState();
+  return result.text;
+};
+var handle = async ({
+  action,
+  pr
+}) => {
+  const result = await monitorSession.execute({
+    action,
+    pr,
+    start: action === "start" /* start */ ? {
+      prepare: prepareStart,
+      announcementMode: "await_delivery" /* awaitDelivery */,
+      createChannel: ({ target, config: config2 }) => ({
+        deliver: ({ report }) => deliver({ target, config: config2, report }),
+        persist: ({ report }) => {
+          spoolReport(claudePid, report);
+          return Promise.resolve();
         }
-      }
-    }
+      })
+    } : void 0
   });
-  const timer = setInterval(() => {
-    void watch.tick().finally(refreshSessionState);
-  }, config2.pollIntervalSeconds * 1e3);
-  watches.set(key, { watch, timer, config: config2 });
-  extendKeepAlive(config2);
-  refreshSessionState();
-  const initialAnnounced = config2.announceOnStart ? await watch.announceInitial() : false;
-  if (watch.isStopped) return `Monitor for ${key} stopped before startup completed; no active monitor remains.`;
-  log(`started monitoring ${key} for Claude Code pid ${claudePid}`);
-  return `Started monitoring ${key} \u2014 "${initial.title}".
-` + (config2.announceOnStart ? initialAnnounced ? `An initial [PR Monitor] status report has been spooled and will be injected into this conversation at the next hook event. ` : `The initial status report could not be spooled; it will retry at the next poll without losing its comment baseline. ` : "") + `Polling every ${config2.pollIntervalSeconds}s; after activity settles for ${config2.debounceMinutes} quiet minutes, a report is injected into this conversation at your next tool call, user message, or turn end. ` + (config2.flushOnCiFailure ? `A failing check does not wait for that quiet window \u2014 it is reported at the next poll, even while the rest of the suite runs, so you can start fixing CI right away. ` : "") + `A newly detected merge conflict or terminal PR state is also reported at the next poll without waiting. The monitor stops automatically when the PR is merged or closed, and does not survive this Claude Code session.` + (config2.keepAlive ? `
-Keep-alive is on: until this PR is handed off with action 'mark_ready', turn-end is refused and you are asked to wait for the next report rather than going idle. Follow the monitor-pr skill; action 'stop' ends it at any time.` : "");
-};
-var loadProjectConfig = () => loadConfig([join3(projectDir, ".claude", "pr-monitor.json"), join3(projectDir, ".opencode", "pr-monitor.json")], log);
-var markReady = async (pr) => {
-  const target = parseTarget(pr);
-  if ("error" in target) return target.error;
-  const config2 = await loadProjectConfig();
-  try {
-    const result = await markReadyForHumanReview(runGh, target, config2.readyLabel);
-    if (watches.has(targetKey(target))) {
-      handedOff.add(targetKey(target));
-      refreshSessionState();
-    }
-    return watches.has(targetKey(target)) ? `${result}
-Still monitoring it, but it no longer holds this session open \u2014 new activity on it will re-open the work loop.` : result;
-  } catch (error51) {
-    return `Cannot mark ${targetKey(target)} as ready for human review: ${error51.message}`;
-  }
-};
-var unmarkReady = async (pr) => {
-  const target = parseTarget(pr);
-  if ("error" in target) return target.error;
-  const config2 = await loadProjectConfig();
-  try {
-    const result = await removeReadyForHumanReview(runGh, target, config2.readyLabel);
-    handedOff.delete(targetKey(target));
-    refreshSessionState();
-    return result;
-  } catch (error51) {
-    return `Cannot withdraw the ready-for-human-review label from ${targetKey(target)}: ${error51.message}`;
-  }
-};
-var handle = async (action, pr) => {
-  switch (action) {
-    case "start": {
-      if (!pr || pr === "all") return "action 'start' requires a single explicit pr: 'owner/repo#123' or a PR URL.";
-      return await startWatch(pr);
-    }
-    case "stop": {
-      if (!pr) return "action 'stop' requires pr: 'owner/repo#123', a PR URL, or 'all'.";
-      const selected = selectWatches(pr);
-      if ("error" in selected) return selected.error;
-      if (selected.length === 0) return "No active monitors in this session.";
-      for (const watch of selected) watch.stop();
-      return `Stopped ${selected.length} monitor(s): ${selected.map((watch) => targetKey(watch.target)).join(", ")}.`;
-    }
-    case "flush": {
-      if (!pr) return "action 'flush' requires pr: 'owner/repo#123', a PR URL, or 'all'.";
-      const selected = selectWatches(pr);
-      if ("error" in selected) return selected.error;
-      if (selected.length === 0) return "No active monitors in this session.";
-      const reports = await Promise.all(selected.map((watch) => watch.manualFlush()));
-      return reports.join("\n\n");
-    }
-    case "status": {
-      if (watches.size === 0) return "No active monitors in this session.";
-      return [...watches.values()].map((entry) => {
-        const line = entry.watch.statusLine();
-        return handedOff.has(targetKey(entry.watch.target)) ? `${line}, handed off for human review` : line;
-      }).join("\n");
-    }
-    case "mark_ready": {
-      if (!pr || pr === "all") return "action 'mark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL.";
-      return await markReady(pr);
-    }
-    case "unmark_ready": {
-      if (!pr || pr === "all") return "action 'unmark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL.";
-      return await unmarkReady(pr);
-    }
-  }
+  return formatResult({ result });
 };
 var shuttingDown = false;
 var shutdown = () => {
   if (shuttingDown) return;
   shuttingDown = true;
-  for (const entry of [...watches.values()]) {
-    try {
-      spoolReport(
-        claudePid,
-        `[PR Monitor] [${targetKey(entry.watch.target)}](${targetUrl(entry.watch.target)}) \u2014 Monitor stopped: the pr-monitor MCP server is shutting down (Claude Code session ended or server restarted). Re-start monitoring if still needed.`
-      );
-    } catch {
-    }
-    entry.watch.stop();
-  }
-  writeSessionState(claudePid, {
-    version: 1,
-    keepAlive: false,
-    expiresAtMs: 0,
-    keepAliveUntilMs: 0,
-    monitors: []
-  });
-  process4.exit(0);
+  void (async () => {
+    await monitorSession.stopAll({
+      notice: "Monitor stopped: the pr-monitor MCP server is shutting down (Claude Code session ended or server restarted). Re-start monitoring if still needed.",
+      channel: "persistent" /* persistent */
+    });
+    writeSessionState(claudePid, {
+      version: 1,
+      keepAlive: false,
+      expiresAtMs: 0,
+      keepAliveUntilMs: 0,
+      monitors: []
+    });
+    process4.exit(0);
+  })();
 };
 process4.stdin.on("end", shutdown);
 process4.stdin.on("close", shutdown);
@@ -32049,15 +32239,20 @@ var server = new McpServer({ name: "pr-monitor", version: "0.2.1" });
 server.registerTool(
   "pr_monitor",
   {
-    description: "Monitor a GitHub PR in the background. Detects CI suite conclusions, new reviews, new inline/issue comments (including follow-ups on existing or resolved review threads), mergeability changes, and merge/close. Changes are aggregated (rolling debounce) and injected into THIS session as '[PR Monitor]' messages stating facts only, delivered at your next tool call, user message, or turn end. A check going red, a newly detected merge conflict, or a terminal PR state skips the debounce and is reported at the next poll. Actions: start (begin watching a PR), stop (end watching), flush (on-demand: immediately return a full status report and reset the 'new since' baseline; a delivered report already advances the baseline, so a flush after handling one is not needed), status (list this session's monitors), mark_ready (add the configured ready-for-human-review label to the PR on GitHub \u2014 use once CI is green and review feedback is addressed, to signal a human should review now; this is also the handoff that releases the keep-alive loop), unmark_ready (withdraw that label \u2014 use when new feedback arrives on a PR that was already flagged ready, before working on it again). mark_ready/unmark_ready do not require an active monitor. The pr argument must be explicit 'owner/repo#123' or a full PR URL; 'all' is allowed for stop/flush. Tuning lives in .claude/pr-monitor.json. Monitors are per-session and do not survive Claude Code restarts. While a monitored PR is not handed off, keep-alive (config key 'keepAlive') refuses turn-end so reports arriving during idle time are still acted on \u2014 follow the monitor-pr skill.",
+    description: buildMonitorToolDescription({
+      delivery: "reports are injected into THIS session as '[PR Monitor]' messages at hook events.",
+      configPath: ".pr-monitor.json (falling back to .claude/pr-monitor.json, then .opencode/pr-monitor.json)",
+      lifecycle: "Monitors are per-session and do not survive Claude Code restarts.",
+      waiting: "End the turn when idle. If a [PR Monitor keep-alive] message supplies an await-activity command, run only that exact event waiter; never invent another delay or polling mechanism."
+    }),
     inputSchema: {
-      action: external_exports.enum(["start", "stop", "flush", "status", "mark_ready", "unmark_ready"]).describe("What to do"),
+      action: external_exports.enum(MONITOR_ACTION_VALUES).describe("What to do"),
       pr: external_exports.string().optional().describe(
         "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready; 'all' allowed for stop/flush."
       )
     }
   },
-  async ({ action, pr }) => ({ content: [{ type: "text", text: await handle(action, pr) }] })
+  async ({ action, pr }) => ({ content: [{ type: "text", text: await handle({ action, pr }) }] })
 );
 await server.connect(new StdioServerTransport());
 log(`pr-monitor MCP server ready (claude pid ${claudePid}, project ${projectDir})`);

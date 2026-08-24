@@ -12,6 +12,7 @@ A GitHub PR monitor for coding agents, available as both an [opencode](https://o
 - **CI hold**: a due report is held while a check suite is still running (bounded by `maxCiWaitMinutes`), so you get one report with the CI verdict instead of two.
 - Reports are **facts only** — counts, authors, check names. No advice, no comment bodies.
 - Monitors are **per-session and in-memory**: they stop automatically when the PR is merged/closed, and they do not survive a host restart.
+- The monitor owns polling and delivers reports automatically. Agents must not create sleeps, scheduled checks, background polling loops, repeated `gh pr checks`, or routine `status`/`flush` calls while waiting.
 
 ### Example report
 
@@ -56,7 +57,7 @@ The bundled `monitor-pr` skill turns reports into work, so the normal path needs
 
 1. Claude opens a PR and starts a monitor for it straight away.
 2. Every report is acted on — review comments via the repo's `address-pr-comments` skill, failing CI by fixing the cause, conflicts by merging the base branch in.
-3. When CI is green, no review threads are unresolved, no requested reviewer is still pending and nothing is left unanswered, Claude calls `mark_ready` — the PR gets the configured `readyLabel` (default `ready-for-human-review`) and it is your turn.
+3. When CI is green, no review threads are unresolved, no requested reviewer is still pending and nothing is left unanswered, Claude calls `mark_ready`. Only a confirmed label success is a handoff; failure leaves keep-alive armed for diagnosis and retry.
 4. If a human then comments, the next report takes the PR back: Claude withdraws the label, works the feedback, and hands off again.
 
 ### How reports arrive (and how that differs from opencode)
@@ -67,7 +68,7 @@ Claude Code has no way for a background process to push a message into a session
 - when you submit a prompt (`UserPromptSubmit`),
 - when Claude tries to end its turn (`Stop`) — a pending report holds the turn open so Claude addresses it before going idle.
 
-That alone still leaves a gap: a report landing while the session sits idle waits until your next message. **Keep-alive** closes it. While a monitored PR has not been handed off with `mark_ready`, the `Stop` hook refuses turn-end and points Claude at `claude-code/hooks/await-activity.mjs`, a small script that blocks until the next report is spooled. Claude waits inside a single tool call instead of going idle, and wakes the moment something happens — one model round trip per real event rather than one per polling tick.
+That alone still leaves a gap: a report landing while the session sits idle waits until your next message. **Keep-alive** closes it. While a monitored PR has not been handed off with `mark_ready`, the `Stop` hook supplies an exact `claude-code/hooks/await-activity.mjs` command that blocks until a report is spooled. That hook-issued command is the only waiting mechanism Claude should run; it must never invent a delay or polling job after starting the monitor.
 
 Bounds, so a loop can never run away:
 
@@ -81,7 +82,7 @@ Prefer being told out of band instead? Set `desktopNotifications: true` for an O
 Further behavior notes for the Claude Code shell:
 
 - Monitors belong to the Claude Code process. They survive `/clear` (the new conversation keeps receiving reports) and die with the process; they do not survive quitting Claude Code or `claude --resume` into a new process. If the MCP server is restarted while Claude Code keeps running (e.g. `/reload-plugins`), each active monitor delivers a `Monitor stopped` notice; when Claude Code itself exits, monitors simply die with it (no notice — there is no session left to deliver to).
-- Config lives in `.claude/pr-monitor.json` (falling back to `.opencode/pr-monitor.json`, so a repo configured for the opencode plugin works as-is).
+- Config first uses repository `.pr-monitor.json`, then falls back to `.claude/pr-monitor.json` and `.opencode/pr-monitor.json`.
 
 ## opencode
 
@@ -115,7 +116,7 @@ Both shells register the same tool:
 
 ## Configuration
 
-Optional, per project: `.claude/pr-monitor.json` for Claude Code (with `.opencode/pr-monitor.json` as fallback), `.opencode/pr-monitor.json` for opencode.
+Optional, per project: use `.pr-monitor.json` for both hosts. Without it, Claude Code falls back to `.claude/pr-monitor.json` then `.opencode/pr-monitor.json`; OpenCode falls back to `.opencode/pr-monitor.json`.
 
 ```json
 {
@@ -159,22 +160,23 @@ Optional, per project: `.claude/pr-monitor.json` for Claude Code (with `.opencod
 
 ```sh
 npm install
-npm test            # shared-core and OpenCode-shell regression tests
-npm run typecheck   # core + both shells
+npm test            # core, shared runtime, and adapter regression tests
+npm run typecheck   # core + runtime + both adapters
 npm run build       # bundle the Claude Code MCP server to claude-code/dist/mcp-server.mjs
 npm run pack:check  # inspect the OpenCode npm package without creating a tarball
 ```
 
-Layout — one directory per target, plus the shared core:
+Layout — one directory per target, plus shared core/runtime layers:
 
 ```
-core/            shell-agnostic core: config, polling, activity detection, PrWatch, report rendering
-opencode/        opencode shell — index.ts is the plugin entry
+core/            per-PR state, config, GitHub normalization, activity, reports
+runtime/         session registry/actions/timers, Node gh runner, shared tool contract
+opencode/        OpenCode adapter — index.ts is the plugin entry
 claude-code/     Claude Code shell — this directory is the plugin root (${CLAUDE_PLUGIN_ROOT})
 .claude-plugin/  marketplace.json, which stays at the repo root and points at ./claude-code
 ```
 
-`core/` never imports from a shell, so a shell is only wiring: transport, delivery, and config paths. opencode executes TypeScript directly (no build step), and the loader invokes every export of the entry module as a plugin, so `PrMonitorPlugin` must remain the sole export of `opencode/index.ts`. The `@sesori/pr-monitor-opencode` npm artifact is allowlisted to `core/` and `opencode/`; it does not contain the Claude Code distribution. The Claude Code shell is bundled with esbuild into the committed `claude-code/dist/mcp-server.mjs`, since plugin installs run no build step; `claude-code/hooks/drain-spool.mjs` is the dependency-free hook that injects spooled reports and runs the keep-alive loop, and `claude-code/hooks/await-activity.mjs` is the blocking waiter it hands to the session; `claude-code/skills/monitor-pr/` is the behavior — when to start a monitor, what to do with each report, when to hand off; `claude-code/.mcp.json` declares the MCP server (plugin-root convention — an inline `mcpServers` field in plugin.json is not picked up).
+Dependency flows adapter → `runtime/` → `core/`; core imports no host SDK and runtime owns common session orchestration. OpenCode executes TypeScript directly, and its loader invokes every export of the entry module as a plugin, so `PrMonitorPlugin` must remain the sole export of `opencode/index.ts`. The transitional `@sesori/pr-monitor-opencode` source artifact allowlists `core/`, `runtime/`, and `opencode/`; it does not contain the Claude Code distribution. The Claude Code shell is bundled with esbuild into the committed `claude-code/dist/mcp-server.mjs`, since plugin installs run no build step; `claude-code/hooks/drain-spool.mjs` is the dependency-free hook that injects spooled reports and runs the keep-alive loop, and `claude-code/hooks/await-activity.mjs` is the blocking waiter it hands to the session; `claude-code/skills/monitor-pr/` is the behavior — when to start a monitor, what to do with each report, when to hand off; `claude-code/.mcp.json` declares the MCP server (plugin-root convention — an inline `mcpServers` field in plugin.json is not picked up).
 
 ## Releasing
 
