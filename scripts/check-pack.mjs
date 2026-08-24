@@ -77,9 +77,10 @@ try {
   })
   await writeFile(
     join(consumerDirectory, "index.ts"),
-    'import { PrMonitorPlugin } from "@sesori/pr-monitor-opencode"\n' +
+    'import type { Plugin } from "@opencode-ai/plugin"\n' +
+      'import { PrMonitorPlugin } from "@sesori/pr-monitor-opencode"\n' +
       'import { PrMonitorPlugin as ServerPlugin } from "@sesori/pr-monitor-opencode/server"\n' +
-      "void PrMonitorPlugin\nvoid ServerPlugin\n",
+      "const root: Plugin = PrMonitorPlugin\nconst server: Plugin = ServerPlugin\nvoid root\nvoid server\n",
   )
   execFileSync(
     process.execPath,

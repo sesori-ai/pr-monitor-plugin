@@ -120,6 +120,8 @@ because the implementation moves concurrency and lifecycle ownership.
 | 2026-08-24 | Cubic: bundled OpenCode artifact lost declarations/metadata export | Accepted: build emits the sole-export declaration, both entries carry type conditions, and `./package.json` is exported and smoke-tested. |
 | 2026-08-24 | Cubic: CI jobs retain GitHub's six-hour timeout | Accepted: each matrix job now has a 20-minute limit. |
 | 2026-08-24 | Main advanced through release PR #13 during review | Merged (not rebased): preserve the private workspace while carrying product version `0.3.0`, Claude source/bundle, changelog, and release docs forward. |
+| 2026-08-24 | Cubic: hand-written declaration can drift | Accepted: build now runs TypeScript declaration emit and copies the compiler output; consumer assignments assert both entries are `Plugin`. |
+| 2026-08-24 | Codex: workspace changelog entry became retroactive | Accepted: the unshipped Step 3 packaging change moved back under `Unreleased`; released Step 2 behavior remains under `0.3.0`. |
 
 ## Verification Log
 
@@ -158,7 +160,7 @@ because the implementation moves concurrency and lifecycle ownership.
 - [x] `npm run release:check`; workspace prepack rebuild; OpenCode clean/build cycle.
 - [x] Claude committed bundle unchanged; root/target licenses byte-identical; `actionlint` and `git diff --check` pass.
 - [ ] Windows CI rerun after the shell-independent npm fix; Linux/macOS already pass.
-- [x] Review-fixed diff: 572 textual changed lines including PR/plan bookkeeping, within the 1,200-line target.
+- [x] Review-fixed diff: 600 textual changed lines including PR/plan bookkeeping, within the 1,200-line target.
 - [x] Commit `38122df` pushed and [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12) opened with the exact Step 3 title.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/
