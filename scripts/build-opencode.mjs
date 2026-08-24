@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { build } from "esbuild"
+import { copyPushSkill } from "./copy-push-skill.mjs"
 
 const root = fileURLToPath(new URL("../", import.meta.url))
 const source = fileURLToPath(new URL("../opencode/index.ts", import.meta.url))
@@ -38,6 +39,7 @@ try {
     { cwd: root, stdio: "pipe" },
   )
   await copyFile(join(declarationDirectory, "opencode", "index.d.ts"), declaration)
+  await copyPushSkill({ target: new URL("../opencode/skills/monitor-pr/", import.meta.url) })
 } finally {
   await rm(declarationDirectory, { recursive: true, force: true })
 }

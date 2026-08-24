@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { resolve } from "node:path"
 import test from "node:test"
 
 import { PrMonitorPlugin } from "../opencode/index"
@@ -95,4 +96,32 @@ test("OpenCode shutdown persists notices synchronously without starting a model 
   assert.equal(body.parts[0]?.type, "text")
   assert.match(body.parts[0]?.text ?? "", /^\[PR Monitor\] \[sesori\/example#42\]/)
   assert.match(body.parts[0]?.text ?? "", /Monitor stopped: opencode is shutting down/)
+})
+
+test("OpenCode injects the packaged monitor skill path exactly once", async () => {
+  const client = {
+    app: { log: async () => ({ data: true, error: undefined }) },
+    session: {
+      promptAsync: async () => ({ data: undefined, error: undefined }),
+      prompt: async () => ({ data: undefined, error: undefined }),
+    },
+  }
+  const hooks = await PrMonitorPlugin({
+    client,
+    directory: process.cwd(),
+    worktree: process.cwd(),
+    project: { id: "project-1", worktree: process.cwd(), time: { created: Date.now() } },
+    serverUrl: new URL("http://localhost:4096"),
+    experimental_workspace: { register: () => {} },
+    $: () => {
+      throw new Error("gh should not run while injecting the skill path")
+    },
+  } as never)
+  const config: { skills?: { paths?: string[] } } = { skills: { paths: ["existing-skills"] } }
+
+  await hooks.config!(config as never)
+  await hooks.config!(config as never)
+
+  assert.deepEqual(config.skills?.paths, ["existing-skills", resolve("skills")])
+  await hooks.dispose!()
 })

@@ -1,6 +1,6 @@
 # pr-monitor
 
-A GitHub PR monitor for coding agents, available as both an [opencode](https://opencode.ai) plugin and a [Claude Code](https://code.claude.com) plugin. It watches pull requests in the background and delivers factual `[PR Monitor]` reports into the session that started the watch — so an agent (or you) can raise a PR, keep working, and get told when something actually happened.
+A GitHub PR monitor for coding agents, available for [OpenCode](https://opencode.ai), [Claude Code](https://code.claude.com), [Pi](https://github.com/earendil-works/pi), and [Oh My Pi](https://omp.sh). It watches pull requests in the background and delivers factual `[PR Monitor]` reports into the session that started the watch — so an agent (or you) can raise a PR, keep working, and get told when something actually happened.
 
 ## What it does
 
@@ -29,7 +29,9 @@ A GitHub PR monitor for coding agents, available as both an [opencode](https://o
 
 - [GitHub CLI](https://cli.github.com) (`gh`) installed and authenticated (`gh auth status`).
 - For Claude Code: Node.js >= 18 on `PATH` (runs the bundled MCP server), macOS or Linux.
-- For opencode: opencode >= 1.17.
+- For OpenCode: OpenCode >= 1.17.
+- For Pi: Pi >= 0.84.2 and Node.js >= 22.19.
+- For OMP: OMP >= 18.0.3.
 
 ## Claude Code
 
@@ -101,9 +103,27 @@ opencode installs npm plugins and their dependencies into its package cache on s
 
 Reports arrive in the owning session as messages starting with `[PR Monitor]`. Monitors stop when the owning session is deleted. On graceful opencode shutdown, a no-reply stop notice is persisted to each owning session before the plugin is disposed, so it is present in history when opencode starts again.
 
+The package injects its `monitor-pr` skill through OpenCode's skill-path config, so the agent learns the complete ownership loop without a consuming repository copying the skill.
+
+## Pi and OMP
+
+Install the shared package in Pi:
+
+```sh
+pi install npm:@sesori/pr-monitor-pi
+```
+
+Or in OMP:
+
+```sh
+omp plugin install @sesori/pr-monitor-pi
+```
+
+The package selects the correct entry automatically and supplies one `monitor-pr` skill to each host. Reports use native custom-message delivery with steering and idle turn triggering, so agents end the turn while waiting and wake only for real activity. Pi clears watches after successful session replacement/reload shutdown; OMP clears them on its post-success session-switch event. Canceled transitions retain the active watch.
+
 ## The `pr_monitor` tool
 
-Both shells register the same tool:
+All four harnesses register the same tool:
 
 | Action   | `pr` argument                          | Effect |
 | -------- | -------------------------------------- | ------ |
@@ -116,7 +136,7 @@ Both shells register the same tool:
 
 ## Configuration
 
-Optional, per project: use `.pr-monitor.json` for both hosts. Without it, Claude Code falls back to `.claude/pr-monitor.json` then `.opencode/pr-monitor.json`; OpenCode falls back to `.opencode/pr-monitor.json`.
+Optional, per project: use `.pr-monitor.json` for every host. Claude Code falls back to `.claude/pr-monitor.json` then `.opencode/pr-monitor.json`; OpenCode falls back to `.opencode/pr-monitor.json`; Pi/OMP use their `CONFIG_DIR_NAME` (`.pi`/`.omp`) before `.opencode/pr-monitor.json`. Pi reads project-local config only after project trust.
 
 ```json
 {
@@ -161,11 +181,12 @@ Optional, per project: use `.pr-monitor.json` for both hosts. Without it, Claude
 ```sh
 npm install
 npm test             # core, shared runtime, and adapter regression tests
-npm run typecheck    # core + runtime + both adapters
-npm run build        # OpenCode publish bundle + committed Claude MCP bundle
+npm run typecheck    # core + runtime + all adapters
+npm run build        # OpenCode/Pi publish bundles + committed Claude MCP bundle
 npm run version:check
-npm run pack:check   # pack/install/import both OpenCode exports in a temporary consumer
-npm run clean        # remove ephemeral OpenCode build output
+npm run pack:check   # inspect/install/import both npm artifacts
+npm run host:check   # load the Pi and OMP bundles through their real loaders
+npm run clean        # remove ephemeral OpenCode/Pi build and generated skill output
 ```
 
 Layout — one directory per target, plus shared core/runtime layers:
@@ -173,7 +194,9 @@ Layout — one directory per target, plus shared core/runtime layers:
 ```
 core/            per-PR state, config, GitHub normalization, activity, reports
 runtime/         session registry/actions/timers, Node gh runner, shared tool contract
-opencode/        OpenCode adapter — index.ts is the plugin entry
+skills/          canonical monitor-pr skill for push-capable hosts
+opencode/        OpenCode adapter and npm workspace
+pi/              shared Pi/OMP adapter entries and npm workspace
 claude-code/     Claude Code shell — this directory is the plugin root (${CLAUDE_PLUGIN_ROOT})
 .claude-plugin/  marketplace.json, which stays at the repo root and points at ./claude-code
 ```
@@ -182,7 +205,7 @@ Dependency flows adapter → `runtime/` → `core/`; core imports no host SDK an
 
 ## Releasing
 
-A release uses one version for both targets: the annotated `vX.Y.Z` Git tag releases the Claude Code plugin, and the `opencode/` workspace publishes `@sesori/pr-monitor-opencode`. The private root cannot be published accidentally. There is no separate GitHub Release step. Update `opencode/package.json`, `package-lock.json`, `claude-code/.claude-plugin/plugin.json`, and `CHANGELOG.md`, then run:
+A release uses one version for all targets: the annotated `vX.Y.Z` Git tag releases the Claude Code plugin, while the `opencode/` and `pi/` workspaces publish `@sesori/pr-monitor-opencode` and `@sesori/pr-monitor-pi`. The private root cannot be published accidentally. There is no separate GitHub Release step. Update `opencode/package.json`, `package-lock.json`, `claude-code/.claude-plugin/plugin.json`, and `CHANGELOG.md`, then run:
 
 ```sh
 npm ci
@@ -199,6 +222,7 @@ Commit any rebuilt bundle and the release metadata. From the clean release commi
 ```sh
 git push origin main
 npm publish --workspace @sesori/pr-monitor-opencode
+npm publish --workspace @sesori/pr-monitor-pi
 git tag -a vX.Y.Z -m "vX.Y.Z — summary"
 git push origin vX.Y.Z
 ```

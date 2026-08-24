@@ -1,5 +1,8 @@
 node_modules/
 opencode/dist/
+opencode/skills/
+pi/dist/
+pi/skills/
 .worktrees/
 
 .DS_Store

@@ -23,6 +23,7 @@ const versions = await Promise.all(
 const expected = versions[0][1]
 const lock = JSON.parse(await readFile(new URL("../package-lock.json", import.meta.url), "utf8"))
 versions.push(["OpenCode lock", lock.packages?.opencode?.version])
+versions.push(["Pi/OMP lock", lock.packages?.pi?.version])
 const serverSource = await readFile(new URL("../claude-code/src/mcp-server.ts", import.meta.url), "utf8")
 const serverVersion = /new McpServer\(\{ name: "pr-monitor", version: "([^"]+)" \}\)/.exec(serverSource)?.[1]
 versions.push(["Claude MCP", serverVersion])

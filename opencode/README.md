@@ -19,8 +19,12 @@ Requirements: OpenCode 1.17 or newer, plus an installed and authenticated GitHub
 ## Behavior
 
 The plugin registers `pr_monitor` actions for `start`, `stop`, `flush`, `status`, `mark_ready`, and `unmark_ready`.
-It reports CI conclusions and new failures, reviews and comments, merge conflicts, and merged/closed state. Reports
-contain facts only and are delivered into the owning OpenCode session.
+It also injects one packaged `monitor-pr` skill through OpenCode's configured skill paths, so consuming repositories
+do not need their own copy. The skill tells the agent to start monitoring after opening a PR, handle every automatic
+report, confirm the ready label before handoff, and end the turn instead of creating a second wait mechanism.
+
+The monitor reports CI conclusions and new failures, reviews and comments, merge conflicts, and merged/closed state.
+Reports contain facts only and are delivered into the owning OpenCode session.
 
 The monitor owns all polling and notifications arrive automatically. Agents must never create sleeps, scheduled
 checks, background polling loops, repeated `gh pr checks`, or routine `status`/`flush` calls while waiting.

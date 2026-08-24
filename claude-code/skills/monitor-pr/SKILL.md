@@ -41,8 +41,8 @@ pr_monitor(action: "start", pr: "owner/repo#123")
   work in a fresh session, run `pr_monitor(action: "status")` and re-start what
   is missing.
 - Tuning (debounce, poll interval, CI wait, ignored comment tag, keep-alive)
-  lives in `.claude/pr-monitor.json` or `.opencode/pr-monitor.json` — never in
-  tool arguments.
+  lives in `.pr-monitor.json`, with `.claude/pr-monitor.json` and
+  `.opencode/pr-monitor.json` as fallbacks — never in tool arguments.
 
 ## 2. Handle each `[PR Monitor]` report
 
