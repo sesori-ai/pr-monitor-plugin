@@ -32,10 +32,11 @@ a small, explicit integration rather than another copy of start/stop/config/time
    persistence, and `session.deleted` cleanup.
 4. Claude Code keeps PID/start-token spool ownership, hook delivery, handoff state, keep-alive, desktop
    notifications, and committed MCP bundle behavior.
-5. One Pi extension registers `pr_monitor`, delivers reports with native `pi.sendMessage(..., { triggerTurn:
-   true })`, and clears all timers on every Pi session shutdown/replacement flow.
-6. The same Pi extension package loads in OMP through OMP's upstream-Pi compatibility surface. There is no
-   second OMP implementation or OMP-only monitor state.
+5. One Pi-family implementation registers `pr_monitor`, delivers reports with native
+   `pi.sendMessage(..., { triggerTurn: true })`, and clears all timers after every successful session replacement
+   and shutdown without clearing them when a cancelable replacement is declined.
+6. The same package loads in OMP through a thin lifecycle/resource entrypoint around the shared implementation.
+   There is no second OMP monitor implementation, watch registry, or npm package.
 7. Pi loads project configuration only for a trusted project. OMP uses its documented always-trusted
    compatibility result. Both resolve the host config directory through `CONFIG_DIR_NAME`, never a hardcoded
    `.pi` or `.omp` branch.
@@ -92,8 +93,9 @@ large enough that a third copy would be a maintenance defect.
   and inject them and run the bounded keep-alive loop.
 - Pi supports custom extension messages that participate in model context. `pi.sendMessage` can queue while the
   agent is busy and start a turn when idle, so Pi needs neither MCP nor a spool.
-- OMP `18.0.3` explicitly rewrites imports from `@earendil-works/pi-*`, remaps TypeBox, accepts `package.json#pi`
-  or `package.json#omp` extension manifests, and implements the Pi message/session APIs needed here.
+- OMP `18.0.3` rewrites imports from `@earendil-works/pi-*`, remaps TypeBox, and accepts `package.json#pi` or
+  `package.json#omp`. Unlike upstream Pi, it retains the extension runner across `/new`, `/resume`, and `/fork`
+  and emits post-success `session_switch`; `session_shutdown` remains process teardown.
 
 Delivery and host lifecycle therefore remain adapter-owned. They are ports into a shared monitor session, not a
 reason to generalize every host through MCP.
@@ -116,7 +118,7 @@ Keep one repository. Split source and release concerns inside it rather than spl
 core/                  pure per-PR domain/state machine
 runtime/               host-neutral session orchestration and Node gh runner
 opencode/              OpenCode source plus @sesori/pr-monitor-opencode package metadata
-pi/                    shared Pi/OMP extension, skill, and @sesori/pr-monitor-pi metadata
+pi/                    shared implementation, thin Pi/OMP entries, skill, and npm package metadata
 claude-code/           Claude Code plugin root, MCP source, hooks, commands, skill, committed bundle
 scripts/               workspace build, package-content, and version checks
 ```
@@ -184,23 +186,29 @@ Pi checks `ctx.isProjectTrusted()` before considering project-local paths. An un
 never reads a local monitor config. OMP's compatibility implementation returns true because OMP already loads
 project resources without Pi's trust gate.
 
-### Pi-family adapter
+### Pi-family adapter and lifecycle seam
 
-Author `pi/index.ts` against the upstream `@earendil-works/pi-coding-agent` API only. Use the documented common
-denominator:
+Keep tool, delivery, config, and monitor ownership in one shared Pi-family implementation. `pi/index.ts` is the
+upstream entry and uses only documented `@earendil-works/pi-coding-agent` APIs: TypeBox/StringEnum `registerTool`,
+`session_start`, `session_shutdown`, `sendMessage`, `CONFIG_DIR_NAME`, and `isProjectTrusted`.
 
-- `registerTool` with TypeBox/StringEnum input for `start|stop|flush|status|mark_ready|unmark_ready`;
-- `session_start`/`session_shutdown` lifecycle;
-- `sendMessage` with custom type `pr-monitor`, `display: true`, `deliverAs: "steer"`, and `triggerTurn: true`;
-- `resources_discover` only where OMP needs the package skill path; and
-- `CONFIG_DIR_NAME` plus `isProjectTrusted` for project configuration.
+Upstream Pi emits `session_shutdown` for the old extension instance only after a successful `/new`, `/resume`,
+`/fork`, `/clone`, or reload transition, then binds a fresh instance and emits `session_start`. Cleanup therefore
+belongs in an idempotent shutdown handler, not `session_before_switch`/`session_before_fork`: those events can cancel,
+and clearing there would kill valid watches when the user stays in the old session.
 
-Do not use OMP-only `pi.zod`, `ctx.setInterval`, jobs, daemon supervision, MCP, or hooks. Use ordinary timers only
-inside `MonitorSession`, and clear them synchronously from `session_shutdown`, which is supported by both hosts.
-The shared tool description must explicitly prohibit agent-created sleeps, scheduled checks, polling loops, and
-routine `status`/`flush`: reports are autonomous, and Pi/OMP should end the turn when no report needs work.
+OMP `18.0.3` has a material lifecycle difference: it retains its extension runner and emits post-success
+`session_switch` for `new|resume|fork`, while `session_shutdown` is process teardown. `pi/omp.ts` is a thin package
+entrypoint that delegates all monitor behavior to the same shared factory and additionally maps `session_switch` to
+session disposal/reinitialization. It owns no watch logic or state. Separate entries avoid runtime host detection and
+make the one unavoidable compatibility seam independently testable.
 
-The package declares both manifests:
+Do not use OMP-only schemas, managed jobs, daemon supervision, MCP, or hooks. Use ordinary timers only inside
+`MonitorSession`; both entries synchronously and idempotently dispose the current session owner at their successful
+replacement/teardown boundary. The shared tool description explicitly prohibits agent-created sleeps, scheduled
+checks, polling loops, and routine `status`/`flush`: reports are autonomous, so Pi/OMP end the turn when idle.
+
+The package declares both entries:
 
 ```json
 {
@@ -209,14 +217,13 @@ The package declares both manifests:
     "skills": ["./skills"]
   },
   "omp": {
-    "extensions": ["./dist/index.js"]
+    "extensions": ["./dist/omp.js"]
   }
 }
 ```
 
-The OMP path relies on its deliberate upstream compatibility layer rather than conditional production imports.
-OMP receives the skill through `resources_discover`; Pi receives it through the native package manifest, avoiding
-duplicate skill registration.
+OMP receives the same skill through its entry's `resources_discover`; Pi receives it through the native package
+manifest. Each loader sees it exactly once.
 
 ### Packaging and release
 
@@ -264,16 +271,17 @@ spool, lock, PID record, config migration, or durable watch restoration is added
 ### Deliberately not added
 
 - public core/runtime npm packages;
-- separate Pi and OMP implementations or packages;
+- separate Pi and OMP monitor implementations or packages;
 - cross-host base classes beyond the three-consumer `MonitorSession` boundary;
 - watch persistence across host restart, `/resume`, or process replacement;
 - a background daemon, MCP bridge, report spool, delivery retry queue, or filesystem watcher for Pi/OMP;
-- OMP runtime detection branches in monitor logic; and
+- runtime host detection or OMP branches inside shared monitor logic; and
 - new convenience commands before the common tool and package skill prove sufficient.
 
 ### Evidence and accepted risk
 
-- Timer cleanup addresses ordinary `/new`, `/resume`, `/fork`, `/reload`, and quit flows. It is not speculative.
+- Timer cleanup addresses ordinary `/new`, `/resume`, `/fork`, `/reload`, and quit flows. Upstream Pi uses
+  post-success shutdown/rebind; OMP uses its post-success switch event. Cancelable before-events never clear state.
 - Duplicate-start rechecking preserves an already demonstrated concurrent request path from the Claude MCP server.
 - Project trust protects an ordinary globally installed Pi extension from honoring untrusted local configuration.
 - OMP compatibility drift is plausible because it is an independently released fork. Release verification pins a
@@ -308,13 +316,16 @@ because repository redirects and branding provide no implementation benefit to P
   source, not the generated bundle.
 - Do not hand-edit generated bundles or lockfiles.
 - Every PR body uses the required complexity, what, why, risk/test-focus, expected-result, and verification sections.
+- The fixed six titles are milestone PRs. An emergent production defect gets a separately tracked atomic repair PR
+  titled `🐛 [pi-omp-pr-monitor] fix: <description> [repair <n>]`; it does not renumber merged or unopened milestones.
+  The blocked milestone resumes only after the repair merges and its focused checks pass.
 - Once an implementation PR is opened, start its PR monitor immediately and follow the repository's monitor skill.
 
 ## Delivery Sequence
 
 | Step | Exact PR title | Complexity | Soft line target |
 |---|---|---|---:|
-| 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan and skill copy | 1,000 |
+| 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan, skill copy, and regression baseline | 1,150 |
 | 2/6 | `⚙️ [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Moderate shared-state and lifecycle refactor | 1,400 |
 | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 |
 | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 1,500 |
@@ -328,6 +339,8 @@ because repository redirects and branding provide no implementation benefit to P
 - Add this `PLAN.md` and `TRACKER.md` under `.plan/active/pi-omp-pr-monitor/`.
 - Copy `sesori-plan-maker` and `sesori-plan-worker` unchanged into `.agents/skills/` so future planning and
   execution sessions discover the same workflow from this repository.
+- Add `docs/regression/README.md` now because both planning skills require its proof levels and retirement rules;
+  Step 5 completes the feature-specific catalog.
 - Validate copied files byte-for-byte, fixed titles/totals, Markdown structure, and `git diff --check`.
 - Do not run TypeScript or bundle suites for this documentation/skill-only step.
 
@@ -365,19 +378,21 @@ because repository redirects and branding provide no implementation benefit to P
 
 ### Step 4/6: Add the Pi and OMP adapter
 
-- Add `pi/index.ts`, `pi/package.json`, target README/license, and `pi/skills/monitor-pr/SKILL.md`.
-- Register the complete `pr_monitor` action surface through the upstream Pi extension API and delegate operations to
-  one session-owned `MonitorSession`.
+- Add the shared Pi-family implementation, upstream `pi/index.ts`, thin `pi/omp.ts`, package metadata, target
+  README/license, and `pi/skills/monitor-pr/SKILL.md`.
+- Register the complete `pr_monitor` action surface and delegate both entries to one session-owned
+  `MonitorSession` implementation.
 - Deliver normal, urgent, initial, terminal, and stop reports as visible `pr-monitor` custom messages with steering
   delivery and idle turn triggering.
-- Start no timers during extension factory evaluation. Start them only after a successful `start` action and clear
-  them on `session_shutdown` for quit/reload/new/resume/fork.
+- Start no timers during factory evaluation. Upstream Pi clears them on post-success `session_shutdown`; OMP clears
+  them on post-success `session_switch` and process `session_shutdown`. Do not clear on cancelable before-events.
 - Apply project trust and config-path rules, and expose the skill once in each host.
 - Add Pi and OMP manifests, upstream host peer dependencies, bundle/pack scripts, lockstep version checks, and CI
   loader validation against Pi `0.84.2` and OMP `18.0.3` plus the then-current releases.
-- Add fake-API contract tests for registration, every action, busy/idle delivery options, lifecycle cleanup,
-  config trust, exactly-once skill discovery, autonomous-delivery/never-delay wording, delivery exceptions, and no
-  duplicate timers after reload.
+- Add fake-API contract tests for registration, every action, busy/idle delivery options, config trust,
+  exactly-once skill discovery, autonomous-delivery wording, and delivery exceptions. Independently test successful
+  new/resume/fork/reload/quit cleanup in both lifecycle models, canceled transitions, idempotence, and no old-session
+  report delivery or duplicate timers after replacement.
 - Make the Pi/OMP skill say to end the turn while idle: never use `sleep`, delayed Bash, cron, a background job,
   repeated `gh pr checks`, or routine `status`/`flush`. Require confirmed `mark_ready` success before handoff.
 - Add packed-plugin loader smoke tests that require no model call, then disposable live tests with a configured model
@@ -386,8 +401,8 @@ because repository redirects and branding provide no implementation benefit to P
 
 ### Step 5/6: Reconcile regression and product documentation
 
-- Add `docs/regression/README.md` with this repository's proof levels, boundaries, matrix/result vocabulary, and
-  plan-retirement rule.
+- Reconcile and complete `docs/regression/README.md` with final boundaries, matrix/result vocabulary, feature index,
+  and plan-retirement rules.
 - Add `docs/regression/pull-request-monitoring.md` for shared monitor semantics, confirmed ready-label handoff,
   autonomous notifications, the prohibition on agent-created waits/polling, and per-host delivery/lifecycle.
 - Add `docs/regression/plugin-installation.md` for npm/Claude distributions, package contents, loader compatibility,
@@ -407,8 +422,9 @@ because repository redirects and branding provide no implementation benefit to P
   `.plan/active/pi-omp-pr-monitor/` to `.plan/completed/pi-omp-pr-monitor/`.
 - Keep the plan active on failure, blocked infrastructure, or an incomplete required host/platform matrix unless the
   user explicitly accepts and records a reduction here.
-- This step contains verification evidence and retirement only. A discovered production defect receives a new
-  implementation step/PR and a consistently renumbered unopened sequence before retirement.
+- This step contains verification evidence and retirement only. A discovered production defect keeps Step 6 open,
+  receives the next `[repair <n>]` PR defined above, and triggers focused plus full-matrix reruns after merge. The
+  fixed six milestone titles and total never change retroactively.
 
 ## Regression And Retirement Matrix
 
@@ -422,8 +438,8 @@ monitor; it does not require unrelated product checks.
 | Shared monitor session | action validation, duplicate-start race, session isolation, timer ownership, idempotent label success, label-failure-without-handoff, config/auth failures, normal/persistent shutdown channels | L3 automated adapter contract; all four adapters represented |
 | OpenCode artifact | packed install, `.` and `./server` import, tool registration, initial delivery, model/agent preservation, session deletion, reload/shutdown notice | L3 actual OpenCode loader on Linux and macOS; automated Windows package import |
 | Claude Code plugin | clean committed bundle, MCP tool start/status/stop/labels, spool injection, handoff/keep-alive, shutdown notice, no subagent drain | L3 automated MCP/hooks plus one live Claude Code session on a release host |
-| Pi package | tarball install, exactly-once skill/extension discovery, trusted/default config, every action, anti-delay wording, busy steer/idle wake, lifecycle cleanup | L4 actual Pi minimum/current loaders; Linux/macOS, Windows loader smoke |
-| OMP package | tarball install through `omp`, import rewrite, exactly-once shared skill, anti-delay wording, same action/report behavior and cleanup | L4 actual OMP minimum/current loaders; Linux/macOS, Windows loader smoke |
+| Pi package | tarball install, exactly-once discovery, config/actions, anti-delay wording, busy/idle delivery, post-success shutdown/rebind and canceled-transition retention | L4 actual Pi minimum/current loaders; Linux/macOS, Windows loader smoke |
+| OMP package | tarball install, import rewrite, exactly-once skill, same behavior, post-success switch cleanup, canceled-transition retention, no cross-session reports | L4 actual OMP minimum/current loaders; Linux/macOS, Windows loader smoke |
 | Cross-host GitHub flow | one real open PR produces initial status, ordinary comment/review aggregation, failing-CI or conflict urgency where safely reproducible, ready-label handoff and withdrawal, and terminal stop | L5 packaged/external; authenticated `gh`, Pi and OMP live, representative OpenCode/Claude regression |
 | Release contents | no private core package dependency, only declared files, host peers external, versions equal, Claude bundle reproducible, install docs match artifacts | L5 packaged; both npm tarballs plus Claude Git plugin root |
 
@@ -438,10 +454,10 @@ host configuration files.
   the extraction.
 - **OpenCode packaging change:** bundling replaces source execution in the npm artifact. Step 3 preserves the sole
   export and tests both supported entry points from the packed tarball before Pi work builds on it.
-- **OMP compatibility drift:** author only against the upstream Pi common denominator, keep OMP-specific behavior to
-  its manifest/skill discovery, and test both a floor and current OMP release before publishing.
-- **Extension reload leaks:** Pi session shutdown is the only timer cleanup boundary; tests cover every replacement
-  reason and verify that old callbacks cannot remove successor watches.
+- **OMP compatibility drift:** keep its post-success `session_switch` adaptation in one thin entrypoint and test both
+  a floor and current OMP release before publishing; all monitor behavior remains shared.
+- **Extension replacement leaks:** test every successful and canceled transition in each host's real lifecycle model,
+  and verify old callbacks cannot deliver into or remove successor-session watches.
 - **Untrusted config:** Pi defaults rather than reading project files when trust is absent. No attempt is made to
   emulate a separate trust gate in OMP.
 - **Package version skew:** root validation makes a release fail before pack/publish when OpenCode, Pi, and Claude

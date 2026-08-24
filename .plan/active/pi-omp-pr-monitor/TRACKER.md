@@ -14,21 +14,23 @@
 
 | Done | Step | Exact PR title | Complexity | Soft line target | State |
 |---|---|---|---|---:|---|
-| [ ] | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan and exact skill copy | 1,000 | [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) open |
+| [ ] | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan, exact skill copy, and regression baseline | 1,150 | [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) open |
 | [ ] | 2/6 | `⚙️ [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Moderate shared-state and lifecycle refactor | 1,400 | Pending Step 1 |
 | [ ] | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 | Pending Step 2 |
 | [ ] | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 1,500 | Pending Step 3 |
 | [ ] | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 | Pending Step 4 |
 | [ ] | 6/6 | `⚙️ [pi-omp-pr-monitor] test: verify Pi and OMP and retire the plan [step 6/6]` | Moderate packaged, live-host, and external verification | 700 | Pending Step 5 |
 
-The total, order, complexity emoji, slug, and titles are fixed. If implementation evidence requires another
-independently valid PR, update this plan and every unopened title before opening that PR. Do not silently exceed the
-1,500-line soft cap.
+The six milestone titles and total are fixed. Emergent defects use separately tracked
+`🐛 [pi-omp-pr-monitor] fix: <description> [repair <n>]` PRs without renumbering milestones; the blocked milestone
+resumes only after its repair passes. Do not silently exceed the 1,500-line soft cap.
 
 ## Locked Decisions
 
 - Keep one Git repository with private shared source and separate host artifacts.
-- Add one upstream-Pi-compatible extension/package for both Pi and OMP; no `omp/` source fork or npm alias.
+- Add one shared Pi-family implementation/package for Pi and OMP; no OMP monitor fork or npm alias.
+- Use a thin OMP entrypoint only for its post-success `session_switch` lifecycle/resource seam; upstream Pi uses
+  post-success `session_shutdown` and a fresh extension instance. Never clear on cancelable before-events.
 - Use native Pi `sendMessage` delivery, not Claude's MCP/spool path.
 - Extract one session-level runtime used by OpenCode, Claude, and Pi/OMP while keeping host delivery/lifecycle policy
   in adapters.
@@ -56,6 +58,7 @@ independently valid PR, update this plan and every unopened title before opening
   matrix.
 - [x] Copy `sesori-plan-maker` and `sesori-plan-worker` under `.agents/skills/`.
 - [x] Verify both copied skill files are byte-identical to their requested sources.
+- [x] Add the regression-level/proof-boundary baseline required by those skills.
 - [x] Write `PLAN.md` and this tracker under `.plan/active/pi-omp-pr-monitor/`.
 - [x] Validate fixed titles/totals, Markdown paths, changed-line count, and `git diff --check`.
 - [x] Commit with the exact Step 1 title, push, and open the planning PR with the required body sections.
@@ -65,6 +68,10 @@ independently valid PR, update this plan and every unopened title before opening
 | Date | Review | Result |
 |---|---|---|
 | 2026-08-23 | Architecture plan review applicability | Not run: this repository has no applicable reviewer; the available source reviewer is specific to another repository's Dart/Flutter architecture. See `PLAN.md`. |
+| 2026-08-23 | Cubic: missing regression path in worker | Declined after clarification: only old plans without a matrix consult it at retirement; this plan creates it before retirement. The later Codex comment exposed the broader plan-maker dependency, so the baseline is now included in Step 1 anyway. |
+| 2026-08-23 | Codex: session replacement cleanup | Accepted with correction: upstream Pi emits shutdown only after successful replacement, while OMP emits post-success switch. The plan now uses separate thin entries and never clears on cancelable before-events. |
+| 2026-08-23 | Codex: regression guidance unavailable | Accepted: `docs/regression/README.md` now ships with the planning skills; Step 5 reconciles/completes it. |
+| 2026-08-23 | Codex: impossible late renumbering | Accepted: emergent defects use numbered repair PRs outside the fixed six milestones, followed by focused and full reruns. |
 
 ## Verification Log
 
@@ -72,13 +79,17 @@ independently valid PR, update this plan and every unopened title before opening
 
 - [x] Both copied skill files are byte-identical to their requested sources.
 - [x] Plan validation passes: fixed slug, six exact ordered titles, and balanced Markdown fences.
+- [x] Regression baseline defines cumulative L1-L5 levels, proof boundaries, result states, evidence privacy, feature
+  maintenance, and plan-retirement rules required by the copied skills.
 - [x] Every referenced current source path exists; future paths are explicitly assigned to implementation steps.
 - [x] `git diff --check` passes.
-- [x] Changed lines: 962, within the 1,000-line Step 1 target.
+- [x] Changed lines: 1,059, within the revised 1,150-line Step 1 target.
 - [x] TypeScript, host, and bundle suites not run: this step changes only plans and agent skills.
 - [x] Commit `17b1562` pushed and [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) opened with the exact Step 1 title.
 - [x] User clarification incorporated: preserve reliable Claude ready-label handoff, discover the Pi/OMP skill once,
   and make autonomous notification/no-agent-delay behavior an explicit tested contract.
+- [x] PR review incorporated: available regression baseline, correct Pi-versus-OMP replacement lifecycles, canceled
+  transition retention, and a non-renumbering repair flow.
 
 Later steps append focused verification here. Do not mark a regression row passed without the boundary and host/
 platform matrix required by `PLAN.md`.
