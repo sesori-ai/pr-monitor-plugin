@@ -1,54 +1,21 @@
 {
-  "name": "@sesori/pr-monitor-opencode",
-  "version": "0.2.1",
-  "description": "OpenCode plugin that watches GitHub PRs in the background and delivers factual [PR Monitor] reports into the owning session",
-  "license": "MIT",
+  "name": "@sesori/pr-monitor-workspace",
+  "version": "0.0.0",
+  "private": true,
   "type": "module",
-  "main": "./opencode/index.ts",
-  "exports": {
-    ".": "./opencode/index.ts",
-    "./server": "./opencode/index.ts"
-  },
-  "files": [
-    "core",
-    "runtime",
+  "workspaces": [
     "opencode"
   ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/sesori-ai/opencode-pr-monitor.git"
-  },
-  "homepage": "https://github.com/sesori-ai/opencode-pr-monitor#readme",
-  "bugs": {
-    "url": "https://github.com/sesori-ai/opencode-pr-monitor/issues"
-  },
-  "author": {
-    "name": "Sesori",
-    "url": "https://github.com/sesori-ai"
-  },
-  "keywords": [
-    "opencode",
-    "opencode-plugin",
-    "github",
-    "pull-request",
-    "monitor"
-  ],
-  "engines": {
-    "opencode": ">=1.17.0"
-  },
   "scripts": {
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "build": "esbuild claude-code/src/mcp-server.ts --bundle --platform=node --format=esm --target=node18 --outfile=claude-code/dist/mcp-server.mjs --log-level=warning --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
-    "pack:check": "node scripts/check-pack.mjs",
-    "prepublishOnly": "npm test && npm run typecheck && npm run pack:check"
-  },
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
-  },
-  "dependencies": {
-    "@opencode-ai/plugin": "^1.4.9"
+    "build": "npm run build:opencode && npm run build:claude",
+    "build:opencode": "node scripts/build-opencode.mjs",
+    "build:claude": "node scripts/build-claude.mjs",
+    "clean": "node scripts/clean.mjs",
+    "pack:check": "npm run build:opencode && node scripts/check-pack.mjs",
+    "version:check": "node scripts/check-versions.mjs",
+    "release:check": "npm test && npm run typecheck && npm run build && npm run version:check && npm run pack:check"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

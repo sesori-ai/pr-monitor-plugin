@@ -1,4 +1,5 @@
 node_modules/
+opencode/dist/
 .worktrees/
 
 .DS_Store
