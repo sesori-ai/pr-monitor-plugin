@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Active watches now manage the configured ready-for-human-review label across OpenCode, Claude Code, Pi, and OMP.
+  Clean acknowledged heads are labeled automatically; later commits, relevant feedback, CI regression, and conflicts
+  withdraw readiness, while unconditional `mark_ready` remains the judgment override for non-actionable activity.
+- Every report states readiness and makes follow-ups on existing/resolved threads action-required even when the
+  unresolved-thread count is unchanged. Local-account comments without the mandatory reply prefix are identified as
+  human feedback.
+
+### Changed
+
+- `ignoreCommentTag` is now a starts-with agent-reply prefix and defaults to `<!-- pr-monitor:reply -->`. Prefixed
+  replies remain private acknowledgement evidence instead of disappearing from readiness ordering.
+- Claude keep-alive follows confirmed label state rather than every report, so resolution-only activity does not
+  reopen a handed-off work loop.
+
+### Fixed
+
+- Readiness rejects partial GraphQL responses, fetches all check/review/thread/label pages, and distinguishes
+  same-name reruns. Edited/deleted acknowledgements withdraw readiness; mixed same-second feedback/reply ties remain
+  conservatively blocked. Ambiguous label failures cannot accept newer feedback during retry.
+- Stop/reload cleanup drains only in-flight label mutations before unregistering a watch, preventing stale mutation
+  races without hanging on a stalled fetch or report delivery.
+
 ## [0.3.0]
 
 ### Added

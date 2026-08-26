@@ -78,6 +78,7 @@ test("OpenCode shutdown persists notices synchronously without starting a model 
     },
   )
   assert.match(String(result), /Started monitoring/)
+  await new Promise<void>((resolveImmediate) => setImmediate(resolveImmediate))
   assert.equal(promptAsyncBodies.length, 1, "initial status uses normal async delivery")
 
   await hooks.dispose!()

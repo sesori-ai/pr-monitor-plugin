@@ -28,18 +28,20 @@ export function buildMonitorToolDescription({
   waiting: string
 }): string {
   return (
-    "Monitor a GitHub PR in the background. Detects CI conclusions, reviews, inline/issue comments (including " +
-    "follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with " +
-    `a rolling debounce; ${delivery} Reports state facts only. A newly failing check (when flushOnCiFailure is ` +
-    "enabled), merge conflict, or terminal PR state skips debounce and is reported at the next poll. The monitor " +
-    "itself owns all polling and notifications " +
-    "arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated `gh pr " +
-    "checks`, or routine status/flush calls while waiting for CI or review. " +
+    "Monitor a GitHub PR in the background. Detects head changes, CI conclusions, reviews, inline/issue comments " +
+    "(including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is " +
+    `aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states ` +
+    "whether the configured ready label is present and tells the agent to keep working or manually mark ready when " +
+    "judgment says no action remains. The monitor automatically adds readiness when CI is passing (or absent), " +
+    "mergeability is definite, and every feedback channel ends in a correctly prefixed local-account reply. It " +
+    "withdraws readiness on later commits, relevant comments, CI regression, or conflict. A newly failing check " +
+    "(when flushOnCiFailure is enabled), readiness withdrawal, merge conflict, or terminal state skips debounce. " +
+    "The monitor owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled " +
+    "jobs, background polling loops, repeated `gh pr checks`, or routine status/flush calls while waiting. " +
     `${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine ` +
-    "after a delivered report), status (list this session's monitors), mark_ready (add the configured ready label " +
-    "after CI/review is clean; never claim handoff unless it confirms success), and unmark_ready (withdraw it before " +
-    "handling later feedback). Ready actions do not " +
-    "require an active monitor. The PR must be `owner/repo#123` or a full URL; `all` is allowed only for stop/flush. " +
-    `Tuning lives in ${configPath}. ${lifecycle}`
+    "after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current " +
+    "state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a " +
+    "later clean assessment). Ready actions do not require an active monitor. The PR must be `owner/repo#123` or a " +
+    `full URL; \`all\` is allowed only for stop/flush. Tuning lives in ${configPath}. ${lifecycle}`
   )
 }

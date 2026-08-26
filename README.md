@@ -1,17 +1,27 @@
 # pr-monitor
 
-A GitHub PR monitor for coding agents, available for [OpenCode](https://opencode.ai), [Claude Code](https://code.claude.com), [Pi](https://github.com/earendil-works/pi), and [Oh My Pi](https://omp.sh). It watches pull requests in the background and delivers factual `[PR Monitor]` reports into the session that started the watch — so an agent (or you) can raise a PR, keep working, and get told when something actually happened.
+A GitHub PR monitor for coding agents, available for [OpenCode](https://opencode.ai),
+[Claude Code](https://code.claude.com), [Pi](https://github.com/earendil-works/pi), and
+[Oh My Pi](https://omp.sh). It watches pull requests in the background, delivers `[PR Monitor]` reports into the
+session that started the watch, and manages the ready-for-human-review label from observable GitHub state.
 
 ## What it does
 
-- Polls GitHub via `gh api graphql` (one query per watched PR per tick, with extra pages only for PRs exceeding 100 review threads).
-- Detects: CI suite conclusions, new reviews, new inline/issue comments (including follow-ups on existing or resolved review threads), review-thread resolution changes, mergeability changes, merge/close.
+- Polls GitHub via `gh api graphql` (one base query per watched PR per tick, plus overflow pages for checks, latest
+  reviews, review threads, or labels only when needed).
+- Detects: new commits, CI suite conclusions, reviews and review summaries, inline/issue comments (including
+  follow-ups on existing or resolved review threads), review-thread resolution changes, mergeability changes, and
+  merge/close.
 - Aggregates ordinary activity with a **rolling debounce**: any new activity resets a quiet timer; a report is delivered after the PR has been quiet for the configured window.
 - **Instant CI failures**: a check going red skips the debounce and the CI hold — the report goes out at the next poll, carrying whatever else was buffered, so the agent starts fixing CI instead of waiting out a timer that PR comments keep resetting.
 - **Instant conflicts and terminal states**: a newly detected merge conflict, merge, or close also reports at the next poll without waiting for the debounce or CI hold.
 - **CI hold**: a due report is held while a check suite is still running (bounded by `maxCiWaitMinutes`), so you get one report with the CI verdict instead of two.
-- Reports are **facts only** — counts, authors, check names. No advice, no comment bodies.
-- Monitors are **per-session and in-memory**: they stop automatically when the PR is merged/closed, and they do not survive a host restart.
+- Automatically adds readiness when CI is green/absent, mergeability is `MERGEABLE`, and every feedback channel
+  ends in a prefixed local-account reply. A later commit, relevant comment, CI regression, or conflict withdraws it.
+- Every report states whether readiness is present and tells the agent to keep working or manually accept
+  non-actionable activity. Reports include no comment bodies.
+- Monitors are **per-session and in-memory**: they stop automatically when the PR is merged/closed, preserve the
+  label as historical evidence, and do not survive a host restart.
 - The monitor owns polling and delivers reports automatically. Agents must not create sleeps, scheduled checks, background polling loops, repeated `gh pr checks`, or routine `status`/`flush` calls while waiting.
 
 ### Example report
@@ -21,8 +31,11 @@ A GitHub PR monitor for coding agents, available for [OpenCode](https://opencode
 - CI: failing (1/8 failed: analyze)
 - Mergeable: MERGEABLE
 - Reviews: alice ✓ approved · bob ⏳ pending
-- [comment:inline] 3 unresolved threads; 2 threads received 2 new comments since last flush (1 currently unresolved, 1 currently resolved; 2 coderabbitai[bot])
-- [comment:issue] 5 total (1 new since last flush: 1 alice)
+- [comment:review] 0 new relevant review summaries since last flush
+- [comment:inline] ACTION REQUIRED: 2 threads received 2 new relevant comments since last flush (1 currently unresolved, 1 currently resolved; 2 coderabbitai[bot]). The unresolved-thread count is unchanged at 3; inspect every changed thread anyway.
+- [comment:issue] 5 total (1 new relevant since last flush: 1 alice)
+- Ready for human review: NO — label "ready-for-human-review" is absent.
+- Required next step: Do more work until the PR is ready for review, or use pr_monitor(action: "mark_ready", pr: "sesori-ai/example#42") if you believe nothing else is required.
 ```
 
 ## Requirements
@@ -59,8 +72,11 @@ The bundled `monitor-pr` skill turns reports into work, so the normal path needs
 
 1. Claude opens a PR and starts a monitor for it straight away.
 2. Every report is acted on — review comments via the repo's `address-pr-comments` skill, failing CI by fixing the cause, conflicts by merging the base branch in.
-3. When CI is green, no review threads are unresolved, no requested reviewer is still pending and nothing is left unanswered, Claude calls `mark_ready`. Only a confirmed label success is a handoff; failure leaves keep-alive armed for diagnosis and retry.
-4. If a human then comments, the next report takes the PR back: Claude withdraws the label, works the feedback, and hands off again.
+3. Agent replies begin with the configured prefix (default `<!-- pr-monitor:reply -->`). Unresolved threads may
+   remain intentionally; the prefixed final reply is the acknowledgement signal.
+4. The monitor automatically adds readiness when the current head is clean and withdraws it for later commits or
+   feedback. Claude uses unconditional `mark_ready` only when new activity is non-actionable and should not receive
+   another reply.
 
 ### How reports arrive (and how that differs from opencode)
 
@@ -70,11 +86,15 @@ Claude Code has no way for a background process to push a message into a session
 - when you submit a prompt (`UserPromptSubmit`),
 - when Claude tries to end its turn (`Stop`) — a pending report holds the turn open so Claude addresses it before going idle.
 
-That alone still leaves a gap: a report landing while the session sits idle waits until your next message. **Keep-alive** closes it. While a monitored PR has not been handed off with `mark_ready`, the `Stop` hook supplies an exact `claude-code/hooks/await-activity.mjs` command that blocks until a report is spooled. That hook-issued command is the only waiting mechanism Claude should run; it must never invent a delay or polling job after starting the monitor.
+That alone still leaves a gap: a report landing while the session sits idle waits until your next message.
+**Keep-alive** closes it. While a monitored PR does not carry the ready label, the `Stop` hook supplies an exact
+`claude-code/hooks/await-activity.mjs` command that blocks until a report is spooled. That hook-issued command is the
+only waiting mechanism Claude should run; it must never invent a delay or polling job after starting the monitor.
 
 Bounds, so a loop can never run away:
 
-- It ends at the handoff (`mark_ready`), on `stop`, when the PR merges or closes, and when the MCP server goes away.
+- It ends when readiness is added automatically or manually, on `stop`, when the PR merges or closes, and when the
+  MCP server goes away.
 - `keepAliveMaxMinutes` (default 120) caps *idle* waiting; every delivered report refreshes it, so an active PR keeps going and an abandoned one lets go.
 - <kbd>Esc</kbd> interrupts the wait like any other tool call, and asking Claude to stop wins over the loop.
 - Set `"keepAlive": false` to switch the whole thing off and keep the passive-delivery behavior.
@@ -131,8 +151,8 @@ All four harnesses register the same tool:
 | `stop`   | PR identifier or `all`                 | Stop watching. |
 | `flush`  | PR identifier or `all`                 | On demand: immediately return a full status report and reset the "new since" baseline. Delivered reports already advance the baseline, so a flush after handling one isn't needed. |
 | `status` | —                                      | List this session's active monitors. |
-| `mark_ready` | `owner/repo#123` or full PR URL    | Add the configured `readyLabel` label to the PR on GitHub, signalling it is ready for human review. Creates the label in the repo (green, with a description) if it doesn't exist. In Claude Code this is also the **handoff** that releases the keep-alive loop. Works without an active monitor; refuses targets that are not open PRs (plain issues, merged/closed PRs). |
-| `unmark_ready` | `owner/repo#123` or full PR URL  | Remove that label again — used when new feedback lands on a PR that was already flagged ready. Idempotent: a PR without the label reports so rather than failing. |
+| `mark_ready` | `owner/repo#123` or full PR URL    | Unconditionally accept current observed state and add `readyLabel`. Use for non-actionable bot acknowledgements or other judgment calls that should not receive a reply. Creates the label if needed and releases Claude keep-alive. Standalone actions still require an open PR. |
+| `unmark_ready` | `owner/repo#123` or full PR URL  | Remove the label now. It is idempotent and is not a permanent hold: an active monitor may restore readiness after a later clean assessment. |
 
 ## Configuration
 
@@ -143,7 +163,7 @@ Optional, per project: use `.pr-monitor.json` for every host. Claude Code falls 
   "debounceMinutes": 2,
   "maxCiWaitMinutes": 30,
   "pollIntervalSeconds": 60,
-  "ignoreCommentTag": "<!-- pr-monitor:ignore -->",
+  "ignoreCommentTag": "<!-- pr-monitor:reply -->",
   "announceOnStart": true,
   "flushOnCiFailure": true,
   "desktopNotifications": false,
@@ -158,20 +178,29 @@ Optional, per project: use `.pr-monitor.json` for every host. Claude Code falls 
 | `debounceMinutes`      | `2`     | Quiet window after the last detected ordinary activity before a report is delivered. Rolling — new activity resets it. |
 | `maxCiWaitMinutes`     | `30`    | Upper bound on holding a due report while CI is still running. After this, the report is force-flushed naming unfinished checks. |
 | `pollIntervalSeconds`  | `60`    | GitHub poll interval per watched PR (clamped to 30 seconds … 24 hours). |
-| `ignoreCommentTag`     | unset   | If set, comments authored by the authenticated `gh` user that contain this tag are invisible to the monitor — useful so an agent replying to review threads doesn't trigger its own reports. |
+| `ignoreCommentTag`     | `<!-- pr-monitor:reply -->` | Mandatory prefix for agent-authored GitHub replies. A local-account comment without this exact starting prefix is treated as human feedback; prefixed replies remain private acknowledgement evidence and do not count as new relevant comments. |
 | `announceOnStart`      | `true`  | Deliver a full status report immediately when a monitor starts, so the session sees its starting point and can address anything already outstanding on the PR. Set `false` to disable. |
 | `flushOnCiFailure`     | `true`  | Report a newly failing check at the next poll instead of waiting out `debounceMinutes` (and any CI hold), so CI fixes start sooner. Counts failures found while the suite is still running. At most one instant report per head commit — later failures on the same commit ride along with the debounced suite-conclusion report. Set `false` for debounce-only delivery. |
 | `desktopNotifications` | `false` | Claude Code only: emit an OS notification (macOS/Linux) when a report is spooled, so an idle session's reports aren't silently waiting. |
-| `readyLabel`           | `ready-for-human-review` | Label the `mark_ready` action applies to the PR on GitHub. |
-| `keepAlive`            | `true`  | Claude Code only: while a monitored PR has not been handed off with `mark_ready`, refuse turn-end and have Claude wait for the next report instead of going idle. Set `false` for purely passive delivery. |
+| `readyLabel`           | `ready-for-human-review` | Label managed automatically by active watches and explicitly by `mark_ready`/`unmark_ready`. |
+| `keepAlive`            | `true`  | Claude Code only: while a monitored PR lacks the ready label, refuse turn-end and have Claude wait for the next report. Set `false` for passive delivery. |
 | `keepAliveMaxMinutes`  | `120`   | Claude Code only: cap on how long the keep-alive loop waits with *nothing happening*. Refreshed by every delivered report, so it bounds idle time rather than total work time. |
 
 ## Behavior details
 
-- **Activity** = state/mergeability changes, review changes, per-thread resolution or visible-comment changes, issue comments, and CI *suite conclusions*. Transitions into "running" (a new push) and non-failing per-check progress are intentionally not activity.
+- **Activity** = head changes, state/mergeability changes, review changes, per-thread resolution or relevant-comment
+  changes, issue comments, and CI *suite conclusions*. A head change is activity even before GitHub registers checks;
+  non-failing per-check progress on the same head remains quiet.
 - **CI failures bypass the timers** (`flushOnCiFailure`, default on). A check whose outcome is newly `failure` — including one found while the suite is still running, which is otherwise not activity — flushes on the spot: no quiet window, no CI hold. The report reads the suite honestly (`- CI: running (3/8 done, 1 failed so far: lint)`). The instant path fires at most once per head commit, so a matrix going red job by job cannot wake the session once per job; the suite's eventual conclusion still delivers the full verdict through the normal debounce, and the next push re-arms the instant path.
 - **Conflicts and terminal states bypass the timers.** A newly observed `CONFLICTING` state (including an `UNKNOWN -> CONFLICTING` settle), merge, or close reports at the next poll and is never held behind running CI.
-- **Review-thread follow-ups stay visible.** Inline comments retain their thread identity and current resolved/unresolved state. Reports state how many threads received visible comments since the last flush and split those threads by current state, so a follow-up on a previously handled or resolved thread cannot be mistaken for an unchanged unresolved-thread count. Comments filtered by `ignoreCommentTag` remain invisible.
+- **Review-thread follow-ups are explicit.** Reports lead with `ACTION REQUIRED` when any existing or resolved thread
+  receives a relevant comment and explicitly warn that the unresolved count may be unchanged. Local-account comments
+  lacking the mandatory prefix are identified as human feedback.
+- **Readiness follows acknowledgement, not resolution.** Each review thread may remain unresolved if its latest
+  comment is a prefixed local reply. Flat issue/review-summary feedback is acknowledged by a later prefixed local
+  issue comment. Editing or deleting that acknowledgement withdraws readiness. Mixed feedback/reply entries in the
+  same timestamp second remain conservatively blocked until a later reply or manual mark. Stale `CHANGES_REQUESTED`,
+  pending reviewers, thread resolution, and draft status do not independently block readiness.
 - **"New since last flush"** compares stable GitHub comment IDs with the last delivered report or manual `flush`, so comments created within the same timestamp second are not lost.
 - **Failure handling**: 10 consecutive poll failures (or report-delivery failures) stop the monitor with a notice. A failed initial status report retains its zero comment baseline and retries at the next poll. A deleted/inaccessible PR stops immediately.
 - **Terminal states**: an immediate report describing a merged/closed PR is delivered with a `Monitor stopped: PR merged|closed` line, then the monitor stops itself. All stop reasons use the same `Monitor stopped: <reason>` phrasing.

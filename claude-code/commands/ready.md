@@ -3,7 +3,10 @@ description: Mark a GitHub PR as ready for human review (adds a label)
 argument-hint: "[owner/repo#123 | PR URL]"
 ---
 
-Mark a PR as ready for human review with the pr_monitor tool (action "mark_ready"). This adds the configured ready label (default `ready-for-human-review`, config key `readyLabel`) to the PR on GitHub so a human knows it is their turn.
+Manually accept a PR's current state with the pr_monitor tool (action "mark_ready"). This unconditionally adds the
+configured ready label (default `ready-for-human-review`, config key `readyLabel`) and records all activity already
+observed by an active watch as accepted. Use it when new activity, such as a bot acknowledgement, is non-actionable
+and should not receive another reply.
 
 PR to mark: $ARGUMENTS
 

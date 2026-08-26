@@ -6,9 +6,24 @@ function reviewSig(snapshot: PrSnapshot): string {
   return `${states.join(",")}|${pending.join(",")}`
 }
 
-function hasAddedComment(prev: CommentMeta[], next: CommentMeta[]): boolean {
+export function relevantComments(comments: CommentMeta[]): CommentMeta[] {
+  return comments.filter((comment) => !comment.isAgentReply)
+}
+
+export function hasAddedRelevantComment(prev: CommentMeta[], next: CommentMeta[]): boolean {
   const before = new Set(prev.map((comment) => comment.id))
-  return next.some((comment) => !before.has(comment.id))
+  return next.some((comment) => !comment.isAgentReply && !before.has(comment.id))
+}
+
+export function reviewThreadsReceivedNewComments(
+  prev: ReviewThreadInfo[],
+  next: ReviewThreadInfo[],
+): boolean {
+  const before = new Map(prev.map((thread) => [thread.id, thread]))
+  return next.some((thread) => {
+    const previous = before.get(thread.id)
+    return hasAddedRelevantComment(previous?.comments ?? [], thread.comments)
+  })
 }
 
 function reviewThreadsChanged(prev: ReviewThreadInfo[], next: ReviewThreadInfo[]): boolean {
@@ -17,15 +32,19 @@ function reviewThreadsChanged(prev: ReviewThreadInfo[], next: ReviewThreadInfo[]
   if (prev.some((thread) => !after.has(thread.id))) return true
   return next.some((thread) => {
     const previous = before.get(thread.id)
-    if (!previous) return !thread.isResolved || thread.comments.length > 0
-    return previous.isResolved !== thread.isResolved || hasAddedComment(previous.comments, thread.comments)
+    if (!previous) return relevantComments(thread.comments).length > 0 || !thread.isResolved
+    return previous.isResolved !== thread.isResolved || hasAddedRelevantComment(previous.comments, thread.comments)
   })
+}
+
+function checkKey(check: PrSnapshot["checks"][number]): string {
+  return check.id ?? check.name
 }
 
 function ciConcludedSig(snapshot: PrSnapshot): string {
   const failed = snapshot.checks
     .filter((check) => check.outcome === "failure")
-    .map((check) => check.name)
+    .map(checkKey)
     .sort()
   return `${snapshot.headSha}:${failed.join(",")}`
 }
@@ -73,8 +92,8 @@ export function hasNewCiFailure(prev: PrSnapshot, next: PrSnapshot): boolean {
   const failing = next.checks.filter((check) => check.outcome === "failure")
   if (failing.length === 0) return false
   if (prev.headSha !== next.headSha) return true
-  const before = new Set(prev.checks.filter((check) => check.outcome === "failure").map((check) => check.name))
-  return failing.some((check) => !before.has(check.name))
+  const before = new Set(prev.checks.filter((check) => check.outcome === "failure").map(checkKey))
+  return failing.some((check) => !before.has(checkKey(check)))
 }
 
 /**
@@ -84,14 +103,32 @@ export function hasNewCiFailure(prev: PrSnapshot, next: PrSnapshot): boolean {
  * (see `mergeableChanged`); pass `undefined` when no definite state has been
  * observed yet.
  */
-export function detectActivity(prev: PrSnapshot, next: PrSnapshot, lastDefiniteMergeable: PrSnapshot["mergeable"] | undefined): boolean {
+export function detectActivity(
+  prev: PrSnapshot,
+  next: PrSnapshot,
+  lastDefiniteMergeable: PrSnapshot["mergeable"] | undefined,
+): boolean {
   if (prev.state !== next.state) return true
+  // A push invalidates readiness and starts a fresh review/CI wave even before
+  // GitHub has registered checks for the new head.
+  if (prev.headSha !== next.headSha) return true
   if (mergeableChanged(lastDefiniteMergeable, next)) return true
   if (reviewSig(prev) !== reviewSig(next)) return true
   if (reviewThreadsChanged(prev.reviewThreads, next.reviewThreads)) return true
-  if (prev.issueCommentsTotal !== next.issueCommentsTotal || hasAddedComment(prev.issueComments, next.issueComments)) return true
-  // CI: only suite conclusion counts. Transitions into "running" (new push)
-  // and per-check progress are intentionally NOT activity.
-  if (ciPhase(next) === "concluded" && (ciPhase(prev) !== "concluded" || ciConcludedSig(prev) !== ciConcludedSig(next))) return true
+  if (
+    prev.issueCommentsTotal !== next.issueCommentsTotal ||
+    hasAddedRelevantComment(prev.issueComments, next.issueComments) ||
+    hasAddedRelevantComment(prev.reviewSummaries, next.reviewSummaries)
+  ) {
+    return true
+  }
+  // CI: only suite conclusion counts. Transitions into "running" and
+  // non-failing per-check progress are otherwise intentionally quiet.
+  if (
+    ciPhase(next) === "concluded" &&
+    (ciPhase(prev) !== "concluded" || ciConcludedSig(prev) !== ciConcludedSig(next))
+  ) {
+    return true
+  }
   return false
 }

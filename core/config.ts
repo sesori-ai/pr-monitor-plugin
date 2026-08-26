@@ -8,6 +8,7 @@ export type WatchConfig = {
   debounceMinutes: number
   maxCiWaitMinutes: number
   pollIntervalSeconds: number
+  // A local-account GitHub comment is an agent acknowledgement only when it starts with this prefix.
   ignoreCommentTag: string | undefined
   announceOnStart: boolean
   // Deliver immediately when a check goes red, skipping debounce and CI hold.
@@ -32,7 +33,7 @@ const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
   debounceMinutes: 2,
   maxCiWaitMinutes: 30,
   pollIntervalSeconds: 60,
-  ignoreCommentTag: undefined,
+  ignoreCommentTag: "<!-- pr-monitor:reply -->",
   announceOnStart: true,
   flushOnCiFailure: true,
   readyLabel: "ready-for-human-review",
@@ -71,7 +72,7 @@ function resolveMonitorConfig(raw: unknown): MonitorConfig {
   config.pollIntervalSeconds = Math.min(Math.max(poll, MIN_POLL_INTERVAL_SECONDS), MAX_POLL_INTERVAL_SECONDS)
 
   const tag = record["ignoreCommentTag"]
-  config.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : undefined
+  config.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : config.ignoreCommentTag
   const announce = record["announceOnStart"]
   if (typeof announce === "boolean") config.announceOnStart = announce
   const flushOnCiFailure = record["flushOnCiFailure"]

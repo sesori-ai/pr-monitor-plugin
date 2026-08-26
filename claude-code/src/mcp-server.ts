@@ -72,7 +72,6 @@ const deliver = ({
   report: string
 }): Promise<void> => {
   spoolReport(claudePid, report)
-  handedOff.delete(targetRegistryKey(target))
   extendKeepAlive({ config })
   refreshSessionState()
   if (config.desktopNotifications) {
@@ -91,9 +90,12 @@ monitorSession = new MonitorSession<ClaudeMonitorConfig>({
     refreshSessionState()
   },
   onTickSettled: refreshSessionState,
-  onReadyChanged: ({ target, ready, watched }) => {
+  onReadyChanged: ({ target, ready, watched, config }) => {
     if (ready && watched) handedOff.add(targetRegistryKey(target))
-    if (!ready) handedOff.delete(targetRegistryKey(target))
+    if (!ready) {
+      handedOff.delete(targetRegistryKey(target))
+      if (watched) extendKeepAlive({ config })
+    }
     refreshSessionState()
   },
   statusSuffix: ({ target }) =>
@@ -115,6 +117,7 @@ const prepareStart = async (): Promise<string | undefined> => {
 const formatResult = ({ result }: { result: MonitorActionResult<ClaudeMonitorConfig> }): string => {
   if (result.start !== undefined) {
     const { config, announcement } = result.start
+    const replyPrefix = config.ignoreCommentTag ?? "<!-- pr-monitor:reply -->"
     return (
       `${result.text}\n` +
       (config.announceOnStart
@@ -127,11 +130,13 @@ const formatResult = ({ result }: { result: MonitorActionResult<ClaudeMonitorCon
       (config.flushOnCiFailure
         ? "A failing check is reported at the next poll without waiting for the quiet window or the rest of CI. "
         : "") +
-      "A new merge conflict or terminal state is also immediate. Never invent sleeps, scheduled checks, polling " +
-      "loops, repeated CI checks, or routine status/flush calls. " +
+      "A new merge conflict or terminal state is also immediate. " +
+      `Readiness is managed automatically; agent-authored GitHub replies must begin with \`${replyPrefix}\`. ` +
+      "Use mark_ready when new feedback is non-actionable and no reply should be posted. " +
+      "Never invent sleeps, scheduled checks, polling loops, repeated CI checks, or routine status/flush calls. " +
       "The monitor stops on merge/close and does not survive this Claude Code session." +
       (config.keepAlive
-        ? "\nKeep-alive is on until mark_ready succeeds. Run only the exact await-activity command supplied by a " +
+        ? "\nKeep-alive follows the ready label. Run only the exact await-activity command supplied by a " +
           "[PR Monitor keep-alive] message; do not create another waiting mechanism."
         : "")
     )

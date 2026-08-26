@@ -3,13 +3,27 @@
 // from the latest snapshot and delivered to the owning session. A due report
 // is held while the CI suite is running, bounded by maxCiWaitMinutes, then
 // force-flushed naming unfinished checks. Actionable or terminal events — a
-// new CI failure, merge conflict, merge, or close — flush on the spot.
+// new CI failure, readiness withdrawal, merge conflict, merge, or close — flush
+// on the spot.
 
 import { detectActivity, hasNewCiFailure, hasNewMergeConflict } from "./activity"
 import type { WatchConfig } from "./config"
 import { ciPhase, PollError, type PrSnapshot } from "./github"
-import { buildReport } from "./report"
+import {
+  assessAutomaticReadiness,
+  hasReadinessInvalidation,
+  hasReadyLabel,
+  withReadyLabel,
+} from "./readiness"
+import { buildReadinessLines, buildReport } from "./report"
 import { targetKey, targetUrl, type Target } from "./target"
+
+export type ReadinessDeps = {
+  label: string
+  replyPrefix: string
+  change: (ready: boolean) => Promise<string>
+  onChanged: (ready: boolean) => void
+}
 
 export type WatchDeps = {
   now: () => number
@@ -17,6 +31,7 @@ export type WatchDeps = {
   deliver: (report: string) => Promise<void>
   log: (message: string) => void
   onStopped: () => void
+  readiness?: ReadinessDeps
 }
 
 const MAX_CONSECUTIVE_FAILURES = 10
@@ -44,20 +59,26 @@ export class PrWatch {
   // Set for actionable or terminal changes that must skip both timers.
   private urgent = false
   // Head SHA whose CI failure already triggered an instant flush. Caps the
-  // instant path at one report per commit, so a matrix whose jobs go red one by
-  // one cannot wake the session once per job; the stragglers ride along with the
-  // debounced suite-conclusion report instead.
+  // instant path at one report per commit.
   private ciFailureFlushedSha: string | undefined
   private consecutiveFailures = 0
   private deliveryFailures = 0
   private fetchStartedAt: number | undefined
   private snapshotAt: number | undefined
   private stopped = false
-  // Serializes tick()/manualFlush(): their fetch -> apply -> flush -> deliver
-  // sequences share snapshot/baseline state, and interleaved awaits could
-  // overwrite a newer snapshot with an older fetch or restore a stale baseline
-  // (duplicate or stale reports). Ticks skip instead of queueing while an op is
-  // pending — the interval fires again soon anyway; manual flushes queue.
+  private stopCleanup: Promise<void> | undefined
+  // Only GitHub label mutation must drain before a successor can own this PR.
+  // Fetches and deliveries are fenced by `stopped` but must not block teardown.
+  private readinessMutation: Promise<unknown> | undefined
+  private readinessRetry: boolean | undefined
+  private readinessRetryBaseline: PrSnapshot | undefined
+  private readinessError: string | undefined
+  private reportedReadinessError: string | undefined
+  // A poll may observe new feedback and a prefixed response together. The
+  // ready label is still withdrawn and reported first; only a later quiet
+  // report can restore it, so the feedback never disappears behind one poll.
+  private autoReadyAfterInvalidation = false
+  // Serializes fetch/apply/mutate/flush/deliver and manual label actions.
   private opQueue: Promise<unknown> = Promise.resolve()
   private pendingOps = 0
 
@@ -86,7 +107,15 @@ export class PrWatch {
     const phase = this.holdStartedAt !== undefined ? "ci-hold" : "watching"
     const baselineAge = Math.round((now - this.lastFlushAt) / 60_000)
     const failures = this.consecutiveFailures > 0 ? `, ${this.consecutiveFailures} consecutive poll failures` : ""
-    return `${targetKey(this.target)} — ${phase}, ${this.dirty ? "activity buffered" : "quiet"}, baseline ${baselineAge}m ago${failures}`
+    const readiness = this.deps.readiness
+    const ready =
+      readiness !== undefined && this.snapshot !== undefined
+        ? `, ready for human review: ${hasReadyLabel(this.snapshot, readiness.label) ? "yes" : "no"}`
+        : ""
+    return (
+      `${targetKey(this.target)} — ${phase}, ${this.dirty ? "activity buffered" : "quiet"}, ` +
+      `baseline ${baselineAge}m ago${failures}${ready}`
+    )
   }
 
   private runExclusive<T>(task: () => Promise<T>): Promise<T> {
@@ -101,6 +130,62 @@ export class PrWatch {
       },
     )
     return run
+  }
+
+  private trackReadinessMutation<T>(task: () => Promise<T>): Promise<T> {
+    const operation = task()
+    let tracked!: Promise<T>
+    tracked = operation.finally(() => {
+      if (this.readinessMutation === tracked) this.readinessMutation = undefined
+    })
+    this.readinessMutation = tracked
+    return tracked
+  }
+
+  /** Reconcile the initial label before the startup report is rendered. */
+  async initializeReadiness(): Promise<void> {
+    if (this.stopped) return
+    await this.runExclusive(async () => {
+      const snapshot = this.snapshot
+      const readiness = this.deps.readiness
+      if (this.stopped || snapshot === undefined || readiness === undefined) return
+      this.notifyReadyChanged(hasReadyLabel(snapshot, readiness.label))
+      if (
+        snapshot.state === "OPEN" &&
+        !hasReadyLabel(snapshot, readiness.label) &&
+        assessAutomaticReadiness(snapshot).eligible
+      ) {
+        this.snapshot = await this.changeSnapshotReadiness(snapshot, true)
+      }
+    })
+  }
+
+  /** Manual actions are serialized with polling and accept all current state. */
+  async manualSetReady(ready: boolean): Promise<string> {
+    if (this.stopped) throw new Error("the monitor stopped before the ready action could run")
+    return await this.runExclusive(async () => {
+      if (this.stopped) throw new Error("the monitor stopped before the ready action could run")
+      const readiness = this.deps.readiness
+      const snapshot = this.snapshot
+      if (readiness === undefined || snapshot === undefined) {
+        throw new Error("this watch does not have a readiness channel")
+      }
+      return await this.trackReadinessMutation(async () => {
+        const text = await readiness.change(ready)
+        this.snapshot = withReadyLabel(snapshot, readiness.label, ready)
+        if (!this.stopped) {
+          this.clearReadinessFailure()
+          this.autoReadyAfterInvalidation = false
+          this.notifyReadyChanged(ready)
+          if (!ready && assessAutomaticReadiness(this.snapshot).eligible) {
+            this.dirty = true
+            this.lastActivityAt = this.deps.now()
+            this.holdStartedAt = undefined
+          }
+        }
+        return text
+      })
+    })
   }
 
   /** Periodic poll; never throws. Skipped while a poll or flush is in flight. */
@@ -123,108 +208,199 @@ export class PrWatch {
       if (!this.stopped) this.handlePollFailure(error)
       return
     }
-    // A stop() that landed during the await must win: a stopped monitor may
-    // not apply the snapshot or deliver anything.
     if (this.stopped) return
     this.consecutiveFailures = 0
     this.snapshotAt = this.fetchStartedAt
-    if (this.snapshot !== undefined) {
-      const becameTerminal = this.snapshot.state === "OPEN" && next.state !== "OPEN"
-      const becameConflicting = hasNewMergeConflict(this.lastDefiniteMergeable, next)
-      if (detectActivity(this.snapshot, next, this.lastDefiniteMergeable)) {
-        this.dirty = true
-        this.lastActivityAt = this.deps.now()
-        this.holdStartedAt = undefined
-      }
-      // A red check is actionable on its own, so it does not wait for the quiet
-      // window (which unrelated comment activity keeps resetting) nor for the
-      // rest of the suite. Marks dirty itself: a mid-suite failure is not
-      // `detectActivity`, so on the running-suite path nothing else would.
-      if (
-        this.config.flushOnCiFailure &&
-        next.state === "OPEN" &&
-        this.ciFailureFlushedSha !== next.headSha &&
-        hasNewCiFailure(this.snapshot, next)
-      ) {
-        this.dirty = true
-        this.urgent = true
-        this.ciFailureFlushedSha = next.headSha
-        this.holdStartedAt = undefined
-      }
-      if (becameConflicting || becameTerminal) {
-        this.dirty = true
-        this.urgent = true
-        this.holdStartedAt = undefined
-      }
-    }
+    next = await this.applySnapshot(next)
     this.snapshot = next
+    if (this.stopped) return
     this.rememberDefiniteMergeable(next)
     await this.maybeAutoFlush()
   }
 
+  private async applySnapshot(next: PrSnapshot): Promise<PrSnapshot> {
+    const previous = this.snapshot
+    if (previous === undefined) return next
+    const becameTerminal = previous.state === "OPEN" && next.state !== "OPEN"
+    const becameConflicting = hasNewMergeConflict(this.lastDefiniteMergeable, next)
+    const now = this.deps.now()
+    if (detectActivity(previous, next, this.lastDefiniteMergeable)) {
+      this.dirty = true
+      this.lastActivityAt = now
+      this.holdStartedAt = undefined
+    }
+    if (
+      this.config.flushOnCiFailure &&
+      next.state === "OPEN" &&
+      this.ciFailureFlushedSha !== next.headSha &&
+      hasNewCiFailure(previous, next)
+    ) {
+      this.dirty = true
+      this.urgent = true
+      this.ciFailureFlushedSha = next.headSha
+      this.holdStartedAt = undefined
+    }
+    if (becameConflicting || becameTerminal) {
+      this.dirty = true
+      this.urgent = true
+      this.holdStartedAt = undefined
+    }
+
+    const readiness = this.deps.readiness
+    if (readiness === undefined) return next
+    const wasReady = hasReadyLabel(previous, readiness.label)
+    const observedReady = hasReadyLabel(next, readiness.label)
+
+    if (next.state !== "OPEN") {
+      this.clearReadinessFailure()
+      if (wasReady !== observedReady) this.notifyReadyChanged(observedReady)
+      return next
+    }
+
+    if (this.readinessRetry !== undefined) {
+      const desired = this.readinessRetry
+      const retryInvalidated =
+        desired &&
+        this.readinessRetryBaseline !== undefined &&
+        hasReadinessInvalidation(this.readinessRetryBaseline, next, this.lastDefiniteMergeable)
+      if (retryInvalidated) {
+        this.clearReadinessFailure()
+        this.dirty = true
+        this.lastActivityAt = now
+        this.holdStartedAt = undefined
+        if (observedReady) {
+          this.urgent = true
+          const changed = await this.changeSnapshotReadiness(next, false)
+          if (!hasReadyLabel(changed, readiness.label)) this.autoReadyAfterInvalidation = true
+          return changed
+        }
+      } else if (observedReady === desired) {
+        this.clearReadinessFailure()
+        this.notifyReadyChanged(desired)
+        this.dirty = true
+        this.urgent = true
+        if (!desired) this.autoReadyAfterInvalidation = true
+        return next
+      } else if (!desired || assessAutomaticReadiness(next).eligible) {
+        const changed = await this.changeSnapshotReadiness(next, desired)
+        if (hasReadyLabel(changed, readiness.label) === desired) {
+          this.dirty = true
+          this.urgent = true
+          if (!desired) this.autoReadyAfterInvalidation = true
+        }
+        return changed
+      } else {
+        this.clearReadinessFailure()
+      }
+    }
+
+    if (wasReady && hasReadinessInvalidation(previous, next, this.lastDefiniteMergeable)) {
+      this.dirty = true
+      this.urgent = true
+      this.holdStartedAt = undefined
+      if (!observedReady) {
+        this.notifyReadyChanged(false)
+        this.autoReadyAfterInvalidation = true
+        return next
+      }
+      const changed = await this.changeSnapshotReadiness(next, false)
+      if (!hasReadyLabel(changed, readiness.label)) this.autoReadyAfterInvalidation = true
+      return changed
+    }
+
+    if (wasReady !== observedReady) {
+      this.notifyReadyChanged(observedReady)
+      if (!observedReady) {
+        this.dirty = true
+        this.lastActivityAt = now
+        this.holdStartedAt = undefined
+      }
+    }
+
+    const beforeEligible = assessAutomaticReadiness(previous).eligible
+    const afterEligible = assessAutomaticReadiness(next).eligible
+    if (!observedReady && afterEligible && !beforeEligible) {
+      this.dirty = true
+      this.lastActivityAt = now
+      this.holdStartedAt = undefined
+    }
+    return next
+  }
+
   /**
-   * Initial status delivered right after the watch starts, so the owning
-   * session sees where it is starting from and can address anything already
-   * outstanding on the PR. Reports against a zero baseline so every existing
-   * comment counts as "new", then advances the baseline to the initial
-   * snapshot so periodic flushes only surface genuinely newer activity.
-   * A delivery failure here is logged and re-armed for an immediate retry at
-   * the next poll without advancing the baseline. The returned promise never
-   * rejects; its boolean says whether this attempt was delivered. Callers that
-   * need the announcement spooled before they return (the Claude Code shell)
-   * can await it; fire-and-forget callers use `void`.
+   * Initial status delivered right after the watch starts. A delivery failure
+   * is re-armed without advancing the baseline.
    */
   async announceInitial(): Promise<boolean> {
+    if (this.stopped) return false
     return await this.runExclusive(() => this.announceInitialOnce())
   }
 
   private async announceInitialOnce(): Promise<boolean> {
     if (this.stopped || this.snapshot === undefined) return false
-    const report = buildReport(this.target, this.snapshot, { baselineMs: 0 })
+    const readiness = this.deps.readiness
+    if (readiness !== undefined) {
+      this.notifyReadyChanged(hasReadyLabel(this.snapshot, readiness.label))
+    }
+    await this.prepareAutomaticReady()
+    if (this.stopped) return false
+    const report = this.buildCurrentReport({ baselineMs: 0 })
     if (await this.deliverOrLog(report)) {
       this.deliveryFailures = 0
       this.lastFlushAt = this.snapshotAt ?? this.startedAt
       this.lastFlushedSnapshot = this.snapshot
       this.initialAnnouncementPending = false
+      this.dirty = false
+      this.holdStartedAt = undefined
+      this.urgent = false
+      this.afterReportDelivered()
       return true
     }
     this.deliveryFailures += 1
     this.dirty = true
     this.urgent = true
     if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
-      this.deps.log(`monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`)
+      this.deps.log(
+        `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`,
+      )
       this.stop()
     }
     return false
   }
 
-  /**
-   * Manual flush: always re-fetches and always returns a full report.
-   * Serialized with polling and concurrent flushes so overlapping fetches
-   * cannot land out of order.
-   */
+  /** Manual flush always re-fetches and returns a full report. */
   async manualFlush(): Promise<string> {
+    if (this.stopped) return `${targetKey(this.target)}: flush skipped — monitor stopped.`
     return await this.runExclusive(() => this.flushOnce())
   }
 
   private async flushOnce(): Promise<string> {
+    if (this.stopped) return `${targetKey(this.target)}: flush skipped — monitor stopped.`
     try {
       this.fetchStartedAt = this.deps.now()
-      this.snapshot = await this.deps.fetchSnapshot()
-      this.rememberDefiniteMergeable(this.snapshot)
+      const fetched = await this.deps.fetchSnapshot()
+      if (this.stopped) return `${targetKey(this.target)}: flush skipped — monitor stopped.`
       this.consecutiveFailures = 0
       this.snapshotAt = this.fetchStartedAt
+      this.snapshot = await this.applySnapshot(fetched)
+      this.rememberDefiniteMergeable(this.snapshot)
     } catch (error) {
+      if (this.stopped) return `${targetKey(this.target)}: flush skipped — monitor stopped.`
       if (this.snapshot === undefined) return `${targetKey(this.target)}: flush failed — ${(error as Error).message}`
-      // Refresh failed: report from the stale snapshot WITHOUT advancing the
-      // baseline, so activity newer than that snapshot is not silently skipped.
-      const report = buildReport(this.target, this.snapshot, {
+      const report = this.buildCurrentReport({
         baselineMs: this.initialAnnouncementPending ? 0 : this.lastFlushAt,
         baselineSnapshot: this.initialAnnouncementPending ? undefined : this.lastFlushedSnapshot,
       })
-      return `${report}\n(note: refresh failed — ${(error as Error).message}; data is from the previous poll; baseline NOT reset)`
+      return (
+        `${report}\n(note: refresh failed — ${(error as Error).message}; ` +
+        "data is from the previous poll; baseline NOT reset)"
+      )
     }
+    if (this.stopped) return `${targetKey(this.target)}: flush skipped — monitor stopped.`
+    if (!this.autoReadyAfterInvalidation) await this.prepareAutomaticReady()
+    if (this.stopped) return `${targetKey(this.target)}: flush skipped — monitor stopped.`
     const report = this.flush(undefined)
+    this.afterReportDelivered()
     this.stopIfTerminal()
     return report
   }
@@ -232,40 +408,72 @@ export class PrWatch {
   stop(): void {
     if (this.stopped) return
     this.stopped = true
-    this.deps.onStopped()
+    const finish = (): void => {
+      try {
+        this.deps.onStopped()
+      } catch (error) {
+        this.deps.log(`stop observer failed for ${targetKey(this.target)}: ${error}`)
+      }
+    }
+    const mutation = this.readinessMutation
+    if (mutation === undefined) {
+      finish()
+      this.stopCleanup = Promise.resolve()
+      return
+    }
+    this.stopCleanup = mutation.then(finish, finish)
+  }
+
+  async waitUntilStopped(): Promise<void> {
+    await this.stopCleanup
+  }
+
+  stopNotice(reason: string): string {
+    const base = `[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) — ${reason}`
+    const snapshot = this.snapshot
+    const readiness = this.deps.readiness
+    if (snapshot === undefined || readiness === undefined) return base
+    return [
+      base,
+      ...buildReadinessLines({
+        target: this.target,
+        snapshot,
+        readyLabel: readiness.label,
+        replyPrefix: readiness.replyPrefix,
+        readinessError: this.readinessError,
+      }),
+    ].join("\n")
   }
 
   private handlePollFailure(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error)
     if (error instanceof PollError && error.notFound) {
-      void this.deliverOrLog(`[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) — Monitor stopped: PR not found (deleted or inaccessible). Last error: ${message}`)
+      void this.deliverOrLog(
+        this.stopNotice(
+          `Monitor stopped: PR not found (deleted or inaccessible). Last error: ${message}`,
+        ),
+      )
       this.stop()
       return
     }
     this.consecutiveFailures += 1
-    this.deps.log(`poll failed for ${targetKey(this.target)} (${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${message}`)
+    this.deps.log(
+      `poll failed for ${targetKey(this.target)} (${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${message}`,
+    )
     if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-      void this.deliverOrLog(`[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) — Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive poll failures. Last error: ${message}`)
+      void this.deliverOrLog(
+        this.stopNotice(
+          `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive poll failures. Last error: ${message}`,
+        ),
+      )
       this.stop()
     }
   }
 
-  /**
-   * Delivery is awaited here rather than fire-and-forget, which keeps it inside
-   * the caller's `runExclusive` op. The rollback below restores exactly the
-   * state a *later* flush would have advanced, so an overlapping delivery that
-   * rejected late could roll a newer report's baseline back and — with `urgent`
-   * restored — fire a duplicate report immediately. Serializing keeps every
-   * rollback about the flush it belongs to. The cost is that ticks skip while a
-   * report is in flight, which is the right behavior anyway: there is nothing
-   * useful to do with a fresher snapshot while the previous report is stuck.
-   */
   private async maybeAutoFlush(): Promise<void> {
     if (!this.dirty || this.snapshot === undefined) return
     const now = this.deps.now()
     let forcedHoldMinutes: number | undefined
-    // Urgent changes skip both timers and carry whatever else was buffered. No
-    // forced-hold annotation is wanted because this report was not held.
     if (!this.urgent) {
       if (now - this.lastActivityAt < this.config.debounceMinutes * 60_000) return
       if (ciPhase(this.snapshot) === "running" && this.snapshot.state === "OPEN") {
@@ -275,6 +483,9 @@ export class PrWatch {
         forcedHoldMinutes = Math.round(heldMs / 60_000)
       }
     }
+    if (this.stopped) return
+    if (!this.autoReadyAfterInvalidation) await this.prepareAutomaticReady()
+    if (this.stopped) return
     const previousFlushAt = this.lastFlushAt
     const previousFlushedSnapshot = this.lastFlushedSnapshot
     const previousInitialAnnouncementPending = this.initialAnnouncementPending
@@ -284,12 +495,9 @@ export class PrWatch {
     try {
       await this.deps.deliver(report)
       this.deliveryFailures = 0
+      this.afterReportDelivered()
       this.stopIfTerminal()
     } catch (error) {
-      // Delivery failed: restore the baseline, dirty flag, CI-hold timer and
-      // urgency so the same activity is re-reported on a later tick without
-      // restarting the maxCiWaitMinutes window — and so a failed instant CI
-      // report retries instantly rather than falling back to the debounce.
       this.lastFlushAt = previousFlushAt
       this.lastFlushedSnapshot = previousFlushedSnapshot
       this.initialAnnouncementPending = previousInitialAnnouncementPending
@@ -297,11 +505,99 @@ export class PrWatch {
       this.holdStartedAt = previousHoldStartedAt
       this.urgent = previousUrgent
       this.deliveryFailures += 1
-      this.deps.log(`report delivery failed for ${targetKey(this.target)} (${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error}`)
+      this.deps.log(
+        `report delivery failed for ${targetKey(this.target)} ` +
+          `(${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error}`,
+      )
       if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
-        this.deps.log(`monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`)
+        this.deps.log(
+          `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`,
+        )
         this.stop()
       }
+    }
+  }
+
+  private async prepareAutomaticReady(): Promise<void> {
+    const snapshot = this.snapshot
+    const readiness = this.deps.readiness
+    if (
+      snapshot === undefined ||
+      readiness === undefined ||
+      snapshot.state !== "OPEN" ||
+      hasReadyLabel(snapshot, readiness.label) ||
+      !assessAutomaticReadiness(snapshot).eligible
+    ) {
+      return
+    }
+    this.snapshot = await this.changeSnapshotReadiness(snapshot, true)
+  }
+
+  private async changeSnapshotReadiness(snapshot: PrSnapshot, ready: boolean): Promise<PrSnapshot> {
+    const readiness = this.deps.readiness
+    if (readiness === undefined) return snapshot
+    return await this.trackReadinessMutation(async () => {
+      try {
+        await readiness.change(ready)
+        const changed = withReadyLabel(snapshot, readiness.label, ready)
+        this.snapshot = changed
+        if (this.stopped) return changed
+        this.clearReadinessFailure()
+        this.notifyReadyChanged(ready)
+        return changed
+      } catch (error) {
+        this.snapshot = snapshot
+        const action = ready ? "add" : "remove"
+        const message =
+          `could not ${action} label "${readiness.label}": ` +
+          `${error instanceof Error ? error.message : String(error)}`
+        if (this.readinessRetry !== ready || this.readinessRetryBaseline === undefined) {
+          this.readinessRetryBaseline = snapshot
+        }
+        this.readinessRetry = ready
+        this.readinessError = message
+        if (message !== this.reportedReadinessError) {
+          this.dirty = true
+          this.urgent = true
+        }
+        this.deps.log(`readiness automation failed for ${targetKey(this.target)}: ${message}`)
+        return snapshot
+      }
+    })
+  }
+
+  private clearReadinessFailure(): void {
+    this.readinessRetry = undefined
+    this.readinessRetryBaseline = undefined
+    this.readinessError = undefined
+    this.reportedReadinessError = undefined
+  }
+
+  private notifyReadyChanged(ready: boolean): void {
+    try {
+      this.deps.readiness?.onChanged(ready)
+    } catch (error) {
+      this.deps.log(`ready-state observer failed for ${targetKey(this.target)}: ${error}`)
+    }
+  }
+
+  private afterReportDelivered(): void {
+    this.reportedReadinessError = this.readinessError
+    if (!this.autoReadyAfterInvalidation) return
+    this.autoReadyAfterInvalidation = false
+    const snapshot = this.snapshot
+    const readiness = this.deps.readiness
+    if (
+      snapshot !== undefined &&
+      readiness !== undefined &&
+      snapshot.state === "OPEN" &&
+      !hasReadyLabel(snapshot, readiness.label) &&
+      assessAutomaticReadiness(snapshot).eligible
+    ) {
+      this.dirty = true
+      this.lastActivityAt = this.deps.now()
+      this.holdStartedAt = undefined
+      this.urgent = false
     }
   }
 
@@ -315,9 +611,29 @@ export class PrWatch {
     }
   }
 
+  private buildCurrentReport({
+    baselineMs,
+    baselineSnapshot,
+    forcedHoldMinutes,
+  }: {
+    baselineMs: number
+    baselineSnapshot?: PrSnapshot
+    forcedHoldMinutes?: number
+  }): string {
+    const readiness = this.deps.readiness
+    return buildReport(this.target, this.snapshot!, {
+      baselineMs,
+      baselineSnapshot,
+      forcedHoldMinutes,
+      readyLabel: readiness?.label,
+      replyPrefix: readiness?.replyPrefix,
+      readinessError: this.readinessError,
+    })
+  }
+
   private flush(forcedHoldMinutes: number | undefined): string {
     const snapshot = this.snapshot!
-    const report = buildReport(this.target, snapshot, {
+    const report = this.buildCurrentReport({
       baselineMs: this.initialAnnouncementPending ? 0 : this.lastFlushAt,
       baselineSnapshot: this.initialAnnouncementPending ? undefined : this.lastFlushedSnapshot,
       forcedHoldMinutes,
