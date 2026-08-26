@@ -6,11 +6,16 @@ import { loadMonitorConfig, type WatchConfig } from "../core/config"
 import {
   fetchPrSnapshot,
   normalizeSnapshot,
+  PollError,
   type CommentMeta,
   type PrSnapshot,
   type ReviewThreadInfo,
 } from "../core/github"
-import { assessAutomaticReadiness, hasReadyLabel } from "../core/readiness"
+import {
+  assessAutomaticReadiness,
+  hasAcknowledgementRegression,
+  hasReadyLabel,
+} from "../core/readiness"
 import { buildReport } from "../core/report"
 import type { Target } from "../core/target"
 import { PrWatch } from "../core/watch"
@@ -197,6 +202,67 @@ test("automatic readiness accepts deliberately unresolved threads after a prefix
   assert.deepEqual(result.blockers, [])
 })
 
+test("automatic readiness conservatively blocks mixed same-second cross-channel feedback", () => {
+  const sameTime = "2026-08-03T11:00:00Z"
+  const mixed = assessAutomaticReadiness(
+    snapshot({
+      issueComments: [
+        {
+          id: "issue-reply",
+          author: "owner",
+          isBot: false,
+          createdAt: sameTime,
+          isLocal: true,
+          isAgentReply: true,
+        },
+      ],
+      reviewSummaries: [
+        {
+          id: "review-feedback",
+          author: "reviewer",
+          isBot: false,
+          createdAt: sameTime,
+          isLocal: false,
+          isAgentReply: false,
+        },
+      ],
+    }),
+  )
+  const emptyThread = assessAutomaticReadiness(
+    snapshot({ reviewThreads: [thread("empty-thread", false, [])] }),
+  )
+  const acknowledged = assessAutomaticReadiness(
+    snapshot({
+      issueComments: [
+        {
+          id: "issue-reply",
+          author: "owner",
+          isBot: false,
+          createdAt: sameTime,
+          isLocal: true,
+          isAgentReply: true,
+        },
+      ],
+      reviewSummaries: [
+        {
+          id: "review-reply",
+          author: "owner",
+          isBot: false,
+          createdAt: sameTime,
+          isLocal: true,
+          isAgentReply: true,
+        },
+      ],
+    }),
+  )
+
+  assert.equal(mixed.eligible, false)
+  assert.equal(mixed.awaitingUnthreadedReply, true)
+  assert.equal(emptyThread.eligible, false)
+  assert.equal(emptyThread.awaitingThreadReplies, 1)
+  assert.equal(acknowledged.eligible, true)
+})
+
 test("automatic readiness is added before the initial report", async () => {
   const initial = snapshot({ checks: [{ name: "tests", outcome: "success" }] })
   const harness = watchHarness(initial, [initial], config(), { readiness: true })
@@ -233,6 +299,47 @@ test("new bot feedback on an existing unresolved thread urgently withdraws readi
   assert.match(harness.reports[0]!, /ACTION REQUIRED: 1 thread received 1 new relevant comment/)
   assert.match(harness.reports[0]!, /unresolved-thread count is unchanged at 1/)
   assert.match(harness.reports[0]!, /Ready for human review: NO/)
+})
+
+test("deleting the latest prefixed reply urgently withdraws readiness", async () => {
+  const feedback = {
+    author: "reviewer",
+    createdAt: "2026-08-03T11:00:00Z",
+  }
+  const reply = {
+    author: "owner",
+    createdAt: "2026-08-03T11:05:00Z",
+    isLocal: true,
+    isAgentReply: true,
+  }
+  const initial = snapshot({
+    labels: ["ready-for-human-review"],
+    reviewThreads: [thread("thread-1", false, [feedback, reply])],
+  })
+  const changed = snapshot({
+    labels: ["ready-for-human-review"],
+    reviewThreads: [thread("thread-1", false, [feedback])],
+  })
+  const edited = snapshot({
+    labels: ["ready-for-human-review"],
+    reviewThreads: [thread("thread-1", false, [feedback, { ...reply, isAgentReply: false }])],
+  })
+  const agentOnly = snapshot({
+    reviewThreads: [thread("thread-2", false, [reply])],
+  })
+  const emptied = snapshot({
+    reviewThreads: [thread("thread-2", false, [])],
+  })
+  const harness = watchHarness(initial, [changed], config({ announceOnStart: false }), { readiness: true })
+
+  assert.equal(hasAcknowledgementRegression(initial, edited), true)
+  assert.equal(hasAcknowledgementRegression(agentOnly, emptied), true)
+  assert.equal(hasAcknowledgementRegression(snapshot(), emptied), true)
+  await harness.watch.tick()
+
+  assert.deepEqual(harness.readyChanges, [false])
+  assert.match(harness.reports[0]!, /Ready for human review: NO/)
+  assert.match(harness.reports[0]!, /1 review thread awaits a prefixed reply/)
 })
 
 test("new review-summary feedback withdraws readiness even when its review is approving", async () => {
@@ -431,6 +538,45 @@ test("stopping a watch fences queued flush and ready mutations", async () => {
   assert.match(await flushing, /flush skipped — monitor stopped/)
   await assert.rejects(marking, /monitor stopped before the ready action could run/)
   assert.deepEqual(readyChanges, [])
+})
+
+test("stop cleanup does not wait for a stalled non-mutation operation", async () => {
+  let resolveFetch!: (snapshot: PrSnapshot) => void
+  let announceFetch!: () => void
+  const fetchStarted = new Promise<void>((resolve) => {
+    announceFetch = resolve
+  })
+  const fetched = new Promise<PrSnapshot>((resolve) => {
+    resolveFetch = resolve
+  })
+  let stopped = false
+  const initial = snapshot()
+  const watch = new PrWatch({
+    target,
+    config: config({ announceOnStart: false }),
+    initial,
+    deps: {
+      now: () => Date.parse("2026-08-03T12:00:00Z"),
+      fetchSnapshot: () => {
+        announceFetch()
+        return fetched
+      },
+      deliver: async () => {},
+      log: () => {},
+      onStopped: () => {
+        stopped = true
+      },
+    },
+  })
+
+  const flushing = watch.manualFlush()
+  await fetchStarted
+  watch.stop()
+  await watch.waitUntilStopped()
+
+  assert.equal(stopped, true)
+  resolveFetch(initial)
+  assert.match(await flushing, /flush skipped — monitor stopped/)
 })
 
 test("stop notices reflect a label mutation that finished while the watch drained", async () => {
@@ -1001,6 +1147,113 @@ test("snapshot pagination includes late checks, review summaries, and labels", a
   assert.deepEqual(result.reviewSummaries.map((comment) => comment.id), ["review-1", "review-2"])
   assert.deepEqual(result.labels, ["first-label", "ready-for-human-review"])
   assert.equal(calls.length, 4)
+})
+
+test("partial GraphQL responses are rejected before readiness assessment", async () => {
+  const partial = {
+    errors: [{ message: "check contexts could not be resolved", type: "NOT_FOUND" }],
+    data: {
+      repository: {
+        pullRequest: {
+          title: "test PR",
+          url: "https://github.com/sesori/example/pull/42",
+          state: "OPEN",
+          mergeable: "MERGEABLE",
+          headRefOid: "head-1",
+          commits: { nodes: [] },
+          reviewRequests: { nodes: [] },
+          latestReviews: { nodes: [] },
+          reviewThreads: { nodes: [] },
+          comments: { totalCount: 0, nodes: [] },
+          labels: { nodes: [] },
+        },
+      },
+    },
+  }
+
+  await assert.rejects(
+    fetchPrSnapshot({
+      target,
+      ignoreTag: undefined,
+      selfLogin: undefined,
+      runGh: async () => JSON.stringify(partial),
+    }),
+    (error) => {
+      assert.ok(error instanceof PollError)
+      assert.equal(error.notFound, false)
+      assert.match(error.message, /incomplete GraphQL response: check contexts could not be resolved/)
+      return true
+    },
+  )
+
+  await assert.rejects(
+    fetchPrSnapshot({
+      target,
+      ignoreTag: undefined,
+      selfLogin: undefined,
+      runGh: async () => JSON.stringify({ errors: [{ message: "service unavailable" }] }),
+    }),
+    (error) => error instanceof PollError && !error.notFound,
+  )
+
+  await assert.rejects(
+    fetchPrSnapshot({
+      target,
+      ignoreTag: undefined,
+      selfLogin: undefined,
+      runGh: async () => JSON.stringify({ data: { repository: { pullRequest: null } } }),
+    }),
+    (error) => error instanceof PollError && error.notFound,
+  )
+})
+
+test("partial pagination responses are rejected before normalization", async () => {
+  const first = {
+    data: {
+      repository: {
+        pullRequest: {
+          title: "test PR",
+          url: "https://github.com/sesori/example/pull/42",
+          state: "OPEN",
+          mergeable: "MERGEABLE",
+          headRefOid: "head-1",
+          commits: { nodes: [] },
+          reviewRequests: { nodes: [] },
+          latestReviews: { nodes: [] },
+          reviewThreads: {
+            pageInfo: { hasNextPage: true, endCursor: "threads-1" },
+            nodes: [],
+          },
+          comments: { totalCount: 0, nodes: [] },
+          labels: { nodes: [] },
+        },
+      },
+    },
+  }
+  const partialPage = {
+    errors: [{ message: "review thread page timed out" }],
+    data: {
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [],
+          },
+        },
+      },
+    },
+  }
+  let calls = 0
+
+  await assert.rejects(
+    fetchPrSnapshot({
+      target,
+      ignoreTag: undefined,
+      selfLogin: undefined,
+      runGh: async () => JSON.stringify(++calls === 1 ? first : partialPage),
+    }),
+    /incomplete GraphQL response: review thread page timed out/,
+  )
 })
 
 test("a follow-up in an existing thread is activity even when resolution counts do not change", () => {

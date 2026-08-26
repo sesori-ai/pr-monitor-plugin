@@ -13,14 +13,49 @@ export type AutomaticReadiness = {
   awaitingUnthreadedReply: boolean
 }
 
-function latestComment(comments: CommentMeta[]): CommentMeta | undefined {
-  return comments.reduce<CommentMeta | undefined>((latest, comment) => {
-    if (latest === undefined) return comment
-    const latestAt = Date.parse(latest.createdAt)
-    const commentAt = Date.parse(comment.createdAt)
-    if (Number.isNaN(latestAt) || Number.isNaN(commentAt)) return comment
-    return commentAt >= latestAt ? comment : latest
-  }, undefined)
+function latestComments(comments: CommentMeta[]): CommentMeta[] {
+  let latestAt = Number.NEGATIVE_INFINITY
+  let latest: CommentMeta[] = []
+  for (const comment of comments) {
+    const createdAt = Date.parse(comment.createdAt)
+    // GitHub timestamps are expected to parse. If one does not, keep every
+    // entry in contention rather than accidentally accepting hidden feedback.
+    if (Number.isNaN(createdAt)) return comments
+    if (createdAt > latestAt) {
+      latestAt = createdAt
+      latest = [comment]
+    } else if (createdAt === latestAt) {
+      latest.push(comment)
+    }
+  }
+  return latest
+}
+
+function channelIsAcknowledged(comments: CommentMeta[]): boolean {
+  // GitHub timestamps can collide at one-second precision. A mixed tie remains
+  // unacknowledged until a later prefixed reply removes the ambiguity.
+  return comments.length > 0 && latestComments(comments).every((comment) => comment.isAgentReply)
+}
+
+function feedbackChannels(snapshot: PrSnapshot): Map<string, CommentMeta[]> {
+  const channels = new Map<string, CommentMeta[]>()
+  channels.set("unthreaded", [...snapshot.issueComments, ...snapshot.reviewSummaries])
+  for (const thread of snapshot.reviewThreads) channels.set(`thread:${thread.id}`, thread.comments)
+  return channels
+}
+
+export function hasAcknowledgementRegression(prev: PrSnapshot, next: PrSnapshot): boolean {
+  const before = feedbackChannels(prev)
+  return [...feedbackChannels(next)].some(([channel, comments]) => {
+    const previous = before.get(channel)
+    if (channel === "unthreaded") {
+      return comments.length > 0 && channelIsAcknowledged(previous ?? []) && !channelIsAcknowledged(comments)
+    }
+    // A present empty thread is conservatively unacknowledged. Its appearance,
+    // or deletion of its last prefixed reply, must therefore revoke readiness.
+    return !channelIsAcknowledged(comments) &&
+      (previous === undefined || channelIsAcknowledged(previous))
+  })
 }
 
 export function ciIsReady(snapshot: PrSnapshot): boolean {
@@ -43,7 +78,7 @@ export function assessAutomaticReadiness(snapshot: PrSnapshot): AutomaticReadine
   }
 
   const awaitingThreadReplies = snapshot.reviewThreads.filter(
-    (thread) => latestComment(thread.comments)?.isAgentReply !== true,
+    (thread) => !channelIsAcknowledged(thread.comments),
   ).length
   if (awaitingThreadReplies > 0) {
     blockers.push(
@@ -52,8 +87,8 @@ export function assessAutomaticReadiness(snapshot: PrSnapshot): AutomaticReadine
     )
   }
 
-  const latestUnthreaded = latestComment([...snapshot.issueComments, ...snapshot.reviewSummaries])
-  const awaitingUnthreadedReply = latestUnthreaded !== undefined && !latestUnthreaded.isAgentReply
+  const unthreaded = [...snapshot.issueComments, ...snapshot.reviewSummaries]
+  const awaitingUnthreadedReply = unthreaded.length > 0 && !channelIsAcknowledged(unthreaded)
   if (awaitingUnthreadedReply) {
     blockers.push("issue or review-summary feedback awaits a prefixed reply from the local GitHub account")
   }
@@ -92,6 +127,7 @@ export function hasReadinessInvalidation(
   if (hasNewMergeConflict(lastDefiniteMergeable, next)) return true
   if (ciIsReady(prev) && !ciIsReady(next)) return true
   if (hasNewCiFailure(prev, next)) return true
+  if (hasAcknowledgementRegression(prev, next)) return true
   if (reviewThreadsReceivedNewComments(prev.reviewThreads, next.reviewThreads)) return true
   if (hasAddedRelevantComment(prev.issueComments, next.issueComments)) return true
   if (hasAddedRelevantComment(prev.reviewSummaries, next.reviewSummaries)) return true

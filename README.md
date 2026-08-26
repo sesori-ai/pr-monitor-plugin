@@ -198,8 +198,9 @@ Optional, per project: use `.pr-monitor.json` for every host. Claude Code falls 
   lacking the mandatory prefix are identified as human feedback.
 - **Readiness follows acknowledgement, not resolution.** Each review thread may remain unresolved if its latest
   comment is a prefixed local reply. Flat issue/review-summary feedback is acknowledged by a later prefixed local
-  issue comment. Stale `CHANGES_REQUESTED`, pending reviewers, thread resolution, and draft status do not
-  independently block readiness.
+  issue comment. Editing or deleting that acknowledgement withdraws readiness. Mixed feedback/reply entries in the
+  same timestamp second remain conservatively blocked until a later reply or manual mark. Stale `CHANGES_REQUESTED`,
+  pending reviewers, thread resolution, and draft status do not independently block readiness.
 - **"New since last flush"** compares stable GitHub comment IDs with the last delivered report or manual `flush`, so comments created within the same timestamp second are not lost.
 - **Failure handling**: 10 consecutive poll failures (or report-delivery failures) stop the monitor with a notice. A failed initial status report retains its zero comment baseline and retries at the next poll. A deleted/inaccessible PR stops immediately.
 - **Terminal states**: an immediate report describing a merged/closed PR is delivered with a `Monitor stopped: PR merged|closed` line, then the monitor stops itself. All stop reasons use the same `Monitor stopped: <reason>` phrasing.

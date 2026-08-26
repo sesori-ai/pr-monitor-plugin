@@ -25,10 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Readiness fetches overflow check, latest-review, review-thread, and label pages before deciding; check-run identity
-  distinguishes same-name reruns. Ambiguous label failures cannot accept newer feedback during retry.
-- Stop/reload cleanup drains in-flight label mutations before unregistering a watch, preventing a stale instance from
-  racing a successor's readiness state.
+- Readiness rejects partial GraphQL responses, fetches all check/review/thread/label pages, and distinguishes
+  same-name reruns. Edited/deleted acknowledgements withdraw readiness; mixed same-second feedback/reply ties remain
+  conservatively blocked. Ambiguous label failures cannot accept newer feedback during retry.
+- Stop/reload cleanup drains only in-flight label mutations before unregistering a watch, preventing stale mutation
+  races without hanging on a stalled fetch or report delivery.
 
 ## [0.3.0]
 

@@ -31192,6 +31192,12 @@ function parseGhPayload(stdout) {
     throw new PollError("gh returned non-JSON output");
   }
 }
+function assertCompleteGraphQlPayload(payload) {
+  const errors = Array.isArray(payload?.errors) ? payload.errors : [];
+  if (errors.length === 0) return;
+  const detail = errors.map((error51) => typeof error51?.message === "string" ? error51.message : "unknown GraphQL error").join("; ");
+  throw new PollError(`GitHub returned an incomplete GraphQL response: ${detail}`);
+}
 async function paginateConnection({
   input,
   connection,
@@ -31227,6 +31233,7 @@ async function paginateConnection({
         `cursor=${cursor}`
       ])
     );
+    assertCompleteGraphQlPayload(page);
     const next = select(page);
     if (next === void 0) {
       throw new PollError(`GitHub data changed while fetching ${name}`, {
@@ -31251,6 +31258,7 @@ async function fetchPrSnapshot(input) {
     `number=${input.target.number}`
   ]));
   const pr = payload?.data?.repository?.pullRequest;
+  assertCompleteGraphQlPayload(payload);
   if (!pr) return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin });
   const pageInput = { runGh: input.runGh, target: input.target };
   await paginateConnection({
@@ -31299,7 +31307,9 @@ function toMeta(raw, classifier) {
   };
 }
 function normalizeSnapshot(payload, opts) {
-  const pr = payload?.data?.repository?.pullRequest;
+  const rawPayload = payload;
+  const pr = rawPayload?.data?.repository?.pullRequest;
+  assertCompleteGraphQlPayload(rawPayload);
   if (!pr) throw new PollError("PR not found in GraphQL response", { notFound: true });
   const classifier = { replyPrefix: opts.ignoreTag, selfLogin: opts.selfLogin };
   const checks = [];
@@ -31491,14 +31501,39 @@ function detectActivity(prev, next, lastDefiniteMergeable) {
 }
 
 // core/readiness.ts
-function latestComment(comments) {
-  return comments.reduce((latest, comment) => {
-    if (latest === void 0) return comment;
-    const latestAt = Date.parse(latest.createdAt);
-    const commentAt = Date.parse(comment.createdAt);
-    if (Number.isNaN(latestAt) || Number.isNaN(commentAt)) return comment;
-    return commentAt >= latestAt ? comment : latest;
-  }, void 0);
+function latestComments(comments) {
+  let latestAt = Number.NEGATIVE_INFINITY;
+  let latest = [];
+  for (const comment of comments) {
+    const createdAt = Date.parse(comment.createdAt);
+    if (Number.isNaN(createdAt)) return comments;
+    if (createdAt > latestAt) {
+      latestAt = createdAt;
+      latest = [comment];
+    } else if (createdAt === latestAt) {
+      latest.push(comment);
+    }
+  }
+  return latest;
+}
+function channelIsAcknowledged(comments) {
+  return comments.length > 0 && latestComments(comments).every((comment) => comment.isAgentReply);
+}
+function feedbackChannels(snapshot) {
+  const channels = /* @__PURE__ */ new Map();
+  channels.set("unthreaded", [...snapshot.issueComments, ...snapshot.reviewSummaries]);
+  for (const thread of snapshot.reviewThreads) channels.set(`thread:${thread.id}`, thread.comments);
+  return channels;
+}
+function hasAcknowledgementRegression(prev, next) {
+  const before = feedbackChannels(prev);
+  return [...feedbackChannels(next)].some(([channel, comments]) => {
+    const previous = before.get(channel);
+    if (channel === "unthreaded") {
+      return comments.length > 0 && channelIsAcknowledged(previous ?? []) && !channelIsAcknowledged(comments);
+    }
+    return !channelIsAcknowledged(comments) && (previous === void 0 || channelIsAcknowledged(previous));
+  });
 }
 function ciIsReady(snapshot) {
   const phase = ciPhase(snapshot);
@@ -31516,15 +31551,15 @@ function assessAutomaticReadiness(snapshot) {
     );
   }
   const awaitingThreadReplies = snapshot.reviewThreads.filter(
-    (thread) => latestComment(thread.comments)?.isAgentReply !== true
+    (thread) => !channelIsAcknowledged(thread.comments)
   ).length;
   if (awaitingThreadReplies > 0) {
     blockers.push(
       `${awaitingThreadReplies} review ${awaitingThreadReplies === 1 ? "thread awaits" : "threads await"} a prefixed reply from the local GitHub account`
     );
   }
-  const latestUnthreaded = latestComment([...snapshot.issueComments, ...snapshot.reviewSummaries]);
-  const awaitingUnthreadedReply = latestUnthreaded !== void 0 && !latestUnthreaded.isAgentReply;
+  const unthreaded = [...snapshot.issueComments, ...snapshot.reviewSummaries];
+  const awaitingUnthreadedReply = unthreaded.length > 0 && !channelIsAcknowledged(unthreaded);
   if (awaitingUnthreadedReply) {
     blockers.push("issue or review-summary feedback awaits a prefixed reply from the local GitHub account");
   }
@@ -31550,6 +31585,7 @@ function hasReadinessInvalidation(prev, next, lastDefiniteMergeable) {
   if (hasNewMergeConflict(lastDefiniteMergeable, next)) return true;
   if (ciIsReady(prev) && !ciIsReady(next)) return true;
   if (hasNewCiFailure(prev, next)) return true;
+  if (hasAcknowledgementRegression(prev, next)) return true;
   if (reviewThreadsReceivedNewComments(prev.reviewThreads, next.reviewThreads)) return true;
   if (hasAddedRelevantComment(prev.issueComments, next.issueComments)) return true;
   if (hasAddedRelevantComment(prev.reviewSummaries, next.reviewSummaries)) return true;
@@ -31724,6 +31760,9 @@ var PrWatch = class {
   snapshotAt;
   stopped = false;
   stopCleanup;
+  // Only GitHub label mutation must drain before a successor can own this PR.
+  // Fetches and deliveries are fenced by `stopped` but must not block teardown.
+  readinessMutation;
   readinessRetry;
   readinessRetryBaseline;
   readinessError;
@@ -31774,6 +31813,15 @@ var PrWatch = class {
     );
     return run;
   }
+  trackReadinessMutation(task) {
+    const operation = task();
+    let tracked;
+    tracked = operation.finally(() => {
+      if (this.readinessMutation === tracked) this.readinessMutation = void 0;
+    });
+    this.readinessMutation = tracked;
+    return tracked;
+  }
   /** Reconcile the initial label before the startup report is rendered. */
   async initializeReadiness() {
     if (this.stopped) return;
@@ -31797,19 +31845,21 @@ var PrWatch = class {
       if (readiness === void 0 || snapshot === void 0) {
         throw new Error("this watch does not have a readiness channel");
       }
-      const text = await readiness.change(ready);
-      this.snapshot = withReadyLabel(snapshot, readiness.label, ready);
-      if (!this.stopped) {
-        this.clearReadinessFailure();
-        this.autoReadyAfterInvalidation = false;
-        this.notifyReadyChanged(ready);
-        if (!ready && assessAutomaticReadiness(this.snapshot).eligible) {
-          this.dirty = true;
-          this.lastActivityAt = this.deps.now();
-          this.holdStartedAt = void 0;
+      return await this.trackReadinessMutation(async () => {
+        const text = await readiness.change(ready);
+        this.snapshot = withReadyLabel(snapshot, readiness.label, ready);
+        if (!this.stopped) {
+          this.clearReadinessFailure();
+          this.autoReadyAfterInvalidation = false;
+          this.notifyReadyChanged(ready);
+          if (!ready && assessAutomaticReadiness(this.snapshot).eligible) {
+            this.dirty = true;
+            this.lastActivityAt = this.deps.now();
+            this.holdStartedAt = void 0;
+          }
         }
-      }
-      return text;
+        return text;
+      });
     });
   }
   /** Periodic poll; never throws. Skipped while a poll or flush is in flight. */
@@ -32016,12 +32066,13 @@ var PrWatch = class {
         this.deps.log(`stop observer failed for ${targetKey(this.target)}: ${error51}`);
       }
     };
-    if (this.pendingOps === 0) {
+    const mutation = this.readinessMutation;
+    if (mutation === void 0) {
       finish();
       this.stopCleanup = Promise.resolve();
       return;
     }
-    this.stopCleanup = this.opQueue.then(finish, finish);
+    this.stopCleanup = mutation.then(finish, finish);
   }
   async waitUntilStopped() {
     await this.stopCleanup;
@@ -32123,27 +32174,32 @@ var PrWatch = class {
   async changeSnapshotReadiness(snapshot, ready) {
     const readiness = this.deps.readiness;
     if (readiness === void 0) return snapshot;
-    try {
-      await readiness.change(ready);
-      if (this.stopped) return withReadyLabel(snapshot, readiness.label, ready);
-      this.clearReadinessFailure();
-      this.notifyReadyChanged(ready);
-      return withReadyLabel(snapshot, readiness.label, ready);
-    } catch (error51) {
-      const action = ready ? "add" : "remove";
-      const message = `could not ${action} label "${readiness.label}": ${error51 instanceof Error ? error51.message : String(error51)}`;
-      if (this.readinessRetry !== ready || this.readinessRetryBaseline === void 0) {
-        this.readinessRetryBaseline = snapshot;
+    return await this.trackReadinessMutation(async () => {
+      try {
+        await readiness.change(ready);
+        const changed = withReadyLabel(snapshot, readiness.label, ready);
+        this.snapshot = changed;
+        if (this.stopped) return changed;
+        this.clearReadinessFailure();
+        this.notifyReadyChanged(ready);
+        return changed;
+      } catch (error51) {
+        this.snapshot = snapshot;
+        const action = ready ? "add" : "remove";
+        const message = `could not ${action} label "${readiness.label}": ${error51 instanceof Error ? error51.message : String(error51)}`;
+        if (this.readinessRetry !== ready || this.readinessRetryBaseline === void 0) {
+          this.readinessRetryBaseline = snapshot;
+        }
+        this.readinessRetry = ready;
+        this.readinessError = message;
+        if (message !== this.reportedReadinessError) {
+          this.dirty = true;
+          this.urgent = true;
+        }
+        this.deps.log(`readiness automation failed for ${targetKey(this.target)}: ${message}`);
+        return snapshot;
       }
-      this.readinessRetry = ready;
-      this.readinessError = message;
-      if (message !== this.reportedReadinessError) {
-        this.dirty = true;
-        this.urgent = true;
-      }
-      this.deps.log(`readiness automation failed for ${targetKey(this.target)}: ${message}`);
-      return snapshot;
-    }
+    });
   }
   clearReadinessFailure() {
     this.readinessRetry = void 0;

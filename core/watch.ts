@@ -67,6 +67,9 @@ export class PrWatch {
   private snapshotAt: number | undefined
   private stopped = false
   private stopCleanup: Promise<void> | undefined
+  // Only GitHub label mutation must drain before a successor can own this PR.
+  // Fetches and deliveries are fenced by `stopped` but must not block teardown.
+  private readinessMutation: Promise<unknown> | undefined
   private readinessRetry: boolean | undefined
   private readinessRetryBaseline: PrSnapshot | undefined
   private readinessError: string | undefined
@@ -129,6 +132,16 @@ export class PrWatch {
     return run
   }
 
+  private trackReadinessMutation<T>(task: () => Promise<T>): Promise<T> {
+    const operation = task()
+    let tracked!: Promise<T>
+    tracked = operation.finally(() => {
+      if (this.readinessMutation === tracked) this.readinessMutation = undefined
+    })
+    this.readinessMutation = tracked
+    return tracked
+  }
+
   /** Reconcile the initial label before the startup report is rendered. */
   async initializeReadiness(): Promise<void> {
     if (this.stopped) return
@@ -157,19 +170,21 @@ export class PrWatch {
       if (readiness === undefined || snapshot === undefined) {
         throw new Error("this watch does not have a readiness channel")
       }
-      const text = await readiness.change(ready)
-      this.snapshot = withReadyLabel(snapshot, readiness.label, ready)
-      if (!this.stopped) {
-        this.clearReadinessFailure()
-        this.autoReadyAfterInvalidation = false
-        this.notifyReadyChanged(ready)
-        if (!ready && assessAutomaticReadiness(this.snapshot).eligible) {
-          this.dirty = true
-          this.lastActivityAt = this.deps.now()
-          this.holdStartedAt = undefined
+      return await this.trackReadinessMutation(async () => {
+        const text = await readiness.change(ready)
+        this.snapshot = withReadyLabel(snapshot, readiness.label, ready)
+        if (!this.stopped) {
+          this.clearReadinessFailure()
+          this.autoReadyAfterInvalidation = false
+          this.notifyReadyChanged(ready)
+          if (!ready && assessAutomaticReadiness(this.snapshot).eligible) {
+            this.dirty = true
+            this.lastActivityAt = this.deps.now()
+            this.holdStartedAt = undefined
+          }
         }
-      }
-      return text
+        return text
+      })
     })
   }
 
@@ -400,12 +415,13 @@ export class PrWatch {
         this.deps.log(`stop observer failed for ${targetKey(this.target)}: ${error}`)
       }
     }
-    if (this.pendingOps === 0) {
+    const mutation = this.readinessMutation
+    if (mutation === undefined) {
       finish()
       this.stopCleanup = Promise.resolve()
       return
     }
-    this.stopCleanup = this.opQueue.then(finish, finish)
+    this.stopCleanup = mutation.then(finish, finish)
   }
 
   async waitUntilStopped(): Promise<void> {
@@ -520,29 +536,34 @@ export class PrWatch {
   private async changeSnapshotReadiness(snapshot: PrSnapshot, ready: boolean): Promise<PrSnapshot> {
     const readiness = this.deps.readiness
     if (readiness === undefined) return snapshot
-    try {
-      await readiness.change(ready)
-      if (this.stopped) return withReadyLabel(snapshot, readiness.label, ready)
-      this.clearReadinessFailure()
-      this.notifyReadyChanged(ready)
-      return withReadyLabel(snapshot, readiness.label, ready)
-    } catch (error) {
-      const action = ready ? "add" : "remove"
-      const message =
-        `could not ${action} label "${readiness.label}": ` +
-        `${error instanceof Error ? error.message : String(error)}`
-      if (this.readinessRetry !== ready || this.readinessRetryBaseline === undefined) {
-        this.readinessRetryBaseline = snapshot
+    return await this.trackReadinessMutation(async () => {
+      try {
+        await readiness.change(ready)
+        const changed = withReadyLabel(snapshot, readiness.label, ready)
+        this.snapshot = changed
+        if (this.stopped) return changed
+        this.clearReadinessFailure()
+        this.notifyReadyChanged(ready)
+        return changed
+      } catch (error) {
+        this.snapshot = snapshot
+        const action = ready ? "add" : "remove"
+        const message =
+          `could not ${action} label "${readiness.label}": ` +
+          `${error instanceof Error ? error.message : String(error)}`
+        if (this.readinessRetry !== ready || this.readinessRetryBaseline === undefined) {
+          this.readinessRetryBaseline = snapshot
+        }
+        this.readinessRetry = ready
+        this.readinessError = message
+        if (message !== this.reportedReadinessError) {
+          this.dirty = true
+          this.urgent = true
+        }
+        this.deps.log(`readiness automation failed for ${targetKey(this.target)}: ${message}`)
+        return snapshot
       }
-      this.readinessRetry = ready
-      this.readinessError = message
-      if (message !== this.reportedReadinessError) {
-        this.dirty = true
-        this.urgent = true
-      }
-      this.deps.log(`readiness automation failed for ${targetKey(this.target)}: ${message}`)
-      return snapshot
-    }
+    })
   }
 
   private clearReadinessFailure(): void {

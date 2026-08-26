@@ -24,8 +24,10 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   Newly definite merge conflict, merge, and close are always urgent. Instant CI failure is limited to one delivery
   per head commit; the concluded suite can report later.
 - Check contexts, latest reviews, review threads, and labels are paginated to completion before readiness is
-  evaluated. Head changes, reviews, review summaries, issue comments, thread resolution, and relevant thread
-  follow-ups count as activity. Stable IDs preserve same-second follow-ups. A local-account comment is an agent
+  evaluated. A GraphQL payload containing `errors` is rejected even when it also contains partial `data` and remains
+  retryable; only a clean response proving the top-level PR absent is terminal. Head changes, reviews, review
+  summaries, issue comments, thread resolution, and relevant thread follow-ups count as
+  activity. Stable IDs preserve same-second follow-ups. A local-account comment is an agent
   acknowledgement only when it begins with `ignoreCommentTag`; those replies remain in readiness ordering but not
   relevant-comment signatures.
 - Reports contain state, counts, authors, labels, readiness, check names, and required workflow direction, but never
@@ -34,16 +36,20 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   delivery failures stop after logging because the failed delivery channel cannot reliably carry a notice.
 - Merge/close produces one terminal report and removes the watch. Explicit stop, session cleanup, and failed starts
   leave no timer. Cleanup drains an already-started label mutation before unregistering the watch, so a successor
-  cannot race a stale add/remove. A cleanup crossing an in-flight start still prevents late registration.
+  cannot race a stale add/remove; it does not wait for a stalled fetch or report delivery. A cleanup crossing an
+  in-flight start still prevents late registration.
 
 ### Ready-label lifecycle
 
 - An active watch automatically adds `readyLabel` when CI is passing or absent, mergeability is `MERGEABLE`, every
   review thread ends in a prefixed local reply, and flat issue/review-summary feedback is followed by a prefixed
   local reply. Resolution state, stale `CHANGES_REQUESTED`, pending review requests, and draft state do not block.
-- A later head, relevant comment/summary, CI regression, or definite conflict automatically removes readiness and
-  flushes urgently. Resolution-only activity, approvals without summary feedback, transient `UNKNOWN`, merge, and
-  close preserve it. An acknowledged state is restored only after the normal quiet window.
+- A later head, relevant comment/summary, acknowledgement edit/deletion, CI regression, or definite conflict
+  automatically removes readiness and flushes urgently. Resolution-only activity, approvals without summary
+  feedback, transient `UNKNOWN`, merge, and close preserve it. An acknowledged state is restored only after the
+  normal quiet window.
+- Cross-channel comments sharing GitHub's timestamp second are conservative: readiness requires every latest tied
+  entry to be a prefixed local reply. A mixed feedback/reply tie remains blocked until a later reply or manual mark.
 - A review summary is feedback when its body is non-empty. An empty, comment-less `CHANGES_REQUESTED` review is also
   flat feedback; an empty review whose inline comments are represented by threads is not duplicated.
 - `mark_ready` verifies an open PR, best-effort creates the green label, accepts all activity currently observed by

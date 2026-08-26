@@ -165,6 +165,18 @@ function parseGhPayload(stdout: string): any {
   }
 }
 
+function assertCompleteGraphQlPayload(payload: any): void {
+  const errors = Array.isArray(payload?.errors) ? payload.errors : []
+  if (errors.length === 0) return
+  const detail = errors
+    .map((error: any) => (typeof error?.message === "string" ? error.message : "unknown GraphQL error"))
+    .join("; ")
+  // GraphQL can return no data for transient service/rate-limit failures, and a
+  // nested field can report NOT_FOUND while the PR remains live. Error-bearing
+  // payloads therefore stay retryable; only a clean null PR is terminal below.
+  throw new PollError(`GitHub returned an incomplete GraphQL response: ${detail}`)
+}
+
 type Connection = { pageInfo?: { hasNextPage?: boolean; endCursor?: unknown }; nodes?: any[] }
 
 async function paginateConnection({
@@ -211,6 +223,7 @@ async function paginateConnection({
         `cursor=${cursor}`,
       ]),
     )
+    assertCompleteGraphQlPayload(page)
     const next = select(page)
     if (next === undefined) {
       throw new PollError(`GitHub data changed while fetching ${name}`, {
@@ -236,6 +249,7 @@ export async function fetchPrSnapshot(input: {
     "-F", `number=${input.target.number}`,
   ]))
   const pr = payload?.data?.repository?.pullRequest
+  assertCompleteGraphQlPayload(payload)
   if (!pr) return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin })
 
   const pageInput = { runGh: input.runGh, target: input.target }
@@ -296,7 +310,9 @@ export function normalizeSnapshot(
   payload: unknown,
   opts: { ignoreTag: string | undefined; selfLogin: string | undefined },
 ): PrSnapshot {
-  const pr = (payload as any)?.data?.repository?.pullRequest
+  const rawPayload = payload as any
+  const pr = rawPayload?.data?.repository?.pullRequest
+  assertCompleteGraphQlPayload(rawPayload)
   if (!pr) throw new PollError("PR not found in GraphQL response", { notFound: true })
 
   const classifier: CommentClassifier = { replyPrefix: opts.ignoreTag, selfLogin: opts.selfLogin }
