@@ -3644,12 +3644,7 @@ var require_fast_uri = __commonJS({
     }
     function resolve(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
-      const { parsed: baseParsed, malformedAuthorityOrPort: baseMalformed } = parseWithStatus(baseURI, schemelessOptions);
-      const { parsed: relativeParsed, malformedAuthorityOrPort: relativeMalformed } = parseWithStatus(relativeURI, schemelessOptions);
-      if (baseMalformed || relativeMalformed) {
-        throw new Error(baseParsed.error || relativeParsed.error || "URI is malformed.");
-      }
-      const resolved = resolveComponent(baseParsed, relativeParsed, schemelessOptions, true);
+      const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
@@ -3775,7 +3770,6 @@ var require_fast_uri = __commonJS({
     }
     var URI_PARSE = /^(?:([^#/:?]+):)?(?:\/\/((?:([^#/?@]*)@)?(\[[^#/?\]]+\]|[^#/:?]*)(?::(\d*))?))?([^#?]*)(?:\?([^#]*))?(?:#((?:.|[\n\r])*))?/u;
     var AUTHORITY_PREFIX = /^(?:[^#/:?]+:)?\/\/([^/?#]*)/;
-    var AUTHORITY_INTRODUCER_REGION = /^(?:[^#/:?]+:)?([/\\\t\n\r]*)/;
     function getParseError(parsed, matches) {
       if (matches[2] !== void 0 && parsed.path && parsed.path[0] !== "/") {
         return 'URI path must start with "/" when authority is present.';
@@ -3809,20 +3803,6 @@ var require_fast_uri = __commonJS({
       if (authorityMatch !== null && authorityMatch[1].indexOf("\\") !== -1) {
         parsed.error = "URI authority must not contain a literal backslash.";
         malformedAuthorityOrPort = true;
-      }
-      const introducerMatch = uri.match(AUTHORITY_INTRODUCER_REGION);
-      if (introducerMatch !== null) {
-        const region = introducerMatch[1];
-        const normalizedRegion = region.replace(/[\t\n\r]/g, "");
-        if (normalizedRegion.length >= 2) {
-          if (normalizedRegion.slice(0, 2) !== "//") {
-            parsed.error = parsed.error || "URI authority must not contain a literal backslash.";
-            malformedAuthorityOrPort = true;
-          } else if (region.length !== normalizedRegion.length) {
-            parsed.error = parsed.error || "URI authority introducer must not contain whitespace.";
-            malformedAuthorityOrPort = true;
-          }
-        }
       }
       const matches = uri.match(URI_PARSE);
       if (matches) {
@@ -30988,7 +30968,7 @@ var DEFAULT_MONITOR_CONFIG = {
   debounceMinutes: 2,
   maxCiWaitMinutes: 30,
   pollIntervalSeconds: 60,
-  ignoreCommentTag: void 0,
+  ignoreCommentTag: "<!-- pr-monitor:reply -->",
   announceOnStart: true,
   flushOnCiFailure: true,
   readyLabel: "ready-for-human-review"
@@ -31013,7 +30993,7 @@ function resolveMonitorConfig(raw) {
   const poll = positiveNumber(record2, "pollIntervalSeconds") ?? config2.pollIntervalSeconds;
   config2.pollIntervalSeconds = Math.min(Math.max(poll, MIN_POLL_INTERVAL_SECONDS), MAX_POLL_INTERVAL_SECONDS);
   const tag = record2["ignoreCommentTag"];
-  config2.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : void 0;
+  config2.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : config2.ignoreCommentTag;
   const announce = record2["announceOnStart"];
   if (typeof announce === "boolean") config2.announceOnStart = announce;
   const flushOnCiFailure = record2["flushOnCiFailure"];
@@ -31090,11 +31070,14 @@ query($owner: String!, $repo: String!, $number: Int!) {
     pullRequest(number: $number) {
       title url state mergeable headRefOid
       commits(last: 1) { nodes { commit { statusCheckRollup {
-        contexts(first: 100) { nodes {
-          __typename
-          ... on CheckRun { name status conclusion }
-          ... on StatusContext { context state }
-        } }
+        contexts(first: 100) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            __typename
+            ... on CheckRun { id name status conclusion }
+            ... on StatusContext { context state createdAt }
+          }
+        }
       } } } }
       reviewRequests(first: 50) { nodes { requestedReviewer {
         __typename
@@ -31102,7 +31085,13 @@ query($owner: String!, $repo: String!, $number: Int!) {
         ... on Team { slug }
         ... on Bot { login }
       } } }
-      latestReviews(first: 50) { nodes { author { login __typename } state submittedAt } }
+      latestReviews(first: 50) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id author { login __typename } state submittedAt body
+          comments(first: 1) { totalCount }
+        }
+      }
       reviewThreads(first: 100) {
         pageInfo { hasNextPage endCursor }
         nodes {
@@ -31111,7 +31100,10 @@ query($owner: String!, $repo: String!, $number: Int!) {
         }
       }
       comments(last: 100) { totalCount nodes { id author { login __typename } body createdAt } }
-      labels(first: 100) { nodes { name } }
+      labels(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes { name }
+      }
     }
   }
 }`;
@@ -31129,11 +31121,100 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String!) {
     }
   }
 }`;
+var CHECKS_PAGE_QUERY = `
+query($owner: String!, $repo: String!, $head: GitObjectID!, $cursor: String!) {
+  repository(owner: $owner, name: $repo) {
+    object(oid: $head) {
+      ... on Commit {
+        statusCheckRollup {
+          contexts(first: 100, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              __typename
+              ... on CheckRun { id name status conclusion }
+              ... on StatusContext { context state createdAt }
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
+var REVIEWS_PAGE_QUERY = `
+query($owner: String!, $repo: String!, $number: Int!, $cursor: String!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      latestReviews(first: 50, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id author { login __typename } state submittedAt body
+          comments(first: 1) { totalCount }
+        }
+      }
+    }
+  }
+}`;
+var LABELS_PAGE_QUERY = `
+query($owner: String!, $repo: String!, $number: Int!, $cursor: String!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      labels(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { name }
+      }
+    }
+  }
+}`;
 function parseGhPayload(stdout) {
   try {
     return JSON.parse(stdout);
   } catch {
     throw new PollError("gh returned non-JSON output");
+  }
+}
+async function paginateConnection({
+  input,
+  connection,
+  query,
+  select,
+  name,
+  variables = [],
+  includeNumber = true,
+  missingMeansNotFound = true
+}) {
+  if (connection === void 0) return;
+  connection.nodes ??= [];
+  const seenCursors = /* @__PURE__ */ new Set();
+  while (connection.pageInfo?.hasNextPage) {
+    const cursor = connection.pageInfo.endCursor;
+    if (typeof cursor !== "string" || seenCursors.has(cursor)) {
+      throw new PollError(`GitHub returned an invalid ${name} pagination cursor`);
+    }
+    seenCursors.add(cursor);
+    const page = parseGhPayload(
+      await input.runGh([
+        "api",
+        "graphql",
+        "-f",
+        `query=${query}`,
+        "-F",
+        `owner=${input.target.owner}`,
+        "-F",
+        `repo=${input.target.repo}`,
+        ...includeNumber ? ["-F", `number=${input.target.number}`] : [],
+        ...variables.flatMap((variable) => ["-F", variable]),
+        "-f",
+        `cursor=${cursor}`
+      ])
+    );
+    const next = select(page);
+    if (next === void 0) {
+      throw new PollError(`GitHub data changed while fetching ${name}`, {
+        notFound: missingMeansNotFound
+      });
+    }
+    connection.nodes.push(...next.nodes ?? []);
+    connection.pageInfo = next.pageInfo;
   }
 }
 async function fetchPrSnapshot(input) {
@@ -31151,70 +31232,102 @@ async function fetchPrSnapshot(input) {
   ]));
   const pr = payload?.data?.repository?.pullRequest;
   if (!pr) return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin });
-  const threads = pr.reviewThreads ??= { nodes: [] };
-  threads.nodes ??= [];
-  const seenCursors = /* @__PURE__ */ new Set();
-  while (threads.pageInfo?.hasNextPage) {
-    const cursor = threads.pageInfo.endCursor;
-    if (typeof cursor !== "string" || seenCursors.has(cursor)) {
-      throw new PollError("GitHub returned an invalid review-thread pagination cursor");
-    }
-    seenCursors.add(cursor);
-    const page = parseGhPayload(await input.runGh([
-      "api",
-      "graphql",
-      "-f",
-      `query=${REVIEW_THREADS_PAGE_QUERY}`,
-      "-F",
-      `owner=${input.target.owner}`,
-      "-F",
-      `repo=${input.target.repo}`,
-      "-F",
-      `number=${input.target.number}`,
-      "-f",
-      `cursor=${cursor}`
-    ]));
-    const next = page?.data?.repository?.pullRequest?.reviewThreads;
-    if (!next) throw new PollError("PR not found while fetching review threads", { notFound: true });
-    threads.nodes.push(...next.nodes ?? []);
-    threads.pageInfo = next.pageInfo;
-  }
+  const pageInput = { runGh: input.runGh, target: input.target };
+  await paginateConnection({
+    input: pageInput,
+    connection: pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts,
+    query: CHECKS_PAGE_QUERY,
+    select: (page) => page?.data?.repository?.object?.statusCheckRollup?.contexts,
+    name: "check-context",
+    variables: [`head=${pr.headRefOid}`],
+    includeNumber: false,
+    missingMeansNotFound: false
+  });
+  await paginateConnection({
+    input: pageInput,
+    connection: pr.latestReviews,
+    query: REVIEWS_PAGE_QUERY,
+    select: (page) => page?.data?.repository?.pullRequest?.latestReviews,
+    name: "latest-review"
+  });
+  await paginateConnection({
+    input: pageInput,
+    connection: pr.reviewThreads,
+    query: REVIEW_THREADS_PAGE_QUERY,
+    select: (page) => page?.data?.repository?.pullRequest?.reviewThreads,
+    name: "review-thread"
+  });
+  await paginateConnection({
+    input: pageInput,
+    connection: pr.labels,
+    query: LABELS_PAGE_QUERY,
+    select: (page) => page?.data?.repository?.pullRequest?.labels,
+    name: "label"
+  });
   return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin });
 }
-function toMeta(raw) {
+function toMeta(raw, classifier) {
+  const author = raw.author?.login ?? "ghost";
+  const isLocal = classifier.selfLogin !== void 0 && author.toLowerCase() === classifier.selfLogin.toLowerCase();
   return {
     id: raw.id,
-    author: raw.author?.login ?? "ghost",
+    author,
     isBot: raw.author?.__typename === "Bot",
-    createdAt: raw.createdAt
+    createdAt: raw.createdAt,
+    isLocal,
+    isAgentReply: isLocal && classifier.replyPrefix !== void 0 && raw.body.startsWith(classifier.replyPrefix)
   };
 }
 function normalizeSnapshot(payload, opts) {
   const pr = payload?.data?.repository?.pullRequest;
   if (!pr) throw new PollError("PR not found in GraphQL response", { notFound: true });
-  const ignored = (raw) => opts.ignoreTag !== void 0 && opts.selfLogin !== void 0 && raw.author?.login === opts.selfLogin && raw.body.includes(opts.ignoreTag);
+  const classifier = { replyPrefix: opts.ignoreTag, selfLogin: opts.selfLogin };
   const checks = [];
   const contexts = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.nodes ?? [];
   for (const ctx of contexts) {
     if (ctx.__typename === "CheckRun") {
       const outcome = ctx.status !== "COMPLETED" ? "pending" : ["SUCCESS", "NEUTRAL", "SKIPPED"].includes(ctx.conclusion) ? "success" : "failure";
-      checks.push({ name: ctx.name, outcome });
+      checks.push({ id: ctx.id, name: ctx.name, outcome });
     } else if (ctx.__typename === "StatusContext") {
       const outcome = ctx.state === "SUCCESS" ? "success" : ["PENDING", "EXPECTED"].includes(ctx.state) ? "pending" : "failure";
-      checks.push({ name: ctx.context, outcome });
+      checks.push({
+        id: `status:${ctx.context}:${ctx.createdAt ?? ""}`,
+        name: ctx.context,
+        outcome
+      });
     }
   }
-  const reviews = (pr.latestReviews?.nodes ?? []).filter((node) => node.author?.login && node.state !== "PENDING").map((node) => ({ login: node.author.login, state: node.state, submittedAt: node.submittedAt ?? "" }));
+  const rawReviews = (pr.latestReviews?.nodes ?? []).filter(
+    (node) => node.author?.login && node.state !== "PENDING"
+  );
+  const reviews = rawReviews.map((node) => ({
+    login: node.author.login,
+    state: node.state,
+    submittedAt: node.submittedAt ?? ""
+  }));
+  const reviewSummaries = rawReviews.filter(
+    (node) => typeof node.body === "string" && node.body.trim().length > 0 || node.state === "CHANGES_REQUESTED" && (node.comments?.totalCount ?? 0) === 0
+  ).map(
+    (node) => toMeta(
+      {
+        id: node.id,
+        author: node.author,
+        body: typeof node.body === "string" ? node.body : "",
+        createdAt: node.submittedAt ?? ""
+      },
+      classifier
+    )
+  );
   const pendingReviewers = (pr.reviewRequests?.nodes ?? []).map((node) => node.requestedReviewer?.login ?? node.requestedReviewer?.slug).filter((name) => typeof name === "string");
   const threads = pr.reviewThreads?.nodes ?? [];
   const reviewThreads = threads.map((thread) => ({
     id: thread.id,
     isResolved: thread.isResolved,
-    comments: (thread.comments?.nodes ?? []).filter((comment) => !ignored(comment)).map(toMeta)
+    comments: (thread.comments?.nodes ?? []).map((comment) => toMeta(comment, classifier))
   }));
   const issueNodes = pr.comments?.nodes ?? [];
-  const issueVisible = issueNodes.filter((node) => !ignored(node));
-  const ignoredCount = issueNodes.length - issueVisible.length;
+  const issueComments = issueNodes.map((node) => toMeta(node, classifier));
+  const acknowledgementCount = issueComments.filter((comment) => comment.isAgentReply).length;
   return {
     title: pr.title,
     url: pr.url,
@@ -31223,10 +31336,14 @@ function normalizeSnapshot(payload, opts) {
     headSha: pr.headRefOid,
     checks,
     reviews,
+    reviewSummaries,
     pendingReviewers,
     reviewThreads,
-    issueCommentsTotal: Math.max((pr.comments?.totalCount ?? issueNodes.length) - ignoredCount, 0),
-    issueComments: issueVisible.map(toMeta),
+    issueCommentsTotal: Math.max(
+      (pr.comments?.totalCount ?? issueNodes.length) - acknowledgementCount,
+      0
+    ),
+    issueComments,
     labels: (pr.labels?.nodes ?? []).map((node) => node?.name).filter((name) => typeof name === "string")
   };
 }
@@ -31292,9 +31409,19 @@ function reviewSig(snapshot) {
   const pending = [...snapshot.pendingReviewers].sort();
   return `${states.join(",")}|${pending.join(",")}`;
 }
-function hasAddedComment(prev, next) {
+function relevantComments(comments) {
+  return comments.filter((comment) => !comment.isAgentReply);
+}
+function hasAddedRelevantComment(prev, next) {
   const before = new Set(prev.map((comment) => comment.id));
-  return next.some((comment) => !before.has(comment.id));
+  return next.some((comment) => !comment.isAgentReply && !before.has(comment.id));
+}
+function reviewThreadsReceivedNewComments(prev, next) {
+  const before = new Map(prev.map((thread) => [thread.id, thread]));
+  return next.some((thread) => {
+    const previous = before.get(thread.id);
+    return hasAddedRelevantComment(previous?.comments ?? [], thread.comments);
+  });
 }
 function reviewThreadsChanged(prev, next) {
   const before = new Map(prev.map((thread) => [thread.id, thread]));
@@ -31302,12 +31429,15 @@ function reviewThreadsChanged(prev, next) {
   if (prev.some((thread) => !after.has(thread.id))) return true;
   return next.some((thread) => {
     const previous = before.get(thread.id);
-    if (!previous) return !thread.isResolved || thread.comments.length > 0;
-    return previous.isResolved !== thread.isResolved || hasAddedComment(previous.comments, thread.comments);
+    if (!previous) return relevantComments(thread.comments).length > 0 || !thread.isResolved;
+    return previous.isResolved !== thread.isResolved || hasAddedRelevantComment(previous.comments, thread.comments);
   });
 }
+function checkKey(check2) {
+  return check2.id ?? check2.name;
+}
 function ciConcludedSig(snapshot) {
-  const failed = snapshot.checks.filter((check2) => check2.outcome === "failure").map((check2) => check2.name).sort();
+  const failed = snapshot.checks.filter((check2) => check2.outcome === "failure").map(checkKey).sort();
   return `${snapshot.headSha}:${failed.join(",")}`;
 }
 function mergeableChanged(lastDefinite, next) {
@@ -31322,37 +31452,119 @@ function hasNewCiFailure(prev, next) {
   const failing = next.checks.filter((check2) => check2.outcome === "failure");
   if (failing.length === 0) return false;
   if (prev.headSha !== next.headSha) return true;
-  const before = new Set(prev.checks.filter((check2) => check2.outcome === "failure").map((check2) => check2.name));
-  return failing.some((check2) => !before.has(check2.name));
+  const before = new Set(prev.checks.filter((check2) => check2.outcome === "failure").map(checkKey));
+  return failing.some((check2) => !before.has(checkKey(check2)));
 }
 function detectActivity(prev, next, lastDefiniteMergeable) {
   if (prev.state !== next.state) return true;
+  if (prev.headSha !== next.headSha) return true;
   if (mergeableChanged(lastDefiniteMergeable, next)) return true;
   if (reviewSig(prev) !== reviewSig(next)) return true;
   if (reviewThreadsChanged(prev.reviewThreads, next.reviewThreads)) return true;
-  if (prev.issueCommentsTotal !== next.issueCommentsTotal || hasAddedComment(prev.issueComments, next.issueComments)) return true;
-  if (ciPhase(next) === "concluded" && (ciPhase(prev) !== "concluded" || ciConcludedSig(prev) !== ciConcludedSig(next))) return true;
+  if (prev.issueCommentsTotal !== next.issueCommentsTotal || hasAddedRelevantComment(prev.issueComments, next.issueComments) || hasAddedRelevantComment(prev.reviewSummaries, next.reviewSummaries)) {
+    return true;
+  }
+  if (ciPhase(next) === "concluded" && (ciPhase(prev) !== "concluded" || ciConcludedSig(prev) !== ciConcludedSig(next))) {
+    return true;
+  }
+  return false;
+}
+
+// core/readiness.ts
+function latestComment(comments) {
+  return comments.reduce((latest, comment) => {
+    if (latest === void 0) return comment;
+    const latestAt = Date.parse(latest.createdAt);
+    const commentAt = Date.parse(comment.createdAt);
+    if (Number.isNaN(latestAt) || Number.isNaN(commentAt)) return comment;
+    return commentAt >= latestAt ? comment : latest;
+  }, void 0);
+}
+function ciIsReady(snapshot) {
+  const phase = ciPhase(snapshot);
+  return phase === "none" || phase === "concluded" && snapshot.checks.every((check2) => check2.outcome === "success");
+}
+function assessAutomaticReadiness(snapshot) {
+  const blockers = [];
+  if (snapshot.state !== "OPEN") blockers.push(`PR is ${snapshot.state.toLowerCase()}`);
+  if (!ciIsReady(snapshot)) {
+    blockers.push(ciPhase(snapshot) === "running" ? "CI is running" : "CI is failing");
+  }
+  if (snapshot.mergeable !== "MERGEABLE") {
+    blockers.push(
+      snapshot.mergeable === "CONFLICTING" ? "the PR has a merge conflict" : "mergeability is still unknown"
+    );
+  }
+  const awaitingThreadReplies = snapshot.reviewThreads.filter(
+    (thread) => latestComment(thread.comments)?.isAgentReply !== true
+  ).length;
+  if (awaitingThreadReplies > 0) {
+    blockers.push(
+      `${awaitingThreadReplies} review ${awaitingThreadReplies === 1 ? "thread awaits" : "threads await"} a prefixed reply from the local GitHub account`
+    );
+  }
+  const latestUnthreaded = latestComment([...snapshot.issueComments, ...snapshot.reviewSummaries]);
+  const awaitingUnthreadedReply = latestUnthreaded !== void 0 && !latestUnthreaded.isAgentReply;
+  if (awaitingUnthreadedReply) {
+    blockers.push("issue or review-summary feedback awaits a prefixed reply from the local GitHub account");
+  }
+  return {
+    eligible: blockers.length === 0,
+    blockers,
+    awaitingThreadReplies,
+    awaitingUnthreadedReply
+  };
+}
+function hasReadyLabel(snapshot, readyLabel) {
+  const normalized = readyLabel.toLowerCase();
+  return snapshot.labels.some((label) => label.toLowerCase() === normalized);
+}
+function withReadyLabel(snapshot, readyLabel, ready) {
+  const normalized = readyLabel.toLowerCase();
+  const withoutReady = snapshot.labels.filter((label) => label.toLowerCase() !== normalized);
+  return { ...snapshot, labels: ready ? [...withoutReady, readyLabel] : withoutReady };
+}
+function hasReadinessInvalidation(prev, next, lastDefiniteMergeable) {
+  if (next.state !== "OPEN") return false;
+  if (prev.headSha !== next.headSha) return true;
+  if (hasNewMergeConflict(lastDefiniteMergeable, next)) return true;
+  if (ciIsReady(prev) && !ciIsReady(next)) return true;
+  if (hasNewCiFailure(prev, next)) return true;
+  if (reviewThreadsReceivedNewComments(prev.reviewThreads, next.reviewThreads)) return true;
+  if (hasAddedRelevantComment(prev.issueComments, next.issueComments)) return true;
+  if (hasAddedRelevantComment(prev.reviewSummaries, next.reviewSummaries)) return true;
   return false;
 }
 
 // core/report.ts
+var DEFAULT_READY_LABEL = "ready-for-human-review";
+var DEFAULT_REPLY_PREFIX = "<!-- pr-monitor:reply -->";
 function authorBreakdown(comments) {
   const counts = /* @__PURE__ */ new Map();
   for (const comment of comments) {
-    const name = comment.isBot ? `${comment.author}[bot]` : comment.author;
+    const account = comment.isBot ? `${comment.author}[bot]` : comment.author;
+    const name = comment.isLocal ? `${account} [local account, unprefixed]` : account;
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => `${count} ${name}`).join(", ");
 }
 function newSince(comments, baselineMs, baselineComments) {
-  if (baselineComments !== void 0) {
-    const seen = new Set(baselineComments.map((comment) => comment.id));
-    return comments.filter((comment) => !seen.has(comment.id));
-  }
-  return comments.filter((comment) => Date.parse(comment.createdAt) > baselineMs);
+  const fresh = (() => {
+    if (baselineComments !== void 0) {
+      const seen = new Set(baselineComments.map((comment) => comment.id));
+      return comments.filter((comment) => !seen.has(comment.id));
+    }
+    return comments.filter((comment) => Date.parse(comment.createdAt) > baselineMs);
+  })();
+  return relevantComments(fresh);
 }
 function countLabel(count, singular) {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+function inlineCode(value) {
+  let fence = "`";
+  while (value.includes(fence)) fence += "`";
+  return `${fence}${value}${fence}`;
 }
 function inlineLine(snapshot, baselineMs, baseline) {
   const unresolved = snapshot.reviewThreads.filter((thread) => !thread.isResolved).length;
@@ -31362,16 +31574,18 @@ function inlineLine(snapshot, baselineMs, baseline) {
     comments: newSince(thread.comments, baselineMs, baseline ? before.get(thread.id) ?? [] : void 0)
   })).filter((item) => item.comments.length > 0);
   if (changed.length === 0) {
-    return `- [comment:inline] ${countLabel(unresolved, "unresolved thread")}; 0 threads received new comments since last flush`;
+    return `- [comment:inline] ${countLabel(unresolved, "unresolved thread")}; 0 threads received new relevant comments since last flush`;
   }
   const fresh = changed.flatMap((item) => item.comments);
+  const previousUnresolved = baseline?.reviewThreads.filter((thread) => !thread.isResolved).length;
+  const unresolvedNotice = previousUnresolved === void 0 ? `Inspect every changed thread regardless of the current unresolved-thread count (${unresolved}).` : previousUnresolved === unresolved ? `The unresolved-thread count is unchanged at ${unresolved}; inspect every changed thread anyway.` : `The unresolved-thread count changed from ${previousUnresolved} to ${unresolved}; inspect every changed thread.`;
   const changedUnresolved = changed.filter((item) => !item.thread.isResolved).length;
   const changedResolved = changed.length - changedUnresolved;
   const states = [
     changedUnresolved > 0 ? `${changedUnresolved} currently unresolved` : void 0,
     changedResolved > 0 ? `${changedResolved} currently resolved` : void 0
   ].filter((part) => part !== void 0);
-  return `- [comment:inline] ${countLabel(unresolved, "unresolved thread")}; ${countLabel(changed.length, "thread")} received ${countLabel(fresh.length, "new comment")} since last flush (${states.join(", ")}; ${authorBreakdown(fresh)})`;
+  return `- [comment:inline] ACTION REQUIRED: ${countLabel(changed.length, "thread")} received ${countLabel(fresh.length, "new relevant comment")} since last flush (${states.join(", ")}; ${authorBreakdown(fresh)}). ${unresolvedNotice}`;
 }
 function ciLine(snapshot, forcedHoldMinutes) {
   const phase = ciPhase(snapshot);
@@ -31401,21 +31615,60 @@ function reviewLine(snapshot) {
   for (const login of snapshot.pendingReviewers) parts.push(`${login} \u23F3 pending`);
   return `- Reviews: ${parts.length > 0 ? parts.join(" \xB7 ") : "none"}`;
 }
+function reviewSummaryLine(snapshot, baselineMs, baseline) {
+  const fresh = newSince(snapshot.reviewSummaries, baselineMs, baseline?.reviewSummaries);
+  return fresh.length === 0 ? "- [comment:review] 0 new relevant review summaries since last flush" : `- [comment:review] ACTION REQUIRED: ${countLabel(fresh.length, "new relevant review summary")} since last flush (${authorBreakdown(fresh)}).`;
+}
+function buildReadinessLines({
+  target,
+  snapshot,
+  readyLabel,
+  replyPrefix,
+  readinessError
+}) {
+  const ready = hasReadyLabel(snapshot, readyLabel);
+  const lines = [
+    ready ? `- Ready for human review: YES \u2014 label "${readyLabel}" is present.` : `- Ready for human review: NO \u2014 label "${readyLabel}" is absent.`
+  ];
+  if (readinessError !== void 0) lines.push(`- Readiness automation failed: ${readinessError}`);
+  if (!ready && snapshot.state === "OPEN") {
+    const assessment = assessAutomaticReadiness(snapshot);
+    if (assessment.blockers.length > 0) {
+      lines.push(`- Automatic readiness blocked by: ${assessment.blockers.join("; ")}.`);
+    }
+    lines.push(
+      `- Required next step: Do more work until the PR is ready for review, or use ${inlineCode(`pr_monitor(action: "mark_ready", pr: "${targetKey(target)}")`)} if you believe nothing else is required. Local agent replies count only when they begin with ${inlineCode(replyPrefix)}.`
+    );
+  }
+  return lines;
+}
 function buildReport(target, snapshot, opts) {
   const stateSuffix = snapshot.state !== "OPEN" ? ` \u2014 ${snapshot.state}` : "";
   const title = snapshot.title.replace(/\s+/g, " ").trim();
   const newIssue = newSince(snapshot.issueComments, opts.baselineMs, opts.baselineSnapshot?.issueComments);
-  const newPart = (fresh) => fresh.length > 0 ? `${fresh.length} new since last flush: ${authorBreakdown(fresh)}` : "0 new since last flush";
+  const newPart = (fresh) => fresh.length > 0 ? `${fresh.length} new relevant since last flush: ${authorBreakdown(fresh)}` : "0 new since last flush";
+  const readyLabel = opts.readyLabel ?? DEFAULT_READY_LABEL;
+  const replyPrefix = opts.replyPrefix ?? DEFAULT_REPLY_PREFIX;
   const lines = [
     `[PR Monitor] [${targetKey(target)}](${snapshot.url}) \u2014 "${title}"${stateSuffix}`,
     ciLine(snapshot, opts.forcedHoldMinutes),
     `- Mergeable: ${snapshot.mergeable}`,
     reviewLine(snapshot),
+    reviewSummaryLine(snapshot, opts.baselineMs, opts.baselineSnapshot),
     inlineLine(snapshot, opts.baselineMs, opts.baselineSnapshot),
-    `- [comment:issue] ${snapshot.issueCommentsTotal} total (${newPart(newIssue)})`
+    `- [comment:issue] ${snapshot.issueCommentsTotal} total (${newPart(newIssue)})`,
+    ...buildReadinessLines({
+      target,
+      snapshot,
+      readyLabel,
+      replyPrefix,
+      readinessError: opts.readinessError
+    })
   ];
   if (snapshot.labels.length > 0) lines.push(`- Labels: ${snapshot.labels.join(", ")}`);
-  if (snapshot.state !== "OPEN") lines.push(`- Monitor stopped: PR ${snapshot.state === "MERGED" ? "merged" : "closed"}`);
+  if (snapshot.state !== "OPEN") {
+    lines.push(`- Monitor stopped: PR ${snapshot.state === "MERGED" ? "merged" : "closed"}`);
+  }
   return lines.join("\n");
 }
 
@@ -31443,20 +31696,23 @@ var PrWatch = class {
   // Set for actionable or terminal changes that must skip both timers.
   urgent = false;
   // Head SHA whose CI failure already triggered an instant flush. Caps the
-  // instant path at one report per commit, so a matrix whose jobs go red one by
-  // one cannot wake the session once per job; the stragglers ride along with the
-  // debounced suite-conclusion report instead.
+  // instant path at one report per commit.
   ciFailureFlushedSha;
   consecutiveFailures = 0;
   deliveryFailures = 0;
   fetchStartedAt;
   snapshotAt;
   stopped = false;
-  // Serializes tick()/manualFlush(): their fetch -> apply -> flush -> deliver
-  // sequences share snapshot/baseline state, and interleaved awaits could
-  // overwrite a newer snapshot with an older fetch or restore a stale baseline
-  // (duplicate or stale reports). Ticks skip instead of queueing while an op is
-  // pending — the interval fires again soon anyway; manual flushes queue.
+  stopCleanup;
+  readinessRetry;
+  readinessRetryBaseline;
+  readinessError;
+  reportedReadinessError;
+  // A poll may observe new feedback and a prefixed response together. The
+  // ready label is still withdrawn and reported first; only a later quiet
+  // report can restore it, so the feedback never disappears behind one poll.
+  autoReadyAfterInvalidation = false;
+  // Serializes fetch/apply/mutate/flush/deliver and manual label actions.
   opQueue = Promise.resolve();
   pendingOps = 0;
   constructor(input) {
@@ -31481,7 +31737,9 @@ var PrWatch = class {
     const phase = this.holdStartedAt !== void 0 ? "ci-hold" : "watching";
     const baselineAge = Math.round((now - this.lastFlushAt) / 6e4);
     const failures = this.consecutiveFailures > 0 ? `, ${this.consecutiveFailures} consecutive poll failures` : "";
-    return `${targetKey(this.target)} \u2014 ${phase}, ${this.dirty ? "activity buffered" : "quiet"}, baseline ${baselineAge}m ago${failures}`;
+    const readiness = this.deps.readiness;
+    const ready = readiness !== void 0 && this.snapshot !== void 0 ? `, ready for human review: ${hasReadyLabel(this.snapshot, readiness.label) ? "yes" : "no"}` : "";
+    return `${targetKey(this.target)} \u2014 ${phase}, ${this.dirty ? "activity buffered" : "quiet"}, baseline ${baselineAge}m ago${failures}${ready}`;
   }
   runExclusive(task) {
     this.pendingOps += 1;
@@ -31495,6 +31753,44 @@ var PrWatch = class {
       }
     );
     return run;
+  }
+  /** Reconcile the initial label before the startup report is rendered. */
+  async initializeReadiness() {
+    if (this.stopped) return;
+    await this.runExclusive(async () => {
+      const snapshot = this.snapshot;
+      const readiness = this.deps.readiness;
+      if (this.stopped || snapshot === void 0 || readiness === void 0) return;
+      this.notifyReadyChanged(hasReadyLabel(snapshot, readiness.label));
+      if (snapshot.state === "OPEN" && !hasReadyLabel(snapshot, readiness.label) && assessAutomaticReadiness(snapshot).eligible) {
+        this.snapshot = await this.changeSnapshotReadiness(snapshot, true);
+      }
+    });
+  }
+  /** Manual actions are serialized with polling and accept all current state. */
+  async manualSetReady(ready) {
+    if (this.stopped) throw new Error("the monitor stopped before the ready action could run");
+    return await this.runExclusive(async () => {
+      if (this.stopped) throw new Error("the monitor stopped before the ready action could run");
+      const readiness = this.deps.readiness;
+      const snapshot = this.snapshot;
+      if (readiness === void 0 || snapshot === void 0) {
+        throw new Error("this watch does not have a readiness channel");
+      }
+      const text = await readiness.change(ready);
+      this.snapshot = withReadyLabel(snapshot, readiness.label, ready);
+      if (!this.stopped) {
+        this.clearReadinessFailure();
+        this.autoReadyAfterInvalidation = false;
+        this.notifyReadyChanged(ready);
+        if (!ready && assessAutomaticReadiness(this.snapshot).eligible) {
+          this.dirty = true;
+          this.lastActivityAt = this.deps.now();
+          this.holdStartedAt = void 0;
+        }
+      }
+      return text;
+    });
   }
   /** Periodic poll; never throws. Skipped while a poll or flush is in flight. */
   async tick() {
@@ -31518,121 +31814,238 @@ var PrWatch = class {
     if (this.stopped) return;
     this.consecutiveFailures = 0;
     this.snapshotAt = this.fetchStartedAt;
-    if (this.snapshot !== void 0) {
-      const becameTerminal = this.snapshot.state === "OPEN" && next.state !== "OPEN";
-      const becameConflicting = hasNewMergeConflict(this.lastDefiniteMergeable, next);
-      if (detectActivity(this.snapshot, next, this.lastDefiniteMergeable)) {
-        this.dirty = true;
-        this.lastActivityAt = this.deps.now();
-        this.holdStartedAt = void 0;
-      }
-      if (this.config.flushOnCiFailure && next.state === "OPEN" && this.ciFailureFlushedSha !== next.headSha && hasNewCiFailure(this.snapshot, next)) {
-        this.dirty = true;
-        this.urgent = true;
-        this.ciFailureFlushedSha = next.headSha;
-        this.holdStartedAt = void 0;
-      }
-      if (becameConflicting || becameTerminal) {
-        this.dirty = true;
-        this.urgent = true;
-        this.holdStartedAt = void 0;
-      }
-    }
+    next = await this.applySnapshot(next);
     this.snapshot = next;
+    if (this.stopped) return;
     this.rememberDefiniteMergeable(next);
     await this.maybeAutoFlush();
   }
+  async applySnapshot(next) {
+    const previous = this.snapshot;
+    if (previous === void 0) return next;
+    const becameTerminal = previous.state === "OPEN" && next.state !== "OPEN";
+    const becameConflicting = hasNewMergeConflict(this.lastDefiniteMergeable, next);
+    const now = this.deps.now();
+    if (detectActivity(previous, next, this.lastDefiniteMergeable)) {
+      this.dirty = true;
+      this.lastActivityAt = now;
+      this.holdStartedAt = void 0;
+    }
+    if (this.config.flushOnCiFailure && next.state === "OPEN" && this.ciFailureFlushedSha !== next.headSha && hasNewCiFailure(previous, next)) {
+      this.dirty = true;
+      this.urgent = true;
+      this.ciFailureFlushedSha = next.headSha;
+      this.holdStartedAt = void 0;
+    }
+    if (becameConflicting || becameTerminal) {
+      this.dirty = true;
+      this.urgent = true;
+      this.holdStartedAt = void 0;
+    }
+    const readiness = this.deps.readiness;
+    if (readiness === void 0) return next;
+    const wasReady = hasReadyLabel(previous, readiness.label);
+    const observedReady = hasReadyLabel(next, readiness.label);
+    if (next.state !== "OPEN") {
+      this.clearReadinessFailure();
+      if (wasReady !== observedReady) this.notifyReadyChanged(observedReady);
+      return next;
+    }
+    if (this.readinessRetry !== void 0) {
+      const desired = this.readinessRetry;
+      const retryInvalidated = desired && this.readinessRetryBaseline !== void 0 && hasReadinessInvalidation(this.readinessRetryBaseline, next, this.lastDefiniteMergeable);
+      if (retryInvalidated) {
+        this.clearReadinessFailure();
+        this.dirty = true;
+        this.lastActivityAt = now;
+        this.holdStartedAt = void 0;
+        if (observedReady) {
+          this.urgent = true;
+          const changed = await this.changeSnapshotReadiness(next, false);
+          if (!hasReadyLabel(changed, readiness.label)) this.autoReadyAfterInvalidation = true;
+          return changed;
+        }
+      } else if (observedReady === desired) {
+        this.clearReadinessFailure();
+        this.notifyReadyChanged(desired);
+        this.dirty = true;
+        this.urgent = true;
+        if (!desired) this.autoReadyAfterInvalidation = true;
+        return next;
+      } else if (!desired || assessAutomaticReadiness(next).eligible) {
+        const changed = await this.changeSnapshotReadiness(next, desired);
+        if (hasReadyLabel(changed, readiness.label) === desired) {
+          this.dirty = true;
+          this.urgent = true;
+          if (!desired) this.autoReadyAfterInvalidation = true;
+        }
+        return changed;
+      } else {
+        this.clearReadinessFailure();
+      }
+    }
+    if (wasReady && hasReadinessInvalidation(previous, next, this.lastDefiniteMergeable)) {
+      this.dirty = true;
+      this.urgent = true;
+      this.holdStartedAt = void 0;
+      if (!observedReady) {
+        this.notifyReadyChanged(false);
+        this.autoReadyAfterInvalidation = true;
+        return next;
+      }
+      const changed = await this.changeSnapshotReadiness(next, false);
+      if (!hasReadyLabel(changed, readiness.label)) this.autoReadyAfterInvalidation = true;
+      return changed;
+    }
+    if (wasReady !== observedReady) {
+      this.notifyReadyChanged(observedReady);
+      if (!observedReady) {
+        this.dirty = true;
+        this.lastActivityAt = now;
+        this.holdStartedAt = void 0;
+      }
+    }
+    const beforeEligible = assessAutomaticReadiness(previous).eligible;
+    const afterEligible = assessAutomaticReadiness(next).eligible;
+    if (!observedReady && afterEligible && !beforeEligible) {
+      this.dirty = true;
+      this.lastActivityAt = now;
+      this.holdStartedAt = void 0;
+    }
+    return next;
+  }
   /**
-   * Initial status delivered right after the watch starts, so the owning
-   * session sees where it is starting from and can address anything already
-   * outstanding on the PR. Reports against a zero baseline so every existing
-   * comment counts as "new", then advances the baseline to the initial
-   * snapshot so periodic flushes only surface genuinely newer activity.
-   * A delivery failure here is logged and re-armed for an immediate retry at
-   * the next poll without advancing the baseline. The returned promise never
-   * rejects; its boolean says whether this attempt was delivered. Callers that
-   * need the announcement spooled before they return (the Claude Code shell)
-   * can await it; fire-and-forget callers use `void`.
+   * Initial status delivered right after the watch starts. A delivery failure
+   * is re-armed without advancing the baseline.
    */
   async announceInitial() {
+    if (this.stopped) return false;
     return await this.runExclusive(() => this.announceInitialOnce());
   }
   async announceInitialOnce() {
     if (this.stopped || this.snapshot === void 0) return false;
-    const report = buildReport(this.target, this.snapshot, { baselineMs: 0 });
+    const readiness = this.deps.readiness;
+    if (readiness !== void 0) {
+      this.notifyReadyChanged(hasReadyLabel(this.snapshot, readiness.label));
+    }
+    await this.prepareAutomaticReady();
+    if (this.stopped) return false;
+    const report = this.buildCurrentReport({ baselineMs: 0 });
     if (await this.deliverOrLog(report)) {
       this.deliveryFailures = 0;
       this.lastFlushAt = this.snapshotAt ?? this.startedAt;
       this.lastFlushedSnapshot = this.snapshot;
       this.initialAnnouncementPending = false;
+      this.dirty = false;
+      this.holdStartedAt = void 0;
+      this.urgent = false;
+      this.afterReportDelivered();
       return true;
     }
     this.deliveryFailures += 1;
     this.dirty = true;
     this.urgent = true;
     if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
-      this.deps.log(`monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`);
+      this.deps.log(
+        `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`
+      );
       this.stop();
     }
     return false;
   }
-  /**
-   * Manual flush: always re-fetches and always returns a full report.
-   * Serialized with polling and concurrent flushes so overlapping fetches
-   * cannot land out of order.
-   */
+  /** Manual flush always re-fetches and returns a full report. */
   async manualFlush() {
+    if (this.stopped) return `${targetKey(this.target)}: flush skipped \u2014 monitor stopped.`;
     return await this.runExclusive(() => this.flushOnce());
   }
   async flushOnce() {
+    if (this.stopped) return `${targetKey(this.target)}: flush skipped \u2014 monitor stopped.`;
     try {
       this.fetchStartedAt = this.deps.now();
-      this.snapshot = await this.deps.fetchSnapshot();
-      this.rememberDefiniteMergeable(this.snapshot);
+      const fetched = await this.deps.fetchSnapshot();
+      if (this.stopped) return `${targetKey(this.target)}: flush skipped \u2014 monitor stopped.`;
       this.consecutiveFailures = 0;
       this.snapshotAt = this.fetchStartedAt;
+      this.snapshot = await this.applySnapshot(fetched);
+      this.rememberDefiniteMergeable(this.snapshot);
     } catch (error51) {
+      if (this.stopped) return `${targetKey(this.target)}: flush skipped \u2014 monitor stopped.`;
       if (this.snapshot === void 0) return `${targetKey(this.target)}: flush failed \u2014 ${error51.message}`;
-      const report2 = buildReport(this.target, this.snapshot, {
+      const report2 = this.buildCurrentReport({
         baselineMs: this.initialAnnouncementPending ? 0 : this.lastFlushAt,
         baselineSnapshot: this.initialAnnouncementPending ? void 0 : this.lastFlushedSnapshot
       });
       return `${report2}
 (note: refresh failed \u2014 ${error51.message}; data is from the previous poll; baseline NOT reset)`;
     }
+    if (this.stopped) return `${targetKey(this.target)}: flush skipped \u2014 monitor stopped.`;
+    if (!this.autoReadyAfterInvalidation) await this.prepareAutomaticReady();
+    if (this.stopped) return `${targetKey(this.target)}: flush skipped \u2014 monitor stopped.`;
     const report = this.flush(void 0);
+    this.afterReportDelivered();
     this.stopIfTerminal();
     return report;
   }
   stop() {
     if (this.stopped) return;
     this.stopped = true;
-    this.deps.onStopped();
+    const finish = () => {
+      try {
+        this.deps.onStopped();
+      } catch (error51) {
+        this.deps.log(`stop observer failed for ${targetKey(this.target)}: ${error51}`);
+      }
+    };
+    if (this.pendingOps === 0) {
+      finish();
+      this.stopCleanup = Promise.resolve();
+      return;
+    }
+    this.stopCleanup = this.opQueue.then(finish, finish);
+  }
+  async waitUntilStopped() {
+    await this.stopCleanup;
+  }
+  stopNotice(reason) {
+    const base = `[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) \u2014 ${reason}`;
+    const snapshot = this.snapshot;
+    const readiness = this.deps.readiness;
+    if (snapshot === void 0 || readiness === void 0) return base;
+    return [
+      base,
+      ...buildReadinessLines({
+        target: this.target,
+        snapshot,
+        readyLabel: readiness.label,
+        replyPrefix: readiness.replyPrefix,
+        readinessError: this.readinessError
+      })
+    ].join("\n");
   }
   handlePollFailure(error51) {
     const message = error51 instanceof Error ? error51.message : String(error51);
     if (error51 instanceof PollError && error51.notFound) {
-      void this.deliverOrLog(`[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) \u2014 Monitor stopped: PR not found (deleted or inaccessible). Last error: ${message}`);
+      void this.deliverOrLog(
+        this.stopNotice(
+          `Monitor stopped: PR not found (deleted or inaccessible). Last error: ${message}`
+        )
+      );
       this.stop();
       return;
     }
     this.consecutiveFailures += 1;
-    this.deps.log(`poll failed for ${targetKey(this.target)} (${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${message}`);
+    this.deps.log(
+      `poll failed for ${targetKey(this.target)} (${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${message}`
+    );
     if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-      void this.deliverOrLog(`[PR Monitor] [${targetKey(this.target)}](${targetUrl(this.target)}) \u2014 Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive poll failures. Last error: ${message}`);
+      void this.deliverOrLog(
+        this.stopNotice(
+          `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive poll failures. Last error: ${message}`
+        )
+      );
       this.stop();
     }
   }
-  /**
-   * Delivery is awaited here rather than fire-and-forget, which keeps it inside
-   * the caller's `runExclusive` op. The rollback below restores exactly the
-   * state a *later* flush would have advanced, so an overlapping delivery that
-   * rejected late could roll a newer report's baseline back and — with `urgent`
-   * restored — fire a duplicate report immediately. Serializing keeps every
-   * rollback about the flush it belongs to. The cost is that ticks skip while a
-   * report is in flight, which is the right behavior anyway: there is nothing
-   * useful to do with a fresher snapshot while the previous report is stuck.
-   */
   async maybeAutoFlush() {
     if (!this.dirty || this.snapshot === void 0) return;
     const now = this.deps.now();
@@ -31646,6 +32059,9 @@ var PrWatch = class {
         forcedHoldMinutes = Math.round(heldMs / 6e4);
       }
     }
+    if (this.stopped) return;
+    if (!this.autoReadyAfterInvalidation) await this.prepareAutomaticReady();
+    if (this.stopped) return;
     const previousFlushAt = this.lastFlushAt;
     const previousFlushedSnapshot = this.lastFlushedSnapshot;
     const previousInitialAnnouncementPending = this.initialAnnouncementPending;
@@ -31655,6 +32071,7 @@ var PrWatch = class {
     try {
       await this.deps.deliver(report);
       this.deliveryFailures = 0;
+      this.afterReportDelivered();
       this.stopIfTerminal();
     } catch (error51) {
       this.lastFlushAt = previousFlushAt;
@@ -31664,11 +32081,74 @@ var PrWatch = class {
       this.holdStartedAt = previousHoldStartedAt;
       this.urgent = previousUrgent;
       this.deliveryFailures += 1;
-      this.deps.log(`report delivery failed for ${targetKey(this.target)} (${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error51}`);
+      this.deps.log(
+        `report delivery failed for ${targetKey(this.target)} (${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error51}`
+      );
       if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
-        this.deps.log(`monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`);
+        this.deps.log(
+          `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`
+        );
         this.stop();
       }
+    }
+  }
+  async prepareAutomaticReady() {
+    const snapshot = this.snapshot;
+    const readiness = this.deps.readiness;
+    if (snapshot === void 0 || readiness === void 0 || snapshot.state !== "OPEN" || hasReadyLabel(snapshot, readiness.label) || !assessAutomaticReadiness(snapshot).eligible) {
+      return;
+    }
+    this.snapshot = await this.changeSnapshotReadiness(snapshot, true);
+  }
+  async changeSnapshotReadiness(snapshot, ready) {
+    const readiness = this.deps.readiness;
+    if (readiness === void 0) return snapshot;
+    try {
+      await readiness.change(ready);
+      if (this.stopped) return withReadyLabel(snapshot, readiness.label, ready);
+      this.clearReadinessFailure();
+      this.notifyReadyChanged(ready);
+      return withReadyLabel(snapshot, readiness.label, ready);
+    } catch (error51) {
+      const action = ready ? "add" : "remove";
+      const message = `could not ${action} label "${readiness.label}": ${error51 instanceof Error ? error51.message : String(error51)}`;
+      if (this.readinessRetry !== ready || this.readinessRetryBaseline === void 0) {
+        this.readinessRetryBaseline = snapshot;
+      }
+      this.readinessRetry = ready;
+      this.readinessError = message;
+      if (message !== this.reportedReadinessError) {
+        this.dirty = true;
+        this.urgent = true;
+      }
+      this.deps.log(`readiness automation failed for ${targetKey(this.target)}: ${message}`);
+      return snapshot;
+    }
+  }
+  clearReadinessFailure() {
+    this.readinessRetry = void 0;
+    this.readinessRetryBaseline = void 0;
+    this.readinessError = void 0;
+    this.reportedReadinessError = void 0;
+  }
+  notifyReadyChanged(ready) {
+    try {
+      this.deps.readiness?.onChanged(ready);
+    } catch (error51) {
+      this.deps.log(`ready-state observer failed for ${targetKey(this.target)}: ${error51}`);
+    }
+  }
+  afterReportDelivered() {
+    this.reportedReadinessError = this.readinessError;
+    if (!this.autoReadyAfterInvalidation) return;
+    this.autoReadyAfterInvalidation = false;
+    const snapshot = this.snapshot;
+    const readiness = this.deps.readiness;
+    if (snapshot !== void 0 && readiness !== void 0 && snapshot.state === "OPEN" && !hasReadyLabel(snapshot, readiness.label) && assessAutomaticReadiness(snapshot).eligible) {
+      this.dirty = true;
+      this.lastActivityAt = this.deps.now();
+      this.holdStartedAt = void 0;
+      this.urgent = false;
     }
   }
   async deliverOrLog(message) {
@@ -31680,9 +32160,24 @@ var PrWatch = class {
       return false;
     }
   }
+  buildCurrentReport({
+    baselineMs,
+    baselineSnapshot,
+    forcedHoldMinutes
+  }) {
+    const readiness = this.deps.readiness;
+    return buildReport(this.target, this.snapshot, {
+      baselineMs,
+      baselineSnapshot,
+      forcedHoldMinutes,
+      readyLabel: readiness?.label,
+      replyPrefix: readiness?.replyPrefix,
+      readinessError: this.readinessError
+    });
+  }
   flush(forcedHoldMinutes) {
     const snapshot = this.snapshot;
-    const report = buildReport(this.target, snapshot, {
+    const report = this.buildCurrentReport({
       baselineMs: this.initialAnnouncementPending ? 0 : this.lastFlushAt,
       baselineSnapshot: this.initialAnnouncementPending ? void 0 : this.lastFlushedSnapshot,
       forcedHoldMinutes
@@ -31715,7 +32210,7 @@ function buildMonitorToolDescription({
   lifecycle,
   waiting
 }) {
-  return `Monitor a GitHub PR in the background. Detects CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports state facts only. A newly failing check (when flushOnCiFailure is enabled), merge conflict, or terminal PR state skips debounce and is reported at the next poll. The monitor itself owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting for CI or review. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (add the configured ready label after CI/review is clean; never claim handoff unless it confirms success), and unmark_ready (withdraw it before handling later feedback). Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Tuning lives in ${configPath}. ${lifecycle}`;
+  return `Monitor a GitHub PR in the background. Detects head changes, CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states whether the configured ready label is present and tells the agent to keep working or manually mark ready when judgment says no action remains. The monitor automatically adds readiness when CI is passing (or absent), mergeability is definite, and every feedback channel ends in a correctly prefixed local-account reply. It withdraws readiness on later commits, relevant comments, CI regression, or conflict. A newly failing check (when flushOnCiFailure is enabled), readiness withdrawal, merge conflict, or terminal state skips debounce. The monitor owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a later clean assessment). Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Tuning lives in ${configPath}. ${lifecycle}`;
 }
 
 // runtime/monitor-session.ts
@@ -31758,7 +32253,7 @@ var MonitorSession = class {
         return await this.start({ pr, options: start, loadConfig: actionLoadConfig });
       case "stop" /* stop */:
         if (!pr) return { text: "action 'stop' requires pr: 'owner/repo#123', a PR URL, or 'all'." };
-        return this.stop({ pr });
+        return await this.stop({ pr });
       case "flush" /* flush */:
         if (!pr) return { text: "action 'flush' requires pr: 'owner/repo#123', a PR URL, or 'all'." };
         return await this.flush({ pr });
@@ -31783,10 +32278,11 @@ var MonitorSession = class {
     this.lifecycleGeneration += 1;
     const entries = [...this.watches.values()];
     for (const entry of entries) entry.watch.stop();
+    await Promise.all(entries.map((entry) => entry.watch.waitUntilStopped()));
     if (notice === void 0) return;
     await Promise.all(
       entries.map(async (entry) => {
-        const report = `[PR Monitor] [${targetKey(entry.watch.target)}](${targetUrl(entry.watch.target)}) \u2014 ${notice}`;
+        const report = entry.watch.stopNotice(notice);
         const send = channel === "persistent" /* persistent */ ? entry.channel.persist ?? entry.channel.deliver : entry.channel.deliver;
         try {
           await send({ report });
@@ -31826,7 +32322,7 @@ ${existing.watch.statusLine()}` };
       } catch (error51) {
         this.selfLoginPromise = void 0;
         return {
-          text: `Cannot start monitor: ignoreCommentTag is configured but resolving the authenticated gh user failed (${error51.message}). Run \`gh auth status\` to check.`
+          text: `Cannot start monitor: resolving the authenticated gh user for the reply prefix failed (${error51.message}). Run \`gh auth status\` to check.`
         };
       }
     }
@@ -31863,6 +32359,12 @@ ${raced.watch.statusLine()}` };
             this.watches.delete(key);
             this.notifyWatchChanged({ type: "stopped" /* stopped */, target, config: config2 });
           }
+        },
+        readiness: {
+          label: config2.readyLabel,
+          replyPrefix: config2.ignoreCommentTag ?? "<!-- pr-monitor:reply -->",
+          change: (ready) => ready ? markReadyForHumanReview(this.deps.runGh, target, config2.readyLabel) : removeReadyForHumanReview(this.deps.runGh, target, config2.readyLabel),
+          onChanged: (ready) => this.notifyReadyChanged({ target, ready, watched: true, config: config2 })
         }
       }
     });
@@ -31875,16 +32377,20 @@ ${raced.watch.statusLine()}` };
     this.watches.set(key, { watch, timer, config: config2, channel: reportChannel });
     this.notifyWatchChanged({ type: "started" /* started */, target, config: config2 });
     let announcement = "disabled" /* disabled */;
-    if (config2.announceOnStart) {
-      if (options.announcementMode === "await_delivery" /* awaitDelivery */) {
+    if (options.announcementMode === "await_delivery" /* awaitDelivery */) {
+      if (config2.announceOnStart) {
         announcement = await watch.announceInitial() ? "delivered" /* delivered */ : "retrying" /* retrying */;
-        if (watch.isStopped) {
-          return { text: `Monitor for ${displayKey} stopped before startup completed; no active monitor remains.` };
-        }
       } else {
-        announcement = "pending" /* pending */;
-        void watch.announceInitial();
+        await watch.initializeReadiness();
       }
+      if (watch.isStopped) {
+        return { text: `Monitor for ${displayKey} stopped before startup completed; no active monitor remains.` };
+      }
+    } else if (config2.announceOnStart) {
+      announcement = "pending" /* pending */;
+      void watch.announceInitial();
+    } else {
+      void watch.initializeReadiness();
     }
     this.deps.log(`started monitoring ${displayKey}`);
     return {
@@ -31904,11 +32410,12 @@ ${raced.watch.statusLine()}` };
     }
     return [entry];
   }
-  stop({ pr }) {
+  async stop({ pr }) {
     const selected = this.select({ pr });
     if ("error" in selected) return { text: selected.error };
     if (selected.length === 0) return { text: "No active monitors in this session." };
     for (const entry of selected) entry.watch.stop();
+    await Promise.all(selected.map((entry) => entry.watch.waitUntilStopped()));
     return {
       text: `Stopped ${selected.length} monitor(s): ${selected.map((entry) => targetKey(entry.watch.target)).join(", ")}.`
     };
@@ -31942,13 +32449,18 @@ ${raced.watch.statusLine()}` };
     const key = targetRegistryKey(target);
     const displayKey = targetKey(target);
     try {
+      const watchedEntry = this.watches.get(key);
+      if (watchedEntry !== void 0) {
+        const text2 = await watchedEntry.watch.manualSetReady(ready);
+        return {
+          text: text2,
+          ready: { target: watchedEntry.watch.target, ready, watched: true }
+        };
+      }
       const config2 = await loadConfig();
       const text = ready ? await markReadyForHumanReview(this.deps.runGh, target, config2.readyLabel) : await removeReadyForHumanReview(this.deps.runGh, target, config2.readyLabel);
-      const watchedEntry = this.watches.get(key);
-      const watched = watchedEntry !== void 0;
-      const eventTarget = watchedEntry?.watch.target ?? target;
-      this.notifyReadyChanged({ target: eventTarget, ready, watched, config: config2 });
-      return { text, ready: { target: eventTarget, ready, watched } };
+      this.notifyReadyChanged({ target, ready, watched: false, config: config2 });
+      return { text, ready: { target, ready, watched: false } };
     } catch (error51) {
       const action = ready ? `mark ${displayKey} as ready for human review` : `withdraw the ready-for-human-review label from ${displayKey}`;
       return { text: `Cannot ${action}: ${error51.message}` };
@@ -32185,7 +32697,6 @@ var deliver = ({
   report
 }) => {
   spoolReport(claudePid, report);
-  handedOff.delete(targetRegistryKey(target));
   extendKeepAlive({ config: config2 });
   refreshSessionState();
   if (config2.desktopNotifications) {
@@ -32203,9 +32714,12 @@ monitorSession = new MonitorSession({
     refreshSessionState();
   },
   onTickSettled: refreshSessionState,
-  onReadyChanged: ({ target, ready, watched }) => {
+  onReadyChanged: ({ target, ready, watched, config: config2 }) => {
     if (ready && watched) handedOff.add(targetRegistryKey(target));
-    if (!ready) handedOff.delete(targetRegistryKey(target));
+    if (!ready) {
+      handedOff.delete(targetRegistryKey(target));
+      if (watched) extendKeepAlive({ config: config2 });
+    }
     refreshSessionState();
   },
   statusSuffix: ({ target }) => handedOff.has(targetRegistryKey(target)) ? ", handed off for human review" : ""
@@ -32221,8 +32735,9 @@ var prepareStart = async () => {
 var formatResult = ({ result }) => {
   if (result.start !== void 0) {
     const { config: config2, announcement } = result.start;
+    const replyPrefix = config2.ignoreCommentTag ?? "<!-- pr-monitor:reply -->";
     return `${result.text}
-` + (config2.announceOnStart ? announcement === "delivered" /* delivered */ ? "An initial [PR Monitor] report is spooled for the next hook event. " : "Initial delivery failed and will retry at the next poll without losing its baseline. " : "") + `Polling every ${config2.pollIntervalSeconds}s; settled activity is injected automatically at the next tool call, user message, or turn end after ${config2.debounceMinutes} quiet minutes. ` + (config2.flushOnCiFailure ? "A failing check is reported at the next poll without waiting for the quiet window or the rest of CI. " : "") + "A new merge conflict or terminal state is also immediate. Never invent sleeps, scheduled checks, polling loops, repeated CI checks, or routine status/flush calls. The monitor stops on merge/close and does not survive this Claude Code session." + (config2.keepAlive ? "\nKeep-alive is on until mark_ready succeeds. Run only the exact await-activity command supplied by a [PR Monitor keep-alive] message; do not create another waiting mechanism." : "");
+` + (config2.announceOnStart ? announcement === "delivered" /* delivered */ ? "An initial [PR Monitor] report is spooled for the next hook event. " : "Initial delivery failed and will retry at the next poll without losing its baseline. " : "") + `Polling every ${config2.pollIntervalSeconds}s; settled activity is injected automatically at the next tool call, user message, or turn end after ${config2.debounceMinutes} quiet minutes. ` + (config2.flushOnCiFailure ? "A failing check is reported at the next poll without waiting for the quiet window or the rest of CI. " : "") + `A new merge conflict or terminal state is also immediate. Readiness is managed automatically; agent-authored GitHub replies must begin with \`${replyPrefix}\`. Use mark_ready when new feedback is non-actionable and no reply should be posted. Never invent sleeps, scheduled checks, polling loops, repeated CI checks, or routine status/flush calls. The monitor stops on merge/close and does not survive this Claude Code session.` + (config2.keepAlive ? "\nKeep-alive follows the ready label. Run only the exact await-activity command supplied by a [PR Monitor keep-alive] message; do not create another waiting mechanism." : "");
   }
   if (result.ready?.ready && result.ready.watched) {
     return `${result.text}

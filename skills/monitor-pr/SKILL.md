@@ -3,146 +3,112 @@ name: monitor-pr
 description: >-
   Drive a GitHub PR to ready-for-human-review without supervision. Start
   pr_monitor immediately after opening a PR and act on every automatic report;
-  the monitor owns polling, so never create sleeps, scheduled checks, or polling
-  loops. Address review comments, failing CI, and conflicts, label the PR ready
-  only after mark_ready confirms success, and take work back when a human
-  responds. Use after raising a PR, when asked to watch one, and whenever a
-  "[PR Monitor]" message appears.
+  the monitor owns polling and readiness labels, so never create sleeps,
+  scheduled checks, or polling loops. Address new feedback on every changed
+  thread, failing CI, and conflicts. Use after raising a PR, when asked to watch
+  one, and whenever a "[PR Monitor]" message appears.
 ---
 
 # monitor-pr
 
-Own a PR from the moment it is opened until a human needs to look at it, then
-hand it over — and take it back if the human responds.
-
-The `pr_monitor` tool owns GitHub polling and delivers factual `[PR Monitor]`
-reports into this session automatically. This skill turns those reports into
-work; it must never create a second waiting or polling mechanism.
-
-## The loop
-
-```
-open PR ─▶ start ─▶ ┌─ report ─▶ address everything ─┐
-                     └────── still not clean ◀────────┘
-                                                     │ clean
-                                                     ▼
-                                              mark_ready (handoff)
-                                                     │
-                                    human comments ──┘
-                                          │
-                            unmark_ready ─┘ ──▶ back into the loop
-```
+Own a PR from creation through handoff. The monitor polls GitHub, delivers
+reports, and automatically adds or withdraws the configured ready label. The
+agent owns the substantive judgment: inspect every new comment, fix what is
+valid, and use `mark_ready` when new activity is non-actionable and deliberately
+needs no GitHub reply.
 
 ## 1. Start monitoring immediately
 
-Right after raising a PR, without waiting for another prompt:
+Right after raising a PR:
 
 ```
 pr_monitor(action: "start", pr: "owner/repo#123")
 ```
 
-- `pr` is always explicit: `owner/repo#123` or a full PR URL, never a bare number.
-- Start one monitor for each PR.
-- Monitors are session-scoped and do not survive a session replacement or host
-  restart. In a fresh session, use `status` once and restart anything missing.
-- Tuning lives in repository `.pr-monitor.json`, the host config directory's
-  `pr-monitor.json`, or `.opencode/pr-monitor.json`, never in tool arguments.
+- Always pass an explicit PR; never infer it from the working directory.
+- Start one monitor per PR. In a fresh session, use `status` once and restart a
+  missing watch.
+- The start result states the configured agent-reply prefix. Every GitHub reply
+  authored by the agent **must begin with that exact prefix** (default
+  `<!-- pr-monitor:reply -->`). A comment from the local GitHub account without
+  the prefix is human feedback, not an agent reply.
 
-## 2. Handle every `[PR Monitor]` report
+## 2. Handle every report
 
-Reports state facts only. Address everything in a report in one batch:
+Address everything in one batch:
 
-- **`CI: failing (…)`:** Inspect with `gh pr checks` and
-  `gh run view --log-failed`, fix the root cause, test, commit, and push. Never
-  delete or weaken tests to make CI green.
-- **`Mergeable: CONFLICTING`:** Resolve the real base with
-  `gh pr view --json baseRefName`, then fetch and merge
-  `origin/<baseRefName>` into the PR branch. Never rebase or force-push.
-  Preserve both sides, test, and push the merge commit.
-- **Threads received new comments / `changes_requested`:** Follow the
-  repository's PR-comment skill when available. Inspect recent comments across
-  every thread, including resolved threads. Validate each comment, fix valid
-  findings, reply, and resolve what was fixed.
-- **New issue comments:** Read them with `gh pr view --comments` and act only
-  when they request work.
-- **`CI: running (… failed so far …)`:** A check is already red. Start on the
-  named failure exactly as for `CI: failing`; do not wait for the suite.
-- **`CI: running` with no failure:** End the turn and let the monitor notify you.
-- **`— MERGED` / `— CLOSED`:** The monitor stopped itself. Done.
+- **CI failing, including a failure while CI is running:** inspect the named
+  checks, fix the root cause, test, commit, and push. Never delete or weaken a
+  test to make CI green.
+- **Mergeable: CONFLICTING:** fetch the actual base and merge it into the PR
+  branch. Never rebase or force-push. Resolve conservatively, test, and push.
+- **`ACTION REQUIRED` inline feedback:** inspect every thread that received a
+  new relevant comment. The unresolved-thread count may be unchanged, and the
+  thread may already be resolved. Neither fact means the follow-up was handled.
+- **New review summaries or issue comments:** fetch their bodies and assess
+  them. Reports intentionally contain authors/counts, not comment bodies.
+- **A local-account, unprefixed comment:** treat it as a human instruction even
+  though the agent uses the same GitHub account.
+- **Merged/closed:** monitoring stopped; no further action.
 
-A delivered report already advances the "new since last flush" baseline. Never
-call `flush` routinely after handling one.
+When taking action, reply on GitHub with the configured prefix first. It is the
+monitor's authoritative evidence that the latest feedback on that channel was
+handled. Threads may remain unresolved intentionally for a human reviewer; a
+prefixed final reply is what matters for automatic readiness.
 
-Comments from the account used to push are not necessarily agent-authored. The
-agent's own replies are filtered only when they contain the configured
-`ignoreCommentTag`; any owner-account comment that reaches a report may be a
-human instruction and must be inspected.
+A delivered report already advances its "new since last flush" baseline. Never
+call `flush` routinely after handling it.
 
-An unchanged unresolved-thread count does not mean there is no new feedback.
-When a report says a thread received comments, inspect it even if that thread is
-currently resolved or was answered before.
+## 3. Respect the readiness line
 
-## 3. Hand off only when genuinely clean
+Every report states one of:
 
-Mark the PR ready only when the latest report shows all of:
+- `Ready for human review: YES` — the GitHub label is present. Do not remove it
+  merely because a thread was resolved, an approval arrived, or another
+  readiness-preserving report was delivered.
+- `Ready for human review: NO` — keep working until the report's blockers are
+  handled, or manually accept the current state when judgment says no action is
+  required.
 
-- `CI: passing`, or `CI: none` when the repository has no checks;
-- `Mergeable: MERGEABLE`;
-- zero unresolved threads;
-- no pending requested reviewers;
-- no outstanding `changes_requested`; and
-- every review comment answered. A reasoned declined finding with a reply is
-  answered even if its thread remains unresolved intentionally.
+Automatic readiness requires green/no CI, definite mergeability, and a
+prefixed local reply after the latest feedback in every threaded or flat
+feedback channel. It deliberately ignores unresolved-thread count, stale
+`CHANGES_REQUESTED`, pending reviewers, and draft state.
 
-Then call:
+A new commit, relevant comment/review summary, CI regression, or definite
+conflict withdraws readiness. Thread resolution alone does not.
+
+## 4. Handle non-actionable bot acknowledgements without a loop
+
+A bot may post an acknowledgement after a fix. That new activity correctly
+withdraws readiness, but replying merely to acknowledge the acknowledgement can
+create an endless bot loop.
+
+1. Fetch and inspect the comment.
+2. If it asks for work, do the work and leave a prefixed reply.
+3. If it is non-actionable, **do not reply**. Manually accept the current state:
 
 ```
 pr_monitor(action: "mark_ready", pr: "owner/repo#123")
 ```
 
-This adds the configured `readyLabel` on GitHub. It is a handoff only after the
-tool confirms success. Report the handoff to the user in one line and end the
-turn. If `mark_ready` fails, do not claim success: diagnose the GitHub or config
-error and retry while the monitor remains active.
+`mark_ready` is an unconditional judgment override. It accepts all activity
+currently observed by the watch and adds the label. Only later invalidating
+activity withdraws it again. Claim handoff only after the tool confirms success.
 
-Do not hand off while CI is running, a reviewer is pending, or feedback remains
-unanswered.
+`unmark_ready` removes the label now, but it is not a permanent hold; automatic
+readiness may restore it after a later clean assessment.
 
-## 4. Never invent a wait
+## 5. Never invent a wait
 
-The monitor owns polling and notifications arrive automatically. Never run
-`sleep`, delayed Bash, cron, a scheduled job, a background polling loop,
-repeated `gh pr checks`, or routine `pr_monitor status`/`flush` calls while
-waiting for CI or review. Do not launch a waiter immediately after `start`.
-
-When there is no delivered report to act on, end the turn. The host's native
-message delivery wakes this session when activity arrives. If the user asks you
-to stop or work elsewhere, call `pr_monitor(action: "stop", pr: "all")`; the
-user always wins over this loop.
-
-## 5. Take handed-off work back
-
-A handed-off PR remains monitored. When a human comments or requests changes,
-the next report makes the PR your job again:
-
-1. Call `pr_monitor(action: "unmark_ready", pr: "owner/repo#123")` first so the
-   PR no longer advertises itself as ready while work is active.
-2. Handle the report exactly as in step 2.
-3. Re-check step 3 and hand off again when clean.
-
-The report's `Labels` line shows whether the configured ready label is present.
-
-## Other actions
-
-- `status`: list this session's monitors. Use deliberately, not as a wait loop.
-- `flush`: request a full status report now. Never call it routinely after a
-  delivered report.
-- `stop`: stop one monitor or all monitors without waiting for merge.
+The monitor owns polling and notifications. Never create sleeps, delayed jobs,
+cron, background polling loops, repeated `gh pr checks`, or routine
+`status`/`flush` calls. When there is no delivered report to handle, end the
+turn and rely on host-native delivery.
 
 ## Avoid the bot-review spiral
 
-Every push can trigger another AI review. A bot-reported edge case earns a code
-change only when it is plausible in a real flow and has a real consequence.
-Contrived cases get a reasoned reply instead. If several rounds cluster on one
-structural seam, fix the seam once or surface it to the user rather than
-patching point by point.
+Every push can trigger another review wave. A bot edge case earns a code change
+only when it is plausible and consequential. Decline contrived findings with a
+prefixed reasoned reply. If several rounds cluster on one seam, fix the seam
+once or surface the concern rather than accumulating patches.

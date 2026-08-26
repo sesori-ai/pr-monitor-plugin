@@ -32,7 +32,15 @@ function config(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
   }
 }
 
-function payload({ number = 42, state = "OPEN" }: { number?: number; state?: PrSnapshot["state"] } = {}): string {
+function payload({
+  number = 42,
+  state = "OPEN",
+  mergeable = "MERGEABLE",
+}: {
+  number?: number
+  state?: PrSnapshot["state"]
+  mergeable?: PrSnapshot["mergeable"]
+} = {}): string {
   return JSON.stringify({
     data: {
       repository: {
@@ -40,7 +48,7 @@ function payload({ number = 42, state = "OPEN" }: { number?: number; state?: PrS
           title: `test PR ${number}`,
           url: `https://github.com/sesori/example/pull/${number}`,
           state,
-          mergeable: "MERGEABLE",
+          mergeable,
           headRefOid: `head-${number}`,
           commits: { nodes: [] },
           reviewRequests: { nodes: [] },
@@ -61,7 +69,9 @@ type RunnerState = {
   labelAdded: boolean
 }
 
-function runnerHarness(): { runGh: GhRunner; state: RunnerState } {
+function runnerHarness(
+  options: { mergeable?: PrSnapshot["mergeable"] } = {},
+): { runGh: GhRunner; state: RunnerState } {
   const state: RunnerState = { calls: [], userCalls: 0, failLabelAdd: false, labelAdded: false }
   const runGh: GhRunner = async (args) => {
     state.calls.push(args)
@@ -71,7 +81,7 @@ function runnerHarness(): { runGh: GhRunner; state: RunnerState } {
     }
     if (args[0] === "api" && args[1] === "graphql") {
       const rawNumber = args.find((arg) => arg.startsWith("number="))?.slice("number=".length)
-      return payload({ number: Number(rawNumber ?? 42) })
+      return payload({ number: Number(rawNumber ?? 42), mergeable: options.mergeable })
     }
     const route = args.find((arg) => arg.startsWith("repos/")) ?? ""
     if (route.includes("/pulls/")) return JSON.stringify({ state: "open", merged: false })
@@ -260,6 +270,58 @@ test("lifecycle cleanup invalidates a start that is still loading", async () => 
   assert.equal(timers.timers.length, 0)
 })
 
+test("session cleanup keeps a stopped watch registered until its label mutation drains", async () => {
+  const runner = runnerHarness()
+  const timers = timerHarness()
+  const channel = channelHarness()
+  let releaseMutation!: () => void
+  let announceMutation!: () => void
+  const mutationStarted = new Promise<void>((resolve) => {
+    announceMutation = resolve
+  })
+  const mutationGate = new Promise<void>((resolve) => {
+    releaseMutation = resolve
+  })
+  const runGh: GhRunner = async (args) => {
+    const route = args.find((arg) => arg.startsWith("repos/")) ?? ""
+    if (route.includes("/issues/") && !args.includes("DELETE")) {
+      announceMutation()
+      await mutationGate
+    }
+    return await runner.runGh(args)
+  }
+  const session = new MonitorSession({
+    runGh,
+    loadConfig: async () => config(),
+    log: () => {},
+    schedule: timers.schedule,
+    cancel: timers.cancel,
+  })
+  const backgroundStart = {
+    announcementMode: InitialAnnouncementMode.background,
+    createChannel: () => channel.channel,
+  }
+
+  await session.execute({
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    start: backgroundStart,
+  })
+  await mutationStarted
+  const stopping = session.stopAll({})
+  const raced = await session.execute({
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    start: backgroundStart,
+  })
+
+  assert.match(raced.text, /Already monitoring/)
+  assert.equal(session.list().length, 1)
+  releaseMutation()
+  await stopping
+  assert.equal(session.list().length, 0)
+})
+
 test("persistent shutdown notices use the persistent channel and clear every timer", async () => {
   const runner = runnerHarness()
   const timers = timerHarness()
@@ -289,11 +351,12 @@ test("persistent shutdown notices use the persistent channel and clear every tim
     assert.equal(harness.delivered.length, 0)
     assert.equal(harness.persisted.length, 1)
     assert.match(harness.persisted[0]!, /Monitor stopped for test/)
+    assert.match(harness.persisted[0]!, /Ready for human review: YES|Ready for human review: NO/)
   }
 })
 
 test("ready handoff follows label success and the watched target identity", async () => {
-  const runner = runnerHarness()
+  const runner = runnerHarness({ mergeable: "UNKNOWN" })
   const timers = timerHarness()
   const channel = channelHarness()
   const handedOff = new Set<string>()
@@ -320,21 +383,21 @@ test("ready handoff follows label success and the watched target identity", asyn
   runner.state.failLabelAdd = true
   const failed = await session.execute({ action: MonitorAction.markReady, pr: "sesori/example#42" })
   assert.match(failed.text, /Cannot mark/)
-  assert.deepEqual(readyEvents, [])
+  assert.deepEqual(readyEvents, [false])
   assert.equal(handedOff.size, 0)
 
   runner.state.failLabelAdd = false
   const ready = await session.execute({ action: MonitorAction.markReady, pr: "SESORI/Example#42" })
   assert.match(ready.text, /label "ready-for-human-review" added/)
-  assert.deepEqual(readyEvents, [true])
-  assert.deepEqual(readyTargets, ["sesori/example#42"])
+  assert.deepEqual(readyEvents, [false, true])
+  assert.deepEqual(readyTargets, ["sesori/example#42", "sesori/example#42"])
   const status = await session.execute({ action: MonitorAction.status, pr: undefined })
   assert.match(status.text, /handed off for human review/)
 
   const unready = await session.execute({ action: MonitorAction.unmarkReady, pr: "SESORI/Example#42" })
   assert.match(unready.text, /no longer flagged for human review/)
-  assert.deepEqual(readyEvents, [true, false])
-  assert.deepEqual(readyTargets, ["sesori/example#42", "sesori/example#42"])
+  assert.deepEqual(readyEvents, [false, true, false])
+  assert.deepEqual(readyTargets, ["sesori/example#42", "sesori/example#42", "sesori/example#42"])
   assert.equal(handedOff.size, 0)
   await session.stopAll({})
 })
@@ -351,4 +414,6 @@ test("tool wording makes autonomous delivery and the no-delay rule explicit", ()
   assert.match(description, /routine status\/flush/)
   assert.match(description, /when flushOnCiFailure is enabled/)
   assert.match(description, /configured ready label/)
+  assert.match(description, /automatically adds readiness/)
+  assert.match(description, /unconditionally accept current state/)
 })

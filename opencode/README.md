@@ -1,7 +1,7 @@
 # @sesori/pr-monitor-opencode
 
-OpenCode plugin that watches GitHub pull requests in the background and delivers factual `[PR Monitor]` reports to
-the session that started each watch.
+OpenCode plugin that watches GitHub pull requests, manages ready-for-human-review state, and delivers `[PR Monitor]`
+reports to the session that started each watch.
 
 ## Install
 
@@ -21,10 +21,12 @@ Requirements: OpenCode 1.17 or newer, plus an installed and authenticated GitHub
 The plugin registers `pr_monitor` actions for `start`, `stop`, `flush`, `status`, `mark_ready`, and `unmark_ready`.
 It also injects one packaged `monitor-pr` skill through OpenCode's configured skill paths, so consuming repositories
 do not need their own copy. The skill tells the agent to start monitoring after opening a PR, handle every automatic
-report, confirm the ready label before handoff, and end the turn instead of creating a second wait mechanism.
+report, use prefixed GitHub replies as acknowledgement evidence, and end the turn instead of creating a second wait
+mechanism.
 
-The monitor reports CI conclusions and new failures, reviews and comments, merge conflicts, and merged/closed state.
-Reports contain facts only and are delivered into the owning OpenCode session.
+The monitor reports commits, CI, reviews/comments, conflicts, and terminal state. It automatically adds readiness
+when the current head is clean and feedback is acknowledged, then withdraws it on later commits or relevant feedback.
+Every report states readiness and contains no comment bodies.
 
 The monitor owns all polling and notifications arrive automatically. Agents must never create sleeps, scheduled
 checks, background polling loops, repeated `gh pr checks`, or routine `status`/`flush` calls while waiting.
@@ -37,7 +39,7 @@ and do not survive an OpenCode restart.
 Use repository `.pr-monitor.json`; `.opencode/pr-monitor.json` remains a fallback. Available settings:
 
 - `debounceMinutes`, `maxCiWaitMinutes`, and `pollIntervalSeconds`
-- `ignoreCommentTag`
+- `ignoreCommentTag` (mandatory agent-reply prefix; default `<!-- pr-monitor:reply -->`)
 - `announceOnStart` and `flushOnCiFailure`
 - `readyLabel`
 

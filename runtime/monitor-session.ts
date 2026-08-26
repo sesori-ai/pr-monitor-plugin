@@ -5,7 +5,7 @@
 import type { MonitorConfig } from "../core/config"
 import { fetchPrSnapshot, type GhRunner, type PrSnapshot } from "../core/github"
 import { markReadyForHumanReview, removeReadyForHumanReview } from "../core/label"
-import { parseTarget, targetKey, targetRegistryKey, targetUrl, type Target } from "../core/target"
+import { parseTarget, targetKey, targetRegistryKey, type Target } from "../core/target"
 import { PrWatch } from "../core/watch"
 import { MonitorAction } from "./tool"
 
@@ -139,7 +139,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
         return await this.start({ pr, options: start, loadConfig: actionLoadConfig })
       case MonitorAction.stop:
         if (!pr) return { text: "action 'stop' requires pr: 'owner/repo#123', a PR URL, or 'all'." }
-        return this.stop({ pr })
+        return await this.stop({ pr })
       case MonitorAction.flush:
         if (!pr) return { text: "action 'flush' requires pr: 'owner/repo#123', a PR URL, or 'all'." }
         return await this.flush({ pr })
@@ -168,11 +168,12 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     this.lifecycleGeneration += 1
     const entries = [...this.watches.values()]
     for (const entry of entries) entry.watch.stop()
+    await Promise.all(entries.map((entry) => entry.watch.waitUntilStopped()))
     if (notice === undefined) return
 
     await Promise.all(
       entries.map(async (entry) => {
-        const report = `[PR Monitor] [${targetKey(entry.watch.target)}](${targetUrl(entry.watch.target)}) — ${notice}`
+        const report = entry.watch.stopNotice(notice)
         const send =
           channel === StopNoticeChannel.persistent
             ? (entry.channel.persist ?? entry.channel.deliver)
@@ -222,7 +223,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
         this.selfLoginPromise = undefined
         return {
           text:
-            `Cannot start monitor: ignoreCommentTag is configured but resolving the authenticated gh user failed ` +
+            "Cannot start monitor: resolving the authenticated gh user for the reply prefix failed " +
             `(${(error as Error).message}). Run \`gh auth status\` to check.`,
         }
       }
@@ -263,6 +264,15 @@ export class MonitorSession<TConfig extends MonitorConfig> {
             this.notifyWatchChanged({ type: WatchChangeType.stopped, target, config })
           }
         },
+        readiness: {
+          label: config.readyLabel,
+          replyPrefix: config.ignoreCommentTag ?? "<!-- pr-monitor:reply -->",
+          change: (ready) =>
+            ready
+              ? markReadyForHumanReview(this.deps.runGh, target, config.readyLabel)
+              : removeReadyForHumanReview(this.deps.runGh, target, config.readyLabel),
+          onChanged: (ready) => this.notifyReadyChanged({ target, ready, watched: true, config }),
+        },
       },
     })
     timer = this.deps.schedule({
@@ -275,18 +285,22 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     this.notifyWatchChanged({ type: WatchChangeType.started, target, config })
 
     let announcement = InitialAnnouncementState.disabled
-    if (config.announceOnStart) {
-      if (options.announcementMode === InitialAnnouncementMode.awaitDelivery) {
+    if (options.announcementMode === InitialAnnouncementMode.awaitDelivery) {
+      if (config.announceOnStart) {
         announcement = (await watch.announceInitial())
           ? InitialAnnouncementState.delivered
           : InitialAnnouncementState.retrying
-        if (watch.isStopped) {
-          return { text: `Monitor for ${displayKey} stopped before startup completed; no active monitor remains.` }
-        }
       } else {
-        announcement = InitialAnnouncementState.pending
-        void watch.announceInitial()
+        await watch.initializeReadiness()
       }
+      if (watch.isStopped) {
+        return { text: `Monitor for ${displayKey} stopped before startup completed; no active monitor remains.` }
+      }
+    } else if (config.announceOnStart) {
+      announcement = InitialAnnouncementState.pending
+      void watch.announceInitial()
+    } else {
+      void watch.initializeReadiness()
     }
 
     this.deps.log(`started monitoring ${displayKey}`)
@@ -309,11 +323,12 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     return [entry]
   }
 
-  private stop({ pr }: { pr: string }): MonitorActionResult<TConfig> {
+  private async stop({ pr }: { pr: string }): Promise<MonitorActionResult<TConfig>> {
     const selected = this.select({ pr })
     if ("error" in selected) return { text: selected.error }
     if (selected.length === 0) return { text: "No active monitors in this session." }
     for (const entry of selected) entry.watch.stop()
+    await Promise.all(selected.map((entry) => entry.watch.waitUntilStopped()))
     return {
       text:
         `Stopped ${selected.length} monitor(s): ` +
@@ -358,15 +373,20 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     const key = targetRegistryKey(target)
     const displayKey = targetKey(target)
     try {
+      const watchedEntry = this.watches.get(key)
+      if (watchedEntry !== undefined) {
+        const text = await watchedEntry.watch.manualSetReady(ready)
+        return {
+          text,
+          ready: { target: watchedEntry.watch.target, ready, watched: true },
+        }
+      }
       const config = await loadConfig()
       const text = ready
         ? await markReadyForHumanReview(this.deps.runGh, target, config.readyLabel)
         : await removeReadyForHumanReview(this.deps.runGh, target, config.readyLabel)
-      const watchedEntry = this.watches.get(key)
-      const watched = watchedEntry !== undefined
-      const eventTarget = watchedEntry?.watch.target ?? target
-      this.notifyReadyChanged({ target: eventTarget, ready, watched, config })
-      return { text, ready: { target: eventTarget, ready, watched } }
+      this.notifyReadyChanged({ target, ready, watched: false, config })
+      return { text, ready: { target, ready, watched: false } }
     } catch (error) {
       const action = ready
         ? `mark ${displayKey} as ready for human review`

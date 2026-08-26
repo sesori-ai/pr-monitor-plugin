@@ -78,6 +78,7 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
   const formatResult = ({ result }: { result: MonitorActionResult<MonitorConfig> }): string => {
     if (result.start === undefined) return result.text
     const { config, announcement } = result.start
+    const replyPrefix = config.ignoreCommentTag ?? "<!-- pr-monitor:reply -->"
     return (
       `${result.text}\n` +
       (announcement === InitialAnnouncementState.pending
@@ -89,6 +90,8 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
         ? "A failing check is reported at the next poll without waiting for that quiet window or the rest of CI. "
         : "") +
       "A new merge conflict or terminal PR state is also reported at the next poll without waiting. " +
+      `Readiness is managed automatically; agent-authored GitHub replies must begin with \`${replyPrefix}\`. ` +
+      "Use mark_ready when new feedback is non-actionable and no reply should be posted. " +
       "Do not schedule delays, polling loops, repeated CI checks, or routine status/flush calls while waiting. " +
       "The monitor stops on merge/close and does not survive an OpenCode restart."
     )
@@ -96,15 +99,19 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
 
   // Plugin reloads can leave old intervals alive. A same-directory successor
   // stops them and sends one factual notice to each owning session.
-  const globalState = globalThis as { __sesoriPrMonitorTakeovers?: Map<string, () => void> }
+  const globalState = globalThis as {
+    __sesoriPrMonitorTakeovers?: Map<string, () => void | Promise<void>>
+  }
   const takeovers = (globalState.__sesoriPrMonitorTakeovers ??= new Map())
-  takeovers.get(directory)?.()
-  takeovers.set(directory, () => {
-    for (const session of sessions.values()) {
-      void session.stopAll({
-        notice: "Monitor stopped: the pr-monitor plugin was reloaded. Re-start monitoring if still needed.",
-      })
-    }
+  await takeovers.get(directory)?.()
+  takeovers.set(directory, async () => {
+    await Promise.all(
+      [...sessions.values()].map((session) =>
+        session.stopAll({
+          notice: "Monitor stopped: the pr-monitor plugin was reloaded. Re-start monitoring if still needed.",
+        }),
+      ),
+    )
   })
 
   return {

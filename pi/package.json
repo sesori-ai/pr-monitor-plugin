@@ -1,7 +1,7 @@
 {
   "name": "@sesori/pr-monitor-pi",
   "version": "0.3.0",
-  "description": "Pi and OMP extension that watches GitHub PRs and delivers factual status reports into the active session",
+  "description": "Pi and OMP extension that watches GitHub PRs, manages readiness, and reports into the active session",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

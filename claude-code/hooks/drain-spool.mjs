@@ -363,8 +363,11 @@ function keepAliveReason({ pid, monitors }) {
     "Pick the first that applies:",
     "",
     "1. Outstanding PR work you already know about (unaddressed review comments, failing CI, merge conflicts): do it now. Follow the monitor-pr skill; use the address-pr-comments skill for review threads.",
-    "2. The PR is finished — CI passing, no unresolved review threads, no pending/requested reviewers left, no outstanding changes_requested, and mergeable: call `pr_monitor` with action `mark_ready`. That is the handoff and it ends this loop.",
-    "3. Nothing to do right now: wait for the next report by running this with the Bash tool, passing `timeout: 600000`:",
+    "2. You inspected the latest activity and it is non-actionable (for example, a bot acknowledgement that " +
+      "should not receive another reply): call `pr_monitor` with action `mark_ready` to accept the current state " +
+      "manually.",
+    "3. Nothing to do right now: automatic readiness is waiting for CI, prefixed replies, or its quiet window. " +
+      "Wait for the next report by running this with the Bash tool, passing `timeout: 600000`:",
     "",
     `   node ${shellQuote(WAITER)} --session ${pid} --timeout ${WAIT_SECONDS}`,
     "",

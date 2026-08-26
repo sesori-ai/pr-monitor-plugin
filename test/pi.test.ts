@@ -196,6 +196,8 @@ test("Pi registers every monitor action and uses native steering delivery", asyn
   assert.match(pi.tool.description, /end the turn/i)
   const start = await executeTool({ tool: pi.tool, action: MonitorAction.start, pr: "sesori/example#42" })
   assert.match(start, /Started monitoring/)
+  assert.match(start, /`<!-- pr-monitor:reply -->`/)
+  await pi.waitForMessageCount(1)
   assert.equal(pi.messages.length, 1)
   assert.deepEqual(pi.messages[0]?.options, { deliverAs: "steer", triggerTurn: true })
   assert.equal(pi.messages[0]?.message.customType, "pr-monitor")
@@ -220,7 +222,7 @@ test("Pi registers every monitor action and uses native steering delivery", asyn
   assert.equal(timers.timers[0]?.cancelled, true)
 })
 
-test("Pi reloads configuration from each tool invocation context", async () => {
+test("Pi keeps a watched target on its start-time readiness configuration", async () => {
   const pi = fakePiHarness()
   const timers = timerHarness()
   const runner = runnerHarness()
@@ -257,7 +259,7 @@ test("Pi reloads configuration from each tool invocation context", async () => {
     context: extensionContext({ cwd: resolve("third-project") }),
   })
 
-  assert.deepEqual(loadedDirectories, [resolve("second-project"), resolve("third-project")])
+  assert.deepEqual(loadedDirectories, [resolve("second-project")])
   await pi.handlers.get("session_shutdown")?.[0]?.({}, extensionContext())
 })
 
@@ -370,10 +372,12 @@ test("package manifests expose the push-host skill exactly once", async () => {
   const pushSkill = await readFile("skills/monitor-pr/SKILL.md", "utf8")
   const claudeSkill = await readFile("claude-code/skills/monitor-pr/SKILL.md", "utf8")
   for (const skill of [pushSkill, claudeSkill]) {
-    assert.match(skill, /notifications arrive automatically/i)
+    assert.match(skill, /monitor owns polling/i)
     assert.match(skill, /never.*sleep/is)
-    assert.match(skill, /mark_ready.*confirms success/is)
-    assert.doesNotMatch(skill, /or pushes/i)
+    assert.match(skill, /mark_ready.*confirm/is)
+    assert.match(skill, /must begin with.*prefix/is)
+    assert.match(skill, /non-actionable/i)
+    assert.match(skill, /do .*not.* reply/is)
   }
   assert.doesNotMatch(pushSkill, /await-activity\.mjs/)
   assert.match(claudeSkill, /await-activity\.mjs/)

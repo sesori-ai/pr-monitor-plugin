@@ -53,6 +53,7 @@ export function piMonitorConfigPaths({
 function formatResult({ result }: { result: MonitorActionResult<MonitorConfig> }): string {
   if (result.start === undefined) return result.text
   const { config, announcement } = result.start
+  const replyPrefix = config.ignoreCommentTag ?? "<!-- pr-monitor:reply -->"
   return (
     `${result.text}\n` +
     (announcement === InitialAnnouncementState.pending
@@ -64,6 +65,8 @@ function formatResult({ result }: { result: MonitorActionResult<MonitorConfig> }
       ? "A failing check is reported at the next poll without waiting for that quiet window or the rest of CI. "
       : "") +
     "A new merge conflict or terminal PR state is also reported at the next poll without waiting. " +
+    `Readiness is managed automatically; agent-authored GitHub replies must begin with \`${replyPrefix}\`. ` +
+    "Use mark_ready when new feedback is non-actionable and no reply should be posted. " +
     "End the turn when there is no delivered report to handle. Never create sleeps, scheduled checks, polling " +
     "loops, repeated CI checks, or routine status/flush calls. " +
     "The monitor stops on merge/close and does not survive a Pi-family session replacement or process restart."

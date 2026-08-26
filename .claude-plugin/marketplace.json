@@ -8,7 +8,7 @@
     {
       "name": "pr-monitor",
       "source": "./claude-code",
-      "description": "Watch GitHub PRs in the background and get factual [PR Monitor] reports injected into your session: CI verdicts, new reviews and comments, mergeability changes, merge/close.",
+      "description": "Manage GitHub PR readiness and report commits, CI, reviews, comments, conflicts, and completion.",
       "category": "productivity"
     }
   ]

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { execFileSync, spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import test from "node:test"
@@ -48,6 +48,14 @@ test("Claude plugin root contains the exact tracked release payload", () => {
   ])
 })
 
+test("Claude handoff follows readiness transitions rather than report delivery", async () => {
+  const source = await readFile("claude-code/src/mcp-server.ts", "utf8")
+
+  assert.match(source, /onReadyChanged:.*if \(!ready\).*extendKeepAlive\(\{ config \}\)/s)
+  const deliverBody = /const deliver = \([\s\S]*?return Promise\.resolve\(\)\n}/.exec(source)?.[0] ?? ""
+  assert.doesNotMatch(deliverBody, /handedOff\.delete/)
+})
+
 test("Claude hook drains once, skips subagents, and arms only its exact waiter", async () => {
   const home = await mkdtemp(join(tmpdir(), "pr-monitor-claude-hook-"))
   const spool = join(home, ".claude", "pr-monitor", "spool", String(process.pid))
@@ -91,6 +99,8 @@ test("Claude hook drains once, skips subagents, and arms only its exact waiter",
     const keepAlive = JSON.parse(runHook({ home, input: { hook_event_name: "Stop" } }))
     assert.equal(keepAlive.decision, "block")
     assert.match(keepAlive.reason, /\[PR Monitor keep-alive\]/)
+    assert.match(keepAlive.reason, /automatic readiness is waiting/)
+    assert.match(keepAlive.reason, /non-actionable.*mark_ready/)
     assert.match(keepAlive.reason, /await-activity\.mjs' --session/)
   } finally {
     await rm(home, { recursive: true, force: true })
