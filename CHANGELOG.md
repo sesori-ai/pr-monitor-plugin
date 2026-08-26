@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1]
+
 ### Added
 
 - Active watches now manage the configured ready-for-human-review label across OpenCode, Claude Code, Pi, and OMP.
