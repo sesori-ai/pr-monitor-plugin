@@ -31115,8 +31115,10 @@ query($owner: String!, $repo: String!, $number: Int!) {
       reviewThreads(first: 100) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          id isResolved
-          comments(last: 100) { nodes { id author { login __typename } body createdAt } }
+          id isResolved path line originalLine
+          comments(last: 100) {
+            nodes { id author { login __typename } body createdAt pullRequestReview { state } }
+          }
         }
       }
       comments(last: 100) { totalCount nodes { id author { login __typename } body createdAt } }
@@ -31134,8 +31136,10 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String!) {
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          id isResolved
-          comments(last: 100) { nodes { id author { login __typename } body createdAt } }
+          id isResolved path line originalLine
+          comments(last: 100) {
+            nodes { id author { login __typename } body createdAt pullRequestReview { state } }
+          }
         }
       }
     }
@@ -31297,13 +31301,15 @@ async function fetchPrSnapshot(input) {
 function toMeta(raw, classifier) {
   const author = raw.author?.login ?? "ghost";
   const isLocal = classifier.selfLogin !== void 0 && author.toLowerCase() === classifier.selfLogin.toLowerCase();
+  const reviewState = raw.pullRequestReview?.state;
   return {
     id: raw.id,
     author,
     isBot: raw.author?.__typename === "Bot",
     createdAt: raw.createdAt,
     isLocal,
-    isAgentReply: isLocal && classifier.replyPrefix !== void 0 && raw.body.startsWith(classifier.replyPrefix)
+    isAgentReply: isLocal && classifier.replyPrefix !== void 0 && raw.body.startsWith(classifier.replyPrefix),
+    ...typeof reviewState === "string" ? { reviewState } : {}
   };
 }
 function normalizeSnapshot(payload, opts) {
@@ -31350,11 +31356,16 @@ function normalizeSnapshot(payload, opts) {
   );
   const pendingReviewers = (pr.reviewRequests?.nodes ?? []).map((node) => node.requestedReviewer?.login ?? node.requestedReviewer?.slug).filter((name) => typeof name === "string");
   const threads = pr.reviewThreads?.nodes ?? [];
-  const reviewThreads = threads.map((thread) => ({
-    id: thread.id,
-    isResolved: thread.isResolved,
-    comments: (thread.comments?.nodes ?? []).map((comment) => toMeta(comment, classifier))
-  }));
+  const reviewThreads = threads.map((thread) => {
+    const line = typeof thread.line === "number" ? thread.line : thread.originalLine;
+    return {
+      id: thread.id,
+      isResolved: thread.isResolved,
+      ...typeof thread.path === "string" ? { path: thread.path } : {},
+      ...typeof line === "number" ? { line } : {},
+      comments: (thread.comments?.nodes ?? []).map((comment) => toMeta(comment, classifier))
+    };
+  });
   const issueNodes = pr.comments?.nodes ?? [];
   const issueComments = issueNodes.map((node) => toMeta(node, classifier));
   const acknowledgementCount = issueComments.filter((comment) => comment.isAgentReply).length;
@@ -31599,7 +31610,11 @@ function authorBreakdown(comments) {
   const counts = /* @__PURE__ */ new Map();
   for (const comment of comments) {
     const account = comment.isBot ? `${comment.author}[bot]` : comment.author;
-    const name = comment.isLocal ? `${account} [local account, unprefixed]` : account;
+    const qualifiers = [
+      comment.isLocal ? "local account, unprefixed" : void 0,
+      comment.reviewState === "PENDING" ? "pending review" : void 0
+    ].filter((qualifier) => qualifier !== void 0);
+    const name = qualifiers.length > 0 ? `${account} [${qualifiers.join("; ")}]` : account;
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => `${count} ${name}`).join(", ");
@@ -31622,6 +31637,14 @@ function inlineCode(value) {
   while (value.includes(fence)) fence += "`";
   return `${fence}${value}${fence}`;
 }
+function threadLocator(thread) {
+  const threadId = `thread ${inlineCode(thread.id)}`;
+  if (thread.path !== void 0) {
+    const location = inlineCode(`${thread.path}${thread.line === void 0 ? "" : `:${thread.line}`}`);
+    return `${location} [${threadId}]`;
+  }
+  return threadId;
+}
 function inlineLine(snapshot, baselineMs, baseline) {
   const unresolved = snapshot.reviewThreads.filter((thread) => !thread.isResolved).length;
   const before = new Map(baseline?.reviewThreads.map((thread) => [thread.id, thread.comments]) ?? []);
@@ -31641,7 +31664,12 @@ function inlineLine(snapshot, baselineMs, baseline) {
     changedUnresolved > 0 ? `${changedUnresolved} currently unresolved` : void 0,
     changedResolved > 0 ? `${changedResolved} currently resolved` : void 0
   ].filter((part) => part !== void 0);
-  return `- [comment:inline] ACTION REQUIRED: ${countLabel(changed.length, "thread")} received ${countLabel(fresh.length, "new relevant comment")} since last flush (${states.join(", ")}; ${authorBreakdown(fresh)}). ${unresolvedNotice}`;
+  const changedThreads = changed.map(
+    ({ thread, comments }) => `${threadLocator(thread)} (${thread.isResolved ? "resolved" : "unresolved"}; ${authorBreakdown(comments)})`
+  ).join("; ");
+  const localNotice = fresh.some((comment) => comment.isLocal) ? ` A listed ${inlineCode("[local account, unprefixed]")} entry is a new human comment, not an earlier agent reply.` : "";
+  const pendingNotice = fresh.some((comment) => comment.isLocal && comment.reviewState === "PENDING") ? " Pending-review comments may be absent from REST pull-comment results; inspect the listed thread through GraphQL before marking ready." : "";
+  return `- [comment:inline] ACTION REQUIRED: ${countLabel(changed.length, "thread")} received ${countLabel(fresh.length, "new relevant comment")} since last flush (${states.join(", ")}; ${authorBreakdown(fresh)}). ${unresolvedNotice} Changed threads: ${changedThreads}.${localNotice}${pendingNotice}`;
 }
 function ciLine(snapshot, forcedHoldMinutes) {
   const phase = ciPhase(snapshot);

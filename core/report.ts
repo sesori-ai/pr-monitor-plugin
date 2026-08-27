@@ -3,7 +3,7 @@
 // standalone initial reports fall back to their timestamp baseline.
 
 import { relevantComments } from "./activity"
-import { ciPhase, type CommentMeta, type PrSnapshot } from "./github"
+import { ciPhase, type CommentMeta, type PrSnapshot, type ReviewThreadInfo } from "./github"
 import { assessAutomaticReadiness, hasReadyLabel } from "./readiness"
 import { targetKey, type Target } from "./target"
 
@@ -14,7 +14,11 @@ function authorBreakdown(comments: CommentMeta[]): string {
   const counts = new Map<string, number>()
   for (const comment of comments) {
     const account = comment.isBot ? `${comment.author}[bot]` : comment.author
-    const name = comment.isLocal ? `${account} [local account, unprefixed]` : account
+    const qualifiers = [
+      comment.isLocal ? "local account, unprefixed" : undefined,
+      comment.reviewState === "PENDING" ? "pending review" : undefined,
+    ].filter((qualifier): qualifier is string => qualifier !== undefined)
+    const name = qualifiers.length > 0 ? `${account} [${qualifiers.join("; ")}]` : account
     counts.set(name, (counts.get(name) ?? 0) + 1)
   }
   return [...counts.entries()]
@@ -42,6 +46,15 @@ function inlineCode(value: string): string {
   let fence = "`"
   while (value.includes(fence)) fence += "`"
   return `${fence}${value}${fence}`
+}
+
+function threadLocator(thread: ReviewThreadInfo): string {
+  const threadId = `thread ${inlineCode(thread.id)}`
+  if (thread.path !== undefined) {
+    const location = inlineCode(`${thread.path}${thread.line === undefined ? "" : `:${thread.line}`}`)
+    return `${location} [${threadId}]`
+  }
+  return threadId
 }
 
 function inlineLine(snapshot: PrSnapshot, baselineMs: number, baseline?: PrSnapshot): string {
@@ -74,10 +87,24 @@ function inlineLine(snapshot: PrSnapshot, baselineMs: number, baseline?: PrSnaps
     changedUnresolved > 0 ? `${changedUnresolved} currently unresolved` : undefined,
     changedResolved > 0 ? `${changedResolved} currently resolved` : undefined,
   ].filter((part): part is string => part !== undefined)
+  const changedThreads = changed
+    .map(
+      ({ thread, comments }) =>
+        `${threadLocator(thread)} (${thread.isResolved ? "resolved" : "unresolved"}; ${authorBreakdown(comments)})`,
+    )
+    .join("; ")
+  const localNotice = fresh.some((comment) => comment.isLocal)
+    ? ` A listed ${inlineCode("[local account, unprefixed]")} entry is a new human comment, not an earlier agent reply.`
+    : ""
+  const pendingNotice = fresh.some((comment) => comment.isLocal && comment.reviewState === "PENDING")
+    ? " Pending-review comments may be absent from REST pull-comment results; inspect the listed thread through " +
+      "GraphQL before marking ready."
+    : ""
   return (
     `- [comment:inline] ACTION REQUIRED: ${countLabel(changed.length, "thread")} received ` +
     `${countLabel(fresh.length, "new relevant comment")} since last flush ` +
-    `(${states.join(", ")}; ${authorBreakdown(fresh)}). ${unresolvedNotice}`
+    `(${states.join(", ")}; ${authorBreakdown(fresh)}). ${unresolvedNotice} ` +
+    `Changed threads: ${changedThreads}.${localNotice}${pendingNotice}`
   )
 }
 

@@ -32,7 +32,7 @@ session that started the watch, and manages the ready-for-human-review label fro
 - Mergeable: MERGEABLE
 - Reviews: alice ✓ approved · bob ⏳ pending
 - [comment:review] 0 new relevant review summaries since last flush
-- [comment:inline] ACTION REQUIRED: 2 threads received 2 new relevant comments since last flush (1 currently unresolved, 1 currently resolved; 2 coderabbitai[bot]). The unresolved-thread count is unchanged at 3; inspect every changed thread anyway.
+- [comment:inline] ACTION REQUIRED: 2 threads received 2 new relevant comments since last flush (1 currently unresolved, 1 currently resolved; 2 coderabbitai[bot]). The unresolved-thread count is unchanged at 3; inspect every changed thread anyway. Changed threads: `core/watch.ts:412` [thread `PRRT_watch`] (unresolved; 1 coderabbitai[bot]); `core/report.ts:96` [thread `PRRT_report`] (resolved; 1 coderabbitai[bot]).
 - [comment:issue] 5 total (1 new relevant since last flush: 1 alice)
 - Ready for human review: NO — label "ready-for-human-review" is absent.
 - Required next step: Do more work until the PR is ready for review, or use pr_monitor(action: "mark_ready", pr: "sesori-ai/example#42") if you believe nothing else is required.

@@ -30,10 +30,14 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   activity. Stable IDs preserve same-second follow-ups. A local-account comment is an agent
   acknowledgement only when it begins with `ignoreCommentTag`; those replies remain in readiness ordering but not
   relevant-comment signatures.
-- Reports contain state, counts, authors, labels, readiness, check names, and required workflow direction, but never
-  comment bodies. A local-account comment lacking the prefix is identified as human feedback. Delivery failure
-  restores the prior baseline and urgency. Ten consecutive poll failures stop with a notice; ten consecutive
-  delivery failures stop after logging because the failed delivery channel cannot reliably carry a notice.
+- Reports contain state, counts, authors, labels, readiness, check names, changed inline-thread paths/lines and
+  unique thread IDs, pending-review markers, and required workflow direction, but never comment bodies. A
+  local-account comment lacking
+  the prefix is identified explicitly as new human feedback rather than an earlier agent reply. Pending-review
+  feedback warns that REST pull-comment results may omit it and directs the agent to inspect the listed thread via
+  GraphQL before marking ready. Delivery failure restores the prior baseline and urgency. Ten consecutive poll
+  failures stop with a notice; ten consecutive delivery failures stop after logging because the failed delivery
+  channel cannot reliably carry a notice.
 - Merge/close produces one terminal report and removes the watch. Explicit stop, session cleanup, and failed starts
   leave no timer. Cleanup drains an already-started label mutation before unregistering the watch, so a successor
   cannot race a stale add/remove; it does not wait for a stalled fetch or report delivery. A cleanup crossing an
@@ -154,8 +158,9 @@ issue, and terminal PR.
 
 - A report is delayed behind debounce after a new failure/conflict/terminal state, or running-CI progress creates
   repeated reports without a conclusion.
-- A failed delivery advances the baseline, a same-second/thread follow-up disappears, or ignored content becomes
-  visible activity.
+- A failed delivery advances the baseline, a same-second/thread follow-up disappears, ignored content becomes
+  visible activity, or an inline-feedback report omits the changed thread's unique ID, location, or pending-review
+  warning needed to distinguish new human feedback from an earlier agent reply.
 - A failed label mutation changes handoff, a plain issue is labeled as a PR, a resolution-only report withdraws
   readiness, or a manual mark is immediately undone by state it explicitly accepted.
 - A canceled session transition loses a watch, a successful transition retains an old timer, or an old session
