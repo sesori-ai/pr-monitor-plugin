@@ -49,10 +49,12 @@ function inlineCode(value: string): string {
 }
 
 function threadLocator(thread: ReviewThreadInfo): string {
+  const threadId = `thread ${inlineCode(thread.id)}`
   if (thread.path !== undefined) {
-    return inlineCode(`${thread.path}${thread.line === undefined ? "" : `:${thread.line}`}`)
+    const location = inlineCode(`${thread.path}${thread.line === undefined ? "" : `:${thread.line}`}`)
+    return `${location} [${threadId}]`
   }
-  return inlineCode(`thread ${thread.id}`)
+  return threadId
 }
 
 function inlineLine(snapshot: PrSnapshot, baselineMs: number, baseline?: PrSnapshot): string {

@@ -1333,7 +1333,7 @@ test("reports locate pending unprefixed local-account follow-ups as human feedba
   assert.match(report, /owner \[local account, unprefixed; pending review\]/)
   assert.ok(
     report.includes(
-      "Changed threads: `bridge/app/lib/src/services/session_creation_service.dart:90` " +
+      "Changed threads: `bridge/app/lib/src/services/session_creation_service.dart:90` [thread `thread-1`] " +
         "(unresolved; 1 owner [local account, unprefixed; pending review])",
     ),
   )
@@ -1385,11 +1385,21 @@ test("reports identify resolved and unresolved threads that received new comment
     target,
     snapshot({
       reviewThreads: [
-        thread("thread-1", false, [
-          { author: "reviewer", createdAt: "2026-08-03T11:00:00Z" },
-          { author: "alice", createdAt: "2026-08-03T12:01:00Z" },
-        ]),
-        thread("thread-2", true, [{ author: "owner", createdAt: "2026-08-03T12:02:00Z" }]),
+        thread(
+          "thread-1",
+          false,
+          [
+            { author: "reviewer", createdAt: "2026-08-03T11:00:00Z" },
+            { author: "alice", createdAt: "2026-08-03T12:01:00Z" },
+          ],
+          { path: "core/report.ts", line: 53 },
+        ),
+        thread(
+          "thread-2",
+          true,
+          [{ author: "owner", createdAt: "2026-08-03T12:02:00Z" }],
+          { path: "core/report.ts", line: 53 },
+        ),
         thread("thread-3", false, [{ author: "reviewer", createdAt: "2026-08-03T11:30:00Z" }]),
       ],
     }),
@@ -1400,6 +1410,8 @@ test("reports identify resolved and unresolved threads that received new comment
     report,
     /\[comment:inline\] ACTION REQUIRED: 2 threads received 2 new relevant comments since last flush/,
   )
+  assert.match(report, /`core\/report\.ts:53` \[thread `thread-1`\]/)
+  assert.match(report, /`core\/report\.ts:53` \[thread `thread-2`\]/)
 })
 
 test("report baselines use comment IDs when GitHub timestamps share a second", () => {

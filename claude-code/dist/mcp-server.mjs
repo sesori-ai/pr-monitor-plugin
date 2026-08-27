@@ -31638,10 +31638,12 @@ function inlineCode(value) {
   return `${fence}${value}${fence}`;
 }
 function threadLocator(thread) {
+  const threadId = `thread ${inlineCode(thread.id)}`;
   if (thread.path !== void 0) {
-    return inlineCode(`${thread.path}${thread.line === void 0 ? "" : `:${thread.line}`}`);
+    const location = inlineCode(`${thread.path}${thread.line === void 0 ? "" : `:${thread.line}`}`);
+    return `${location} [${threadId}]`;
   }
-  return inlineCode(`thread ${thread.id}`);
+  return threadId;
 }
 function inlineLine(snapshot, baselineMs, baseline) {
   const unresolved = snapshot.reviewThreads.filter((thread) => !thread.isResolved).length;
