@@ -50,11 +50,14 @@ function thread(
     isBot?: boolean
     isLocal?: boolean
     isAgentReply?: boolean
+    reviewState?: string
   }>,
+  location: { path?: string; line?: number } = {},
 ): ReviewThreadInfo {
   return {
     id,
     isResolved,
+    ...location,
     comments: comments.map((comment, index) => ({
       id: `${id}-comment-${index + 1}`,
       isBot: false,
@@ -842,6 +845,8 @@ test("normalization preserves tagged replies as private acknowledgement evidence
               {
                 id: "thread-1",
                 isResolved: false,
+                path: "client/module_core/lib/src/services/new_session_options_service.dart",
+                line: 258,
                 comments: {
                   nodes: [
                     {
@@ -861,6 +866,7 @@ test("normalization preserves tagged replies as private acknowledgement evidence
                       author: { login: "owner", __typename: "User" },
                       body: "Please still address the [Sesori reply] edge case.",
                       createdAt: "2026-08-03T11:10:00Z",
+                      pullRequestReview: { state: "PENDING" },
                     },
                   ],
                 },
@@ -902,6 +908,9 @@ test("normalization preserves tagged replies as private acknowledgement evidence
       { id: "empty-changes-requested", author: "reviewer", isBot: false, isAgentReply: false },
     ],
   )
+  assert.equal(result.reviewThreads[0]?.path, "client/module_core/lib/src/services/new_session_options_service.dart")
+  assert.equal(result.reviewThreads[0]?.line, 258)
+  assert.equal(result.reviewThreads[0]?.comments[2]?.reviewState, "PENDING")
   assert.deepEqual(
     result.reviewThreads.map((item) => ({
       id: item.id,
@@ -1274,7 +1283,7 @@ test("a follow-up in an existing thread is activity even when resolution counts 
   assert.equal(detectActivity(before, after, "MERGEABLE"), true)
 })
 
-test("reports identify unprefixed local-account follow-ups as human feedback", () => {
+test("reports locate pending unprefixed local-account follow-ups as human feedback", () => {
   const before = snapshot({
     reviewThreads: [
       thread("thread-1", false, [
@@ -1289,20 +1298,29 @@ test("reports identify unprefixed local-account follow-ups as human feedback", (
   })
   const after = snapshot({
     reviewThreads: [
-      thread("thread-1", false, [
+      thread(
+        "thread-1",
+        false,
+        [
+          {
+            author: "owner",
+            createdAt: "2026-08-03T11:00:00Z",
+            isLocal: true,
+            isAgentReply: true,
+          },
+          {
+            author: "owner",
+            createdAt: "2026-08-03T12:01:00Z",
+            isLocal: true,
+            isAgentReply: false,
+            reviewState: "PENDING",
+          },
+        ],
         {
-          author: "owner",
-          createdAt: "2026-08-03T11:00:00Z",
-          isLocal: true,
-          isAgentReply: true,
+          path: "bridge/app/lib/src/services/session_creation_service.dart",
+          line: 90,
         },
-        {
-          author: "owner",
-          createdAt: "2026-08-03T12:01:00Z",
-          isLocal: true,
-          isAgentReply: false,
-        },
-      ]),
+      ),
     ],
   })
 
@@ -1312,8 +1330,16 @@ test("reports identify unprefixed local-account follow-ups as human feedback", (
     replyPrefix: "[Agent reply]",
   })
 
-  assert.match(report, /owner \[local account, unprefixed\]/)
-  assert.match(report, /treat as human feedback|ACTION REQUIRED/)
+  assert.match(report, /owner \[local account, unprefixed; pending review\]/)
+  assert.ok(
+    report.includes(
+      "Changed threads: `bridge/app/lib/src/services/session_creation_service.dart:90` " +
+        "(unresolved; 1 owner [local account, unprefixed; pending review])",
+    ),
+  )
+  assert.match(report, /new human comment, not an earlier agent reply/)
+  assert.match(report, /Pending-review comments may be absent from REST pull-comment results/)
+  assert.match(report, /inspect the listed thread through GraphQL before marking ready/)
   assert.match(report, /Local agent replies count only when they begin with `\[Agent reply\]`/)
 })
 

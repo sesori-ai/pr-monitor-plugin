@@ -13,11 +13,14 @@ export type CommentMeta = {
   createdAt: string
   isLocal: boolean
   isAgentReply: boolean
+  reviewState?: string
 }
 
 export type ReviewThreadInfo = {
   id: string
   isResolved: boolean
+  path?: string
+  line?: number
   comments: CommentMeta[] // includes agent acknowledgements for last-reply readiness
 }
 
@@ -82,8 +85,10 @@ query($owner: String!, $repo: String!, $number: Int!) {
       reviewThreads(first: 100) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          id isResolved
-          comments(last: 100) { nodes { id author { login __typename } body createdAt } }
+          id isResolved path line originalLine
+          comments(last: 100) {
+            nodes { id author { login __typename } body createdAt pullRequestReview { state } }
+          }
         }
       }
       comments(last: 100) { totalCount nodes { id author { login __typename } body createdAt } }
@@ -102,8 +107,10 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String!) {
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          id isResolved
-          comments(last: 100) { nodes { id author { login __typename } body createdAt } }
+          id isResolved path line originalLine
+          comments(last: 100) {
+            nodes { id author { login __typename } body createdAt pullRequestReview { state } }
+          }
         }
       }
     }
@@ -287,7 +294,13 @@ export async function fetchPrSnapshot(input: {
   return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin })
 }
 
-type RawComment = { id: string; author: { login: string; __typename: string } | null; body: string; createdAt: string }
+type RawComment = {
+  id: string
+  author: { login: string; __typename: string } | null
+  body: string
+  createdAt: string
+  pullRequestReview?: { state?: string } | null
+}
 
 type CommentClassifier = { replyPrefix: string | undefined; selfLogin: string | undefined }
 
@@ -295,6 +308,7 @@ function toMeta(raw: RawComment, classifier: CommentClassifier): CommentMeta {
   const author = raw.author?.login ?? "ghost"
   const isLocal =
     classifier.selfLogin !== undefined && author.toLowerCase() === classifier.selfLogin.toLowerCase()
+  const reviewState = raw.pullRequestReview?.state
   return {
     id: raw.id,
     author,
@@ -303,6 +317,7 @@ function toMeta(raw: RawComment, classifier: CommentClassifier): CommentMeta {
     isLocal,
     isAgentReply:
       isLocal && classifier.replyPrefix !== undefined && raw.body.startsWith(classifier.replyPrefix),
+    ...(typeof reviewState === "string" ? { reviewState } : {}),
   }
 }
 
@@ -374,11 +389,16 @@ export function normalizeSnapshot(
     .filter((name: unknown): name is string => typeof name === "string")
 
   const threads = pr.reviewThreads?.nodes ?? []
-  const reviewThreads: ReviewThreadInfo[] = threads.map((thread: any) => ({
-    id: thread.id,
-    isResolved: thread.isResolved,
-    comments: (thread.comments?.nodes ?? []).map((comment: RawComment) => toMeta(comment, classifier)),
-  }))
+  const reviewThreads: ReviewThreadInfo[] = threads.map((thread: any) => {
+    const line = typeof thread.line === "number" ? thread.line : thread.originalLine
+    return {
+      id: thread.id,
+      isResolved: thread.isResolved,
+      ...(typeof thread.path === "string" ? { path: thread.path } : {}),
+      ...(typeof line === "number" ? { line } : {}),
+      comments: (thread.comments?.nodes ?? []).map((comment: RawComment) => toMeta(comment, classifier)),
+    }
+  })
 
   const issueNodes: RawComment[] = pr.comments?.nodes ?? []
   const issueComments = issueNodes.map((node) => toMeta(node, classifier))
