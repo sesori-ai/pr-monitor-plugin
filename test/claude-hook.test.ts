@@ -53,7 +53,8 @@ test("Claude handoff follows readiness transitions rather than report delivery",
   const source = await readFile("claude-code/src/mcp-server.ts", "utf8")
 
   assert.match(source, /onReadyChanged:.*if \(!ready\).*extendKeepAlive\(\{ config \}\)/s)
-  const deliverBody = /const deliver = async \(\{[\s\S]*?\n\}\n/.exec(source)?.[0] ?? ""
+  // \r?\n: Windows checkouts read the source with CRLF endings.
+  const deliverBody = /const deliver = async \(\{[\s\S]*?\r?\n\}\r?\n/.exec(source)?.[0] ?? ""
   assert.ok(deliverBody.length > 0, "deliver body not found")
   assert.doesNotMatch(deliverBody, /handedOff\.delete/)
 })

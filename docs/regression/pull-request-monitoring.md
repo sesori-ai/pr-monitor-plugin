@@ -94,8 +94,10 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   into the owning session as a visible message: an auth line then a `{"type":"user"}` line of newline-delimited
   JSON. A pushed report starts its own turn on an idle session and surfaces mid-turn on a busy one; keep-alive stays
   disarmed (`keepAlive: false`) so the Stop hook never blocks and no waiter is suggested.
-- Without the socket, or after a failed push, the MCP process spools one file per report under the owning Claude
-  process identity. Hooks claim reports exactly once, do not let Task subagents consume them, and inject them on
+- A failed push is a delivery failure: the watch rolls back its baseline and retries at poll cadence, and
+  persistent failure stops the monitor with a truthful notice — a report is never parked on disk behind hook
+  events an idle session cannot fire. Without the socket, the MCP process spools one file per report under the
+  owning Claude process identity. Hooks claim reports exactly once, do not let Task subagents consume them, and inject them on
   prompt, tool completion, or turn end.
 - In that fallback, keep-alive publishes a liveness heartbeat and rolling idle deadline. It ends on confirmed
   handoff, stop, terminal state, MCP death, or idle expiry; only its exact event waiter may block.

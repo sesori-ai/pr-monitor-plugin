@@ -32806,7 +32806,6 @@ function writeSessionState(claudePid2, state) {
 // claude-code/src/mcp-server.ts
 var claudePid = process5.ppid;
 var pushChannel = messagingChannel();
-var pushDegraded = false;
 var projectDir = process5.env["CLAUDE_PROJECT_DIR"] ?? process5.cwd();
 var configPaths = [
   join3(projectDir, ".pr-monitor.json"),
@@ -32827,9 +32826,11 @@ var refreshSessionState = () => {
   const pollMs = Math.max(...watches.map(({ config: config2 }) => config2.pollIntervalSeconds * 1e3), 0);
   writeSessionState(claudePid, {
     version: 1,
-    // With a working push channel the session may go idle freely — the next
-    // report wakes it by itself, so the Stop hook must not hold turn-end.
-    keepAlive: (pushChannel === void 0 || pushDegraded) && active.some(({ config: config2 }) => config2.keepAlive),
+    // With a push channel the session may go idle freely — the next report
+    // wakes it by itself, so the Stop hook must not hold turn-end. A failed
+    // push is retried by the watch at poll cadence (see deliver), never parked
+    // behind hooks an idle session cannot fire.
+    keepAlive: pushChannel === void 0 && active.some(({ config: config2 }) => config2.keepAlive),
     expiresAtMs: Date.now() + Math.max(pollMs * 3 + 6e4, STATE_LIVENESS_FLOOR_MS),
     keepAliveUntilMs,
     monitors: active.map(({ target }) => targetKey(target))
@@ -32844,19 +32845,13 @@ var deliver = async ({
   report
 }) => {
   if (pushChannel !== void 0) {
-    try {
-      await pushMessage({ channel: pushChannel, text: report });
-      pushDegraded = false;
-      extendKeepAlive({ config: config2 });
-      refreshSessionState();
-      if (config2.desktopNotifications) {
-        notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, "New report delivered to your Claude Code session");
-      }
-      return;
-    } catch (error51) {
-      pushDegraded = true;
-      log(`push delivery failed, falling back to the spool: ${error51.message}`);
+    await pushMessage({ channel: pushChannel, text: report });
+    extendKeepAlive({ config: config2 });
+    refreshSessionState();
+    if (config2.desktopNotifications) {
+      notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, "New report delivered to your Claude Code session");
     }
+    return;
   }
   spoolReport(claudePid, report);
   extendKeepAlive({ config: config2 });

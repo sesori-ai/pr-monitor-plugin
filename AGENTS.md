@@ -88,9 +88,11 @@ where the plugin root sits in the repo.
      (newline-delimited JSON), which injects the report as a visible user message — starting a turn when the
      session is idle, surfacing mid-turn when busy. Injection has no protocol ack: a clean close is success, so a
      stale token after a messaging-server restart is a silent-drop residue healed by the next `/mcp` reconnect.
-     Hosts without the socket, and any failed push, fall back to `spoolReport()` (one file per report under
-     `~/.claude/pr-monitor/spool/<claude pid>/`) with the plugin's hooks injecting spooled text at the next
-     UserPromptSubmit / PostToolUse / Stop event, guarded by the keep-alive loop (below).
+     A failed push rejects so the watch's delivery-failure path rolls back the baseline and retries at poll
+     cadence — able to wake an idle session the moment the socket recovers — and persistent failure ends in the
+     watch's stop-after-consecutive-failures notice. Only hosts without the socket fall back to `spoolReport()`
+     (one file per report under `~/.claude/pr-monitor/spool/<claude pid>/`) with the plugin's hooks injecting
+     spooled text at the next UserPromptSubmit / PostToolUse / Stop event, guarded by the keep-alive loop (below).
    - Pi/OMP (`pi/extension.ts`): `sendMessage(..., { deliverAs: "steer", triggerTurn: true })` queues while busy and starts a model turn while idle. No spool or waiter is needed.
 
 ## Key behaviors / gotchas
@@ -129,9 +131,9 @@ where the plugin root sits in the repo.
   `pulls/{n}` and refuse non-open targets: label endpoints share the issue namespace, so a plain issue number or a
   terminal PR would otherwise produce false success. `mark_ready` best-effort creates the green label before adding
   it. `unmark_ready` treats a missing label as success. Standalone actions need no active monitor.
-- **Keep-alive loop, Claude Code shell (fallback only)** — armed only when the session has no messaging socket or
-  the last push failed (`pushDegraded`); with working push delivery `session.json` carries `keepAlive: false`, the
-  Stop hook never blocks, and the session goes idle freely. In fallback: while a monitored PR is not handed off, the
+- **Keep-alive loop, Claude Code shell (fallback only)** — armed only when the session has no messaging socket;
+  with a push channel `session.json` carries `keepAlive: false`, the Stop hook never blocks, and the session goes
+  idle freely (failed pushes retry through the watch, not through hooks). In fallback: while a monitored PR is not handed off, the
   Stop hook runs
   `claude-code/hooks/await-activity.mjs`, which blocks until a report is spooled: one model round trip per real event.
   `session-state.ts` publishes liveness and the rolling `keepAliveMaxMinutes` idle deadline. The MCP server refreshes

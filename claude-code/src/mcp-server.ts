@@ -1,9 +1,9 @@
 // pr-monitor — Claude Code adapter. The MCP process owns one logical session.
 // Reports are pushed straight into that session over its messaging socket
 // (see push.ts) so they arrive on their own — even while the session is idle —
-// exactly like the OpenCode and Pi channels. Hosts without the socket, and any
-// failed push, fall back to spooling for the hooks to inject, guarded by the
-// keep-alive loop.
+// exactly like the OpenCode and Pi channels. A failed push rejects so the
+// watch retries it at poll cadence; only hosts without the socket fall back to
+// spooling for the hooks to inject, guarded by the keep-alive loop.
 
 import { join } from "node:path"
 import process from "node:process"
@@ -32,9 +32,6 @@ import { claimSpool, collectDeadSpools, notifyDesktop, probeSpool, spoolReport }
 
 const claudePid = process.ppid
 const pushChannel = messagingChannel()
-// Push failed at least once since the last success: arm the spool/keep-alive
-// fallback so a report stranded on disk still holds the session on the job.
-let pushDegraded = false
 const projectDir = process.env["CLAUDE_PROJECT_DIR"] ?? process.cwd()
 const configPaths = [
   join(projectDir, ".pr-monitor.json"),
@@ -60,9 +57,11 @@ const refreshSessionState = (): void => {
   const pollMs = Math.max(...watches.map(({ config }) => config.pollIntervalSeconds * 1000), 0)
   writeSessionState(claudePid, {
     version: 1,
-    // With a working push channel the session may go idle freely — the next
-    // report wakes it by itself, so the Stop hook must not hold turn-end.
-    keepAlive: (pushChannel === undefined || pushDegraded) && active.some(({ config }) => config.keepAlive),
+    // With a push channel the session may go idle freely — the next report
+    // wakes it by itself, so the Stop hook must not hold turn-end. A failed
+    // push is retried by the watch at poll cadence (see deliver), never parked
+    // behind hooks an idle session cannot fire.
+    keepAlive: pushChannel === undefined && active.some(({ config }) => config.keepAlive),
     expiresAtMs: Date.now() + Math.max(pollMs * 3 + 60_000, STATE_LIVENESS_FLOOR_MS),
     keepAliveUntilMs,
     monitors: active.map(({ target }) => targetKey(target)),
@@ -83,19 +82,18 @@ const deliver = async ({
   report: string
 }): Promise<void> => {
   if (pushChannel !== undefined) {
-    try {
-      await pushMessage({ channel: pushChannel, text: report })
-      pushDegraded = false
-      extendKeepAlive({ config })
-      refreshSessionState()
-      if (config.desktopNotifications) {
-        notifyDesktop(`PR Monitor — ${targetKey(target)}`, "New report delivered to your Claude Code session")
-      }
-      return
-    } catch (error) {
-      pushDegraded = true
-      log(`push delivery failed, falling back to the spool: ${(error as Error).message}`)
+    // Rejection is deliberate: the watch rolls back its baseline and retries
+    // the push at poll cadence, which can wake an idle session the moment the
+    // socket recovers. Spooling here instead would strand the report behind
+    // hook events an idle session never fires; persistent push failure ends in
+    // the watch's own stop-after-consecutive-failures notice.
+    await pushMessage({ channel: pushChannel, text: report })
+    extendKeepAlive({ config })
+    refreshSessionState()
+    if (config.desktopNotifications) {
+      notifyDesktop(`PR Monitor — ${targetKey(target)}`, "New report delivered to your Claude Code session")
     }
+    return
   }
   spoolReport(claudePid, report)
   extendKeepAlive({ config })
