@@ -78,18 +78,27 @@ The bundled `monitor-pr` skill turns reports into work, so the normal path needs
    feedback. Claude uses unconditional `mark_ready` only when new activity is non-actionable and should not receive
    another reply.
 
-### How reports arrive (and how that differs from opencode)
+### How reports arrive (push-based like opencode, with a passive fallback)
 
-Claude Code has no way for a background process to push a message into a session, so delivery is passive. The bundled MCP server spools finished reports, and plugin hooks inject them into the conversation at the next opportunity:
+On current Claude Code versions delivery is push-based, exactly like opencode: each session exposes a local
+messaging socket, and the bundled MCP server injects finished reports into the owning conversation as visible
+`[PR Monitor]` messages. A report arriving while the session sits idle starts its own turn; one arriving mid-turn
+surfaces alongside the work in progress. Claude never waits for the monitor — no sleeps, no delays, no waiter
+commands — it simply ends its turn and is woken when something happens. A push that fails is retried by the watch at
+poll cadence, and persistent failure stops the monitor with a terminal notice left in the fallback spool.
+
+On hosts without the messaging socket, delivery falls back to the passive spool: the MCP server writes reports to
+disk and plugin hooks inject them at the next opportunity —
 
 - immediately after any tool call Claude makes (`PostToolUse`),
 - when you submit a prompt (`UserPromptSubmit`),
 - when Claude tries to end its turn (`Stop`) — a pending report holds the turn open so Claude addresses it before going idle.
 
 That alone still leaves a gap: a report landing while the session sits idle waits until your next message.
-**Keep-alive** closes it. While a monitored PR does not carry the ready label, the `Stop` hook supplies an exact
-`claude-code/hooks/await-activity.mjs` command that blocks until a report is spooled. That hook-issued command is the
-only waiting mechanism Claude should run; it must never invent a delay or polling job after starting the monitor.
+**Keep-alive** closes it, on those fallback hosts only. While a monitored PR does not carry the ready label, the
+`Stop` hook supplies an exact `claude-code/hooks/await-activity.mjs` command that blocks until a report is spooled.
+That hook-issued command is the only waiting mechanism Claude should ever run; it must never invent a delay or
+polling job after starting the monitor.
 
 Bounds, so a loop can never run away:
 
@@ -97,7 +106,8 @@ Bounds, so a loop can never run away:
   MCP server goes away.
 - `keepAliveMaxMinutes` (default 120) caps *idle* waiting; every delivered report refreshes it, so an active PR keeps going and an abandoned one lets go.
 - <kbd>Esc</kbd> interrupts the wait like any other tool call, and asking Claude to stop wins over the loop.
-- Set `"keepAlive": false` to switch the whole thing off and keep the passive-delivery behavior.
+- Set `"keepAlive": false` to switch the fallback loop off and keep pure passive delivery. With push delivery
+  the loop is never armed, so the setting only matters on socketless hosts.
 
 Prefer being told out of band instead? Set `desktopNotifications: true` for an OS notification when a report is waiting.
 
@@ -181,10 +191,10 @@ Optional, per project: use `.pr-monitor.json` for every host. Claude Code falls 
 | `ignoreCommentTag`     | `<!-- pr-monitor:reply -->` | Mandatory prefix for agent-authored GitHub replies. A local-account comment without this exact starting prefix is treated as human feedback; prefixed replies remain private acknowledgement evidence and do not count as new relevant comments. |
 | `announceOnStart`      | `true`  | Deliver a full status report immediately when a monitor starts, so the session sees its starting point and can address anything already outstanding on the PR. Set `false` to disable. |
 | `flushOnCiFailure`     | `true`  | Report a newly failing check at the next poll instead of waiting out `debounceMinutes` (and any CI hold), so CI fixes start sooner. Counts failures found while the suite is still running. At most one instant report per head commit — later failures on the same commit ride along with the debounced suite-conclusion report. Set `false` for debounce-only delivery. |
-| `desktopNotifications` | `false` | Claude Code only: emit an OS notification (macOS/Linux) when a report is spooled, so an idle session's reports aren't silently waiting. |
+| `desktopNotifications` | `false` | Claude Code only: emit an OS notification (macOS/Linux) when a report is delivered or spooled. |
 | `readyLabel`           | `ready-for-human-review` | Label managed automatically by active watches and explicitly by `mark_ready`/`unmark_ready`. |
-| `keepAlive`            | `true`  | Claude Code only: while a monitored PR lacks the ready label, refuse turn-end and have Claude wait for the next report. Set `false` for passive delivery. |
-| `keepAliveMaxMinutes`  | `120`   | Claude Code only: cap on how long the keep-alive loop waits with *nothing happening*. Refreshed by every delivered report, so it bounds idle time rather than total work time. |
+| `keepAlive`            | `true`  | Claude Code fallback hosts only (no messaging socket): while a monitored PR lacks the ready label, refuse turn-end and have Claude wait for the next report. Ignored on push-enabled hosts, where reports arrive on their own. Set `false` for passive delivery. |
+| `keepAliveMaxMinutes`  | `120`   | Claude Code fallback hosts only: cap on how long the keep-alive loop waits with *nothing happening*. Refreshed by every delivered report, so it bounds idle time rather than total work time. Ignored on push-enabled hosts. |
 
 ## Behavior details
 

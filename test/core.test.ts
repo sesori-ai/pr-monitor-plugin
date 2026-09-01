@@ -92,6 +92,7 @@ function watchHarness(
   let remainingReadinessFailures = opts.readinessFailures ?? 0
   let deliveryAttempts = 0
   const reports: string[] = []
+  const persisted: string[] = []
   const readyChanges: boolean[] = []
   const readyObservations: boolean[] = []
   const watch = new PrWatch({
@@ -108,6 +109,9 @@ function watchHarness(
           throw new Error("delivery failed")
         }
         reports.push(report)
+      },
+      persist: async (report) => {
+        persisted.push(report)
       },
       log: () => {},
       onStopped: () => {},
@@ -131,6 +135,7 @@ function watchHarness(
   return {
     watch,
     reports,
+    persisted,
     readyChanges,
     readyObservations,
     get deliveryAttempts() {
@@ -798,6 +803,8 @@ test("the initial announcement counts toward the delivery-failure limit", async 
 
   assert.equal(harness.deliveryAttempts, 10)
   assert.equal(harness.watch.isStopped, true)
+  assert.equal(harness.persisted.length, 1)
+  assert.match(harness.persisted[0]!, /Monitor stopped: 10 consecutive delivery failures/)
 })
 
 test("normalization preserves tagged replies as private acknowledgement evidence", () => {

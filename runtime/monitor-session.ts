@@ -255,6 +255,10 @@ export class MonitorSession<TConfig extends MonitorConfig> {
         now: this.deps.now,
         fetchSnapshot: () => this.fetchSnapshot({ target, config }),
         deliver: (report) => reportChannel.deliver({ report }),
+        persist:
+          reportChannel.persist === undefined
+            ? undefined
+            : (report) => reportChannel.persist?.({ report }) ?? Promise.resolve(),
         log: this.deps.log,
         onStopped: () => {
           this.deps.cancel({ timer })

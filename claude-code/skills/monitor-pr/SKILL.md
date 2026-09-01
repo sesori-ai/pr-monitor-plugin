@@ -3,10 +3,11 @@ name: monitor-pr
 description: >-
   Drive a GitHub PR to ready-for-human-review without supervision. Start
   pr_monitor immediately after opening a PR and act on every automatic report;
-  the monitor owns polling and readiness labels, so never create sleeps,
-  scheduled checks, or polling loops. Address every newly commented thread,
-  failing CI, and conflicts. Use after `gh pr create`, when asked to watch a PR,
-  and whenever a "[PR Monitor]" or "[PR Monitor keep-alive]" message appears.
+  the monitor owns polling, delivery, and readiness labels — reports arrive on
+  their own, so never create sleeps, delays, timeouts, scheduled checks, or
+  polling loops. Address every newly commented thread, failing CI, and
+  conflicts. Use after `gh pr create`, when asked to watch a PR, and whenever a
+  "[PR Monitor]" or "[PR Monitor keep-alive]" message appears.
 ---
 
 # monitor-pr
@@ -89,19 +90,19 @@ automation may restore readiness after a later clean assessment.
 
 ## 5. Never invent a wait
 
-Never run `sleep`, delayed Bash, cron, a background polling loop, repeated
-`gh pr checks`, or routine `status`/`flush` calls. The monitor owns polling.
+The monitor delivers on its own: a new report arrives as a `[PR Monitor]`
+message even while the session is idle, and starts its own turn. Waiting is
+never the agent's job. Never run `sleep`, delayed Bash, cron, a background
+polling loop, repeated `gh pr checks`, routine `status`/`flush` calls, or any
+other delay/timeout mechanism to wait for the monitor. When nothing is left to
+handle, end the turn — the next report re-opens the work by itself.
 
-When a turn would end while a PR is not ready, the plugin may inject a
-`[PR Monitor keep-alive]` message containing the exact waiter:
-
-```
-node "<plugin>/hooks/await-activity.mjs" --session <pid> --timeout 540
-```
-
-That hook-issued command is the only permitted waiter. Run it only when asked,
-using Bash with `timeout: 600000`. Never wrap it in another delay. If no
-keep-alive message asks, end the turn. If the user asks to stop, call
+Only on legacy hosts without push delivery, the plugin may inject a
+`[PR Monitor keep-alive]` message containing an exact waiter command
+(`node "<plugin>/hooks/await-activity.mjs" --session <pid> --timeout 540`).
+Run that exact command, with Bash `timeout: 600000`, only when such a message
+explicitly asks; never wrap it in another delay and never start it unasked. If
+no keep-alive message asks, end the turn. If the user asks to stop, call
 `pr_monitor(action: "stop", pr: "all")`.
 
 ## Other actions

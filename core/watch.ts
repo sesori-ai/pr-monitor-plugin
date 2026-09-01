@@ -29,6 +29,13 @@ export type WatchDeps = {
   now: () => number
   fetchSnapshot: () => Promise<PrSnapshot>
   deliver: (report: string) => Promise<void>
+  /**
+   * Best-effort persistence for a terminal notice when `deliver` itself is the
+   * broken channel (consecutive delivery failures). Shells with a durable side
+   * channel (Claude Code's spool, OpenCode's no-reply prompt) supply it so the
+   * user eventually learns monitoring ended; without it the stop is log-only.
+   */
+  persist?: (report: string) => Promise<void>
   log: (message: string) => void
   onStopped: () => void
   readiness?: ReadinessDeps
@@ -448,7 +455,7 @@ export class PrWatch {
   private handlePollFailure(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error)
     if (error instanceof PollError && error.notFound) {
-      void this.deliverOrLog(
+      void this.deliverStopNotice(
         this.stopNotice(
           `Monitor stopped: PR not found (deleted or inaccessible). Last error: ${message}`,
         ),
@@ -461,7 +468,7 @@ export class PrWatch {
       `poll failed for ${targetKey(this.target)} (${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${message}`,
     )
     if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-      void this.deliverOrLog(
+      void this.deliverStopNotice(
         this.stopNotice(
           `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive poll failures. Last error: ${message}`,
         ),
@@ -513,6 +520,21 @@ export class PrWatch {
         this.deps.log(
           `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`,
         )
+        // The delivery channel is the thing that is broken, so the notice goes
+        // through the shell's persistent side channel when one exists. A watch
+        // stopped manually while this attempt was in flight owes no notice.
+        if (!this.stopped && this.deps.persist !== undefined) {
+          try {
+            await this.deps.persist(
+              this.stopNotice(
+                `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures. Last error: ` +
+                  `${error instanceof Error ? error.message : String(error)}`,
+              ),
+            )
+          } catch (persistError) {
+            this.deps.log(`terminal stop notice could not be persisted for ${targetKey(this.target)}: ${persistError}`)
+          }
+        }
         this.stop()
       }
     }
@@ -598,6 +620,21 @@ export class PrWatch {
       this.lastActivityAt = this.deps.now()
       this.holdStartedAt = undefined
       this.urgent = false
+    }
+  }
+
+  /**
+   * Deliver a terminal stop notice, falling back to the persistent channel
+   * when the delivery channel itself fails — a watch that stops must not do so
+   * silently when any channel can still carry the fact.
+   */
+  private async deliverStopNotice(message: string): Promise<void> {
+    if (await this.deliverOrLog(message)) return
+    if (this.deps.persist === undefined) return
+    try {
+      await this.deps.persist(message)
+    } catch (error) {
+      this.deps.log(`terminal stop notice could not be persisted for ${targetKey(this.target)}: ${error}`)
     }
   }
 

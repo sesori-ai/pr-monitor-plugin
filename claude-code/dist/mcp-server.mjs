@@ -6917,7 +6917,7 @@ var require_dist = __commonJS({
 
 // claude-code/src/mcp-server.ts
 import { join as join3 } from "node:path";
-import process4 from "node:process";
+import process5 from "node:process";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -32124,7 +32124,7 @@ var PrWatch = class {
   handlePollFailure(error51) {
     const message = error51 instanceof Error ? error51.message : String(error51);
     if (error51 instanceof PollError && error51.notFound) {
-      void this.deliverOrLog(
+      void this.deliverStopNotice(
         this.stopNotice(
           `Monitor stopped: PR not found (deleted or inaccessible). Last error: ${message}`
         )
@@ -32137,7 +32137,7 @@ var PrWatch = class {
       `poll failed for ${targetKey(this.target)} (${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${message}`
     );
     if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-      void this.deliverOrLog(
+      void this.deliverStopNotice(
         this.stopNotice(
           `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive poll failures. Last error: ${message}`
         )
@@ -32187,6 +32187,17 @@ var PrWatch = class {
         this.deps.log(
           `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`
         );
+        if (!this.stopped && this.deps.persist !== void 0) {
+          try {
+            await this.deps.persist(
+              this.stopNotice(
+                `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures. Last error: ${error51 instanceof Error ? error51.message : String(error51)}`
+              )
+            );
+          } catch (persistError) {
+            this.deps.log(`terminal stop notice could not be persisted for ${targetKey(this.target)}: ${persistError}`);
+          }
+        }
         this.stop();
       }
     }
@@ -32253,6 +32264,20 @@ var PrWatch = class {
       this.lastActivityAt = this.deps.now();
       this.holdStartedAt = void 0;
       this.urgent = false;
+    }
+  }
+  /**
+   * Deliver a terminal stop notice, falling back to the persistent channel
+   * when the delivery channel itself fails — a watch that stops must not do so
+   * silently when any channel can still carry the fact.
+   */
+  async deliverStopNotice(message) {
+    if (await this.deliverOrLog(message)) return;
+    if (this.deps.persist === void 0) return;
+    try {
+      await this.deps.persist(message);
+    } catch (error51) {
+      this.deps.log(`terminal stop notice could not be persisted for ${targetKey(this.target)}: ${error51}`);
     }
   }
   async deliverOrLog(message) {
@@ -32455,6 +32480,7 @@ ${raced.watch.statusLine()}` };
         now: this.deps.now,
         fetchSnapshot: () => this.fetchSnapshot({ target, config: config2 }),
         deliver: (report) => reportChannel.deliver({ report }),
+        persist: reportChannel.persist === void 0 ? void 0 : (report) => reportChannel.persist?.({ report }) ?? Promise.resolve(),
         log: this.deps.log,
         onStopped: () => {
           this.deps.cancel({ timer });
@@ -32617,6 +32643,51 @@ function createNodeGhRunner() {
   });
 }
 
+// claude-code/src/push.ts
+import { connect } from "node:net";
+import process4 from "node:process";
+function messagingChannel(env = process4.env) {
+  const socketPath = env["CLAUDE_CODE_MESSAGING_SOCKET"];
+  if (socketPath === void 0 || socketPath.length === 0) return void 0;
+  const token = env["CLAUDE_CODE_MESSAGING_TOKEN"];
+  return { socketPath, token: token !== void 0 && token.length > 0 ? token : void 0 };
+}
+var SOCKET_TIMEOUT_MS = 3e3;
+function pushMessage({ channel, text }) {
+  return new Promise((resolve, reject) => {
+    const socket = connect({ path: channel.socketPath });
+    let failure;
+    let wrote = false;
+    let settled = false;
+    const settle = (error51) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      if (error51 !== void 0) reject(error51);
+      else resolve();
+    };
+    socket.setTimeout(
+      SOCKET_TIMEOUT_MS,
+      () => wrote ? settle() : settle(new Error("messaging socket timed out"))
+    );
+    socket.on("error", (error51) => {
+      failure ??= error51;
+    });
+    socket.on("connect", () => {
+      const lines = [];
+      if (channel.token !== void 0) lines.push(JSON.stringify({ type: "auth", token: channel.token }));
+      lines.push(JSON.stringify({ type: "user", message: { role: "user", content: text } }));
+      socket.end(lines.map((line) => `${line}
+`).join(""), () => {
+        wrote = true;
+      });
+    });
+    socket.on("close", (hadError) => {
+      settle(failure ?? (hadError ? new Error("messaging socket closed with an error") : void 0));
+    });
+  });
+}
+
 // claude-code/src/session-state.ts
 import { mkdirSync as mkdirSync2, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
@@ -32765,8 +32836,9 @@ function writeSessionState(claudePid2, state) {
 }
 
 // claude-code/src/mcp-server.ts
-var claudePid = process4.ppid;
-var projectDir = process4.env["CLAUDE_PROJECT_DIR"] ?? process4.cwd();
+var claudePid = process5.ppid;
+var pushChannel = messagingChannel();
+var projectDir = process5.env["CLAUDE_PROJECT_DIR"] ?? process5.cwd();
 var configPaths = [
   join3(projectDir, ".pr-monitor.json"),
   join3(projectDir, ".claude", "pr-monitor.json"),
@@ -32786,7 +32858,11 @@ var refreshSessionState = () => {
   const pollMs = Math.max(...watches.map(({ config: config2 }) => config2.pollIntervalSeconds * 1e3), 0);
   writeSessionState(claudePid, {
     version: 1,
-    keepAlive: active.some(({ config: config2 }) => config2.keepAlive),
+    // With a push channel the session may go idle freely — the next report
+    // wakes it by itself, so the Stop hook must not hold turn-end. A failed
+    // push is retried by the watch at poll cadence (see deliver), never parked
+    // behind hooks an idle session cannot fire.
+    keepAlive: pushChannel === void 0 && active.some(({ config: config2 }) => config2.keepAlive),
     expiresAtMs: Date.now() + Math.max(pollMs * 3 + 6e4, STATE_LIVENESS_FLOOR_MS),
     keepAliveUntilMs,
     monitors: active.map(({ target }) => targetKey(target))
@@ -32795,18 +32871,26 @@ var refreshSessionState = () => {
 var extendKeepAlive = ({ config: config2 }) => {
   keepAliveUntilMs = Math.max(keepAliveUntilMs, Date.now() + config2.keepAliveMaxMinutes * 6e4);
 };
-var deliver = ({
+var deliver = async ({
   target,
   config: config2,
   report
 }) => {
+  if (pushChannel !== void 0) {
+    await pushMessage({ channel: pushChannel, text: report });
+    extendKeepAlive({ config: config2 });
+    refreshSessionState();
+    if (config2.desktopNotifications) {
+      notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, "New report delivered to your Claude Code session");
+    }
+    return;
+  }
   spoolReport(claudePid, report);
   extendKeepAlive({ config: config2 });
   refreshSessionState();
   if (config2.desktopNotifications) {
     notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, "New report waiting in your Claude Code session");
   }
-  return Promise.resolve();
 };
 monitorSession = new MonitorSession({
   runGh,
@@ -32829,6 +32913,7 @@ monitorSession = new MonitorSession({
   statusSuffix: ({ target }) => handedOff.has(targetRegistryKey(target)) ? ", handed off for human review" : ""
 });
 var prepareStart = async () => {
+  if (pushChannel !== void 0) return void 0;
   try {
     probeSpool(claudePid);
     return void 0;
@@ -32841,7 +32926,7 @@ var formatResult = ({ result }) => {
     const { config: config2, announcement } = result.start;
     const replyPrefix = config2.ignoreCommentTag ?? "<!-- pr-monitor:reply -->";
     return `${result.text}
-` + (config2.announceOnStart ? announcement === "delivered" /* delivered */ ? "An initial [PR Monitor] report is spooled for the next hook event. " : "Initial delivery failed and will retry at the next poll without losing its baseline. " : "") + `Polling every ${config2.pollIntervalSeconds}s; settled activity is injected automatically at the next tool call, user message, or turn end after ${config2.debounceMinutes} quiet minutes. ` + (config2.flushOnCiFailure ? "A failing check is reported at the next poll without waiting for the quiet window or the rest of CI. " : "") + `A new merge conflict or terminal state is also immediate. Readiness is managed automatically; agent-authored GitHub replies must begin with \`${replyPrefix}\`. Use mark_ready when new feedback is non-actionable and no reply should be posted. Never invent sleeps, scheduled checks, polling loops, repeated CI checks, or routine status/flush calls. The monitor stops on merge/close and does not survive this Claude Code session.` + (config2.keepAlive ? "\nKeep-alive follows the ready label. Run only the exact await-activity command supplied by a [PR Monitor keep-alive] message; do not create another waiting mechanism." : "");
+` + (config2.announceOnStart ? announcement === "delivered" /* delivered */ ? pushChannel !== void 0 ? "An initial [PR Monitor] report has been delivered into this session. " : "An initial [PR Monitor] report is spooled for the next hook event. " : "Initial delivery failed and will retry at the next poll without losing its baseline. " : "") + (pushChannel !== void 0 ? `Polling every ${config2.pollIntervalSeconds}s; settled activity arrives on its own as a '[PR Monitor]' message after ${config2.debounceMinutes} quiet minutes \u2014 even while this session is idle. ` : `Polling every ${config2.pollIntervalSeconds}s; settled activity is injected automatically at the next tool call, user message, or turn end after ${config2.debounceMinutes} quiet minutes. `) + (config2.flushOnCiFailure ? "A failing check is reported at the next poll without waiting for the quiet window or the rest of CI. " : "") + `A new merge conflict or terminal state is also immediate. Readiness is managed automatically; agent-authored GitHub replies must begin with \`${replyPrefix}\`. Use mark_ready when new feedback is non-actionable and no reply should be posted. Never invent sleeps, delays, timeouts, scheduled checks, polling loops, repeated CI checks, or routine status/flush calls \u2014 the monitor delivers on its own. The monitor stops on merge/close and does not survive this Claude Code session.` + (pushChannel !== void 0 ? "\nEnd the turn when there is nothing left to handle; a new report starts its own turn." : config2.keepAlive ? "\nKeep-alive follows the ready label. Run only the exact await-activity command supplied by a [PR Monitor keep-alive] message; do not create another waiting mechanism." : "");
   }
   if (result.ready?.ready && result.ready.watched) {
     return `${result.text}
@@ -32886,24 +32971,24 @@ var shutdown = () => {
       keepAliveUntilMs: 0,
       monitors: []
     });
-    process4.exit(0);
+    process5.exit(0);
   })();
 };
-process4.stdin.on("end", shutdown);
-process4.stdin.on("close", shutdown);
-process4.on("SIGTERM", shutdown);
-process4.on("SIGINT", shutdown);
+process5.stdin.on("end", shutdown);
+process5.stdin.on("close", shutdown);
+process5.on("SIGTERM", shutdown);
+process5.on("SIGINT", shutdown);
 claimSpool(claudePid);
 collectDeadSpools(claudePid);
-var server = new McpServer({ name: "pr-monitor", version: "0.3.1" });
+var server = new McpServer({ name: "pr-monitor", version: "0.4.0" });
 server.registerTool(
   "pr_monitor",
   {
     description: buildMonitorToolDescription({
-      delivery: "reports are injected into THIS session as '[PR Monitor]' messages at hook events.",
+      delivery: pushChannel !== void 0 ? "reports are pushed into THIS session as visible '[PR Monitor]' messages, even while it is idle." : "reports are injected into THIS session as '[PR Monitor]' messages at hook events.",
       configPath: ".pr-monitor.json (falling back to .claude/pr-monitor.json, then .opencode/pr-monitor.json)",
       lifecycle: "Monitors are per-session and do not survive Claude Code restarts.",
-      waiting: "End the turn when idle. If a [PR Monitor keep-alive] message supplies an await-activity command, run only that exact event waiter; never invent another delay or polling mechanism."
+      waiting: pushChannel !== void 0 ? "The monitor delivers on its own; never set up delays, timeouts, or waiters for it. End the turn when idle \u2014 a new report starts its own turn." : "End the turn when idle. If a [PR Monitor keep-alive] message supplies an await-activity command, run only that exact event waiter; never invent another delay or polling mechanism."
     }),
     inputSchema: {
       action: external_exports.enum(MONITOR_ACTION_VALUES).describe("What to do"),

@@ -36,8 +36,9 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   the prefix is identified explicitly as new human feedback rather than an earlier agent reply. Pending-review
   feedback warns that REST pull-comment results may omit it and directs the agent to inspect the listed thread via
   GraphQL before marking ready. Delivery failure restores the prior baseline and urgency. Ten consecutive poll
-  failures stop with a notice; ten consecutive delivery failures stop after logging because the failed delivery
-  channel cannot reliably carry a notice.
+  failures stop with a notice; ten consecutive delivery failures stop after logging and best-effort persist a
+  terminal stop notice through the shell's persistent channel where one exists, because the failed delivery channel
+  itself cannot carry it.
 - Merge/close produces one terminal report and removes the watch. Explicit stop, session cleanup, and failed starts
   leave no timer. Cleanup drains an already-started label mutation before unregistering the watch, so a successor
   cannot race a stale add/remove; it does not wait for a stalled fetch or report delivery. A cleanup crossing an
@@ -70,8 +71,9 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 - The monitor owns GitHub polling and report timing. Every tool description and shipped skill forbids agent-created
   sleeps, delayed or scheduled commands, cron, background polling, repeated `gh pr checks`, and routine
   `status`/`flush` calls while waiting.
-- OpenCode, Pi, and OMP end the turn and rely on native push delivery. Claude Code may run only the exact
-  `await-activity.mjs` event waiter supplied by its keep-alive hook; it must not invent another waiter.
+- Every host ends the turn and relies on push delivery. Only a Claude Code session without the messaging socket
+  falls back to the keep-alive loop, and there Claude may run only the exact `await-activity.mjs` event waiter
+  supplied by its keep-alive hook; it must not invent another waiter, delay, or timeout.
 - A delivered report already advances the baseline. Agent GitHub replies begin with the configured prefix. A
   non-actionable bot acknowledgement gets no reply; the agent uses unconditional `mark_ready` instead, avoiding an
   acknowledgement loop.
@@ -89,10 +91,18 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 
 ### Claude Code with Node.js 18 or newer on macOS/Linux
 
-- The MCP process spools one file per report under the owning Claude process identity. Hooks claim reports exactly
-  once, do not let Task subagents consume them, and inject them on prompt, tool completion, or turn end.
-- Keep-alive publishes a liveness heartbeat and rolling idle deadline. It ends on confirmed handoff, stop, terminal
-  state, MCP death, or idle expiry; only its exact event waiter may block.
+- When the session exposes its messaging socket (`CLAUDE_CODE_MESSAGING_SOCKET`), the MCP process pushes each report
+  into the owning session as a visible message: an auth line then a `{"type":"user"}` line of newline-delimited
+  JSON. A pushed report starts its own turn on an idle session and surfaces mid-turn on a busy one; keep-alive stays
+  disarmed (`keepAlive: false`) so the Stop hook never blocks and no waiter is suggested.
+- A failed push is a delivery failure: the watch rolls back its baseline and retries at poll cadence, and
+  persistent failure stops the monitor after logging, best-effort persisting a terminal stop notice into the spool
+  for the user's return — a report is never parked on disk behind hook events an idle session cannot fire. Without
+  the socket, the MCP process spools one file per report under the owning Claude process identity. Hooks claim
+  reports exactly once, do not let Task subagents consume them, and inject them on prompt, tool completion, or turn
+  end.
+- In that fallback, keep-alive publishes a liveness heartbeat and rolling idle deadline. It ends on confirmed
+  handoff, stop, terminal state, MCP death, or idle expiry; only its exact event waiter may block.
 - `/clear` retains process-owned watches. Process exit loses them. MCP restart spools factual stop notices when the
   owning process remains able to receive them.
 - Claude discovers exactly one conventional waiter-aware `monitor-pr` skill.
@@ -177,8 +187,10 @@ issue, and terminal PR.
   older replies cannot be subtracted from the repository-wide relevant total and may cause false activity.
 - GitHub CLI authentication, GitHub GraphQL/REST behavior, rate limits, and external CI timing cannot be proved by
   fakes; those claims remain partial unless their L5 rows run.
-- Claude delivery is necessarily spool/hook based. Desktop notifications and the supported live Claude matrix are
-  macOS/Linux only; Pi/OMP use native push and do not use the Claude waiter.
+- Claude push injection has no protocol acknowledgement: a clean socket close is the success signal, so a token
+  rotated underneath a still-running MCP server can drop a report silently until the next `/mcp` reconnect. Desktop
+  notifications and the supported live Claude matrix are macOS/Linux only; Pi/OMP use native push and do not use the
+  Claude waiter.
 
 ## Sources
 
