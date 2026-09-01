@@ -32124,7 +32124,7 @@ var PrWatch = class {
   handlePollFailure(error51) {
     const message = error51 instanceof Error ? error51.message : String(error51);
     if (error51 instanceof PollError && error51.notFound) {
-      void this.deliverOrLog(
+      void this.deliverStopNotice(
         this.stopNotice(
           `Monitor stopped: PR not found (deleted or inaccessible). Last error: ${message}`
         )
@@ -32137,7 +32137,7 @@ var PrWatch = class {
       `poll failed for ${targetKey(this.target)} (${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${message}`
     );
     if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-      void this.deliverOrLog(
+      void this.deliverStopNotice(
         this.stopNotice(
           `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive poll failures. Last error: ${message}`
         )
@@ -32187,7 +32187,7 @@ var PrWatch = class {
         this.deps.log(
           `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`
         );
-        if (this.deps.persist !== void 0) {
+        if (!this.stopped && this.deps.persist !== void 0) {
           try {
             await this.deps.persist(
               this.stopNotice(
@@ -32264,6 +32264,20 @@ var PrWatch = class {
       this.lastActivityAt = this.deps.now();
       this.holdStartedAt = void 0;
       this.urgent = false;
+    }
+  }
+  /**
+   * Deliver a terminal stop notice, falling back to the persistent channel
+   * when the delivery channel itself fails — a watch that stops must not do so
+   * silently when any channel can still carry the fact.
+   */
+  async deliverStopNotice(message) {
+    if (await this.deliverOrLog(message)) return;
+    if (this.deps.persist === void 0) return;
+    try {
+      await this.deps.persist(message);
+    } catch (error51) {
+      this.deps.log(`terminal stop notice could not be persisted for ${targetKey(this.target)}: ${error51}`);
     }
   }
   async deliverOrLog(message) {
@@ -32669,8 +32683,7 @@ function pushMessage({ channel, text }) {
       });
     });
     socket.on("close", (hadError) => {
-      if (wrote) settle();
-      else settle(failure ?? (hadError ? new Error("messaging socket closed with an error") : void 0));
+      settle(failure ?? (hadError ? new Error("messaging socket closed with an error") : void 0));
     });
   });
 }

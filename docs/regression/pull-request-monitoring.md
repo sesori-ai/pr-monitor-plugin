@@ -97,9 +97,10 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   disarmed (`keepAlive: false`) so the Stop hook never blocks and no waiter is suggested.
 - A failed push is a delivery failure: the watch rolls back its baseline and retries at poll cadence, and
   persistent failure stops the monitor after logging, best-effort persisting a terminal stop notice into the spool
-  for the user's return — a report is never parked on disk behind hook events an idle session cannot fire. Without the socket, the MCP process spools one file per report under the
-  owning Claude process identity. Hooks claim reports exactly once, do not let Task subagents consume them, and inject them on
-  prompt, tool completion, or turn end.
+  for the user's return — a report is never parked on disk behind hook events an idle session cannot fire. Without
+  the socket, the MCP process spools one file per report under the owning Claude process identity. Hooks claim
+  reports exactly once, do not let Task subagents consume them, and inject them on prompt, tool completion, or turn
+  end.
 - In that fallback, keep-alive publishes a liveness heartbeat and rolling idle deadline. It ends on confirmed
   handoff, stop, terminal state, MCP death, or idle expiry; only its exact event waiter may block.
 - `/clear` retains process-owned watches. Process exit loses them. MCP restart spools factual stop notices when the

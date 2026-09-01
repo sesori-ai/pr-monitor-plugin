@@ -78,7 +78,7 @@ The bundled `monitor-pr` skill turns reports into work, so the normal path needs
    feedback. Claude uses unconditional `mark_ready` only when new activity is non-actionable and should not receive
    another reply.
 
-### How reports arrive (and how that differs from opencode)
+### How reports arrive (push-based like opencode, with a passive fallback)
 
 On current Claude Code versions delivery is push-based, exactly like opencode: each session exposes a local
 messaging socket, and the bundled MCP server injects finished reports into the owning conversation as visible

@@ -41,11 +41,12 @@ export function messagingChannel(env: NodeJS.ProcessEnv = process.env): PushChan
 const SOCKET_TIMEOUT_MS = 3_000
 
 /**
- * Push one message into the owning session. Resolves once the write has
- * flushed (a post-write timeout or teardown still counts as delivered — the
- * server has the bytes, and retrying would inject the report twice); rejects
- * on pre-write connection failure, error, or timeout so the caller can retry
- * safely.
+ * Push one message into the owning session. Resolves on a clean close after
+ * the write, and on a quiet post-write timeout (a live server holds the bytes
+ * and merely closed slowly; retrying would inject the report twice). Rejects
+ * on any socket error — even after the write flushed, an errored connection
+ * cannot prove the server read the bytes, and a lost report is worse than the
+ * duplicate a retry risks — and on pre-write timeout or connection failure.
  */
 export function pushMessage({ channel, text }: { channel: PushChannel; text: string }): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -79,8 +80,7 @@ export function pushMessage({ channel, text }: { channel: PushChannel; text: str
       })
     })
     socket.on("close", (hadError) => {
-      if (wrote) settle()
-      else settle(failure ?? (hadError ? new Error("messaging socket closed with an error") : undefined))
+      settle(failure ?? (hadError ? new Error("messaging socket closed with an error") : undefined))
     })
   })
 }
