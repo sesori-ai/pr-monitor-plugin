@@ -1,10 +1,13 @@
 // Keep-alive state shared with hooks/drain-spool.mjs and hooks/await-activity.mjs.
 //
-// Claude Code has no push channel into a session, so a report that lands while
-// the session is idle would simply wait on disk (see spool.ts). The keep-alive
-// loop closes that gap: while this session owns a monitor whose PR has not been
-// handed off to a human, the Stop hook refuses turn-end and points the session
-// at the waiter script, which blocks until the next report is spooled.
+// This is the FALLBACK delivery loop. When the session exposes its messaging
+// socket, reports are pushed straight into it (see push.ts), the server writes
+// `keepAlive: false`, and none of this holds the session. Without the socket
+// (or after a failed push), a report that lands while the session is idle
+// would simply wait on disk (see spool.ts). The keep-alive loop closes that
+// gap: while this session owns a monitor whose PR has not been handed off to a
+// human, the Stop hook refuses turn-end and points the session at the waiter
+// script, which blocks until the next report is spooled.
 //
 // Only the MCP server writes this file; the two hook scripts only read it. It
 // lives inside the session's spool dir so it shares that dir's lifecycle —

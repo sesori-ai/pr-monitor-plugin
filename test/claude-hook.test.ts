@@ -43,6 +43,7 @@ test("Claude plugin root contains the exact tracked release payload", () => {
     "hooks/hooks.json",
     "skills/monitor-pr/SKILL.md",
     "src/mcp-server.ts",
+    "src/push.ts",
     "src/session-state.ts",
     "src/spool.ts",
   ])
@@ -52,7 +53,8 @@ test("Claude handoff follows readiness transitions rather than report delivery",
   const source = await readFile("claude-code/src/mcp-server.ts", "utf8")
 
   assert.match(source, /onReadyChanged:.*if \(!ready\).*extendKeepAlive\(\{ config \}\)/s)
-  const deliverBody = /const deliver = \([\s\S]*?return Promise\.resolve\(\)\n}/.exec(source)?.[0] ?? ""
+  const deliverBody = /const deliver = async \(\{[\s\S]*?\n\}\n/.exec(source)?.[0] ?? ""
+  assert.ok(deliverBody.length > 0, "deliver body not found")
   assert.doesNotMatch(deliverBody, /handedOff\.delete/)
 })
 

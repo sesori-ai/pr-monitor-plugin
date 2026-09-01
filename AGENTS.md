@@ -47,7 +47,8 @@ pi/                  # @sesori/pr-monitor-pi workspace shared by upstream Pi and
 
 claude-code/         # Claude Code shell. THIS DIRECTORY IS THE PLUGIN ROOT (= ${CLAUDE_PLUGIN_ROOT}).
   src/               # Bundled; never executed from source.
-    mcp-server.ts# MCP stdio adapter: MonitorSession wiring, spool delivery, handoff, shutdown notices.
+    mcp-server.ts# MCP stdio adapter: MonitorSession wiring, push-first delivery with spool fallback, handoff, shutdown notices.
+    push.ts      # active delivery: injects reports as user messages over the session's uds-messaging socket (env CLAUDE_CODE_MESSAGING_SOCKET/TOKEN).
     spool.ts     # spool write/GC/ownership: ~/.claude/pr-monitor/spool/<claude pid>/<ts>-<server pid>-<seq>.md (tmp+rename).
     session-state.ts # keep-alive state published to the hooks: <spool dir>/session.json.
   hooks/
@@ -81,7 +82,15 @@ where the plugin root sits in the repo.
    the label when needed → mark dirty/reset debounce or urgency → `maybeAutoFlush()`.
 3. **deliver** — shell-specific, injected as `deps.deliver`:
    - opencode (`opencode/index.ts`): `client.session.promptAsync(...)` pushes a `[PR Monitor]` message into the owning session. `promptAsync` never rejects on server error — check `result.error`. `agent` captured at start time (default agent may be a subagent, which fails); model captured per-message via the `chat.message` hook.
-   - Claude Code (`claude-code/src/mcp-server.ts`): `spoolReport()` writes one file per report under `~/.claude/pr-monitor/spool/<claude pid>/`; the plugin's hooks inject spooled text at the next UserPromptSubmit / PostToolUse / Stop event (Stop blocks turn-end so pending reports are addressed). Claude Code has no push channel into a session, so delivery itself is passive by necessity; the keep-alive loop (below) is what stops that mattering while a PR is still in flight.
+   - Claude Code (`claude-code/src/mcp-server.ts` + `push.ts`): push-first. Claude Code binds a per-session
+     uds-messaging socket and exports `CLAUDE_CODE_MESSAGING_SOCKET`/`CLAUDE_CODE_MESSAGING_TOKEN` to child
+     processes (the MCP server is one). `pushMessage` writes an auth line then a `{"type":"user"}` line
+     (newline-delimited JSON), which injects the report as a visible user message — starting a turn when the
+     session is idle, surfacing mid-turn when busy. Injection has no protocol ack: a clean close is success, so a
+     stale token after a messaging-server restart is a silent-drop residue healed by the next `/mcp` reconnect.
+     Hosts without the socket, and any failed push, fall back to `spoolReport()` (one file per report under
+     `~/.claude/pr-monitor/spool/<claude pid>/`) with the plugin's hooks injecting spooled text at the next
+     UserPromptSubmit / PostToolUse / Stop event, guarded by the keep-alive loop (below).
    - Pi/OMP (`pi/extension.ts`): `sendMessage(..., { deliverAs: "steer", triggerTurn: true })` queues while busy and starts a model turn while idle. No spool or waiter is needed.
 
 ## Key behaviors / gotchas
@@ -108,7 +117,7 @@ where the plugin root sits in the repo.
   before-events.
 - Reports never include comment bodies. They include factual counts/authors/readiness plus explicit workflow
   direction when the PR is unready or new feedback needs inspection.
-- **The monitor owns waiting.** Tool descriptions and every shipped skill forbid agent-created sleeps, scheduled checks, background polling, repeated `gh pr checks`, and routine `status`/`flush`. Claude may run only the exact `await-activity.mjs` command supplied by a keep-alive message; OpenCode/Pi/OMP end the turn and rely on native push delivery.
+- **The monitor owns waiting.** Tool descriptions and every shipped skill forbid agent-created sleeps, delays, timeouts, scheduled checks, background polling, repeated `gh pr checks`, and routine `status`/`flush`. All shells end the turn and rely on push delivery; only a legacy Claude host without the messaging socket may be handed the exact `await-activity.mjs` command by a keep-alive message, and Claude may run only that.
 - **Automatic readiness** (`core/readiness.ts`, `core/watch.ts`) — adds the label after green/no CI, definite
   mergeability, and prefixed local replies on every feedback channel. A later head, relevant comment/summary,
   acknowledgement edit/deletion, CI regression, or conflict withdraws it urgently. Mixed same-second
@@ -120,7 +129,10 @@ where the plugin root sits in the repo.
   `pulls/{n}` and refuse non-open targets: label endpoints share the issue namespace, so a plain issue number or a
   terminal PR would otherwise produce false success. `mark_ready` best-effort creates the green label before adding
   it. `unmark_ready` treats a missing label as success. Standalone actions need no active monitor.
-- **Keep-alive loop, Claude Code shell** — while a monitored PR is not handed off, the Stop hook runs
+- **Keep-alive loop, Claude Code shell (fallback only)** — armed only when the session has no messaging socket or
+  the last push failed (`pushDegraded`); with working push delivery `session.json` carries `keepAlive: false`, the
+  Stop hook never blocks, and the session goes idle freely. In fallback: while a monitored PR is not handed off, the
+  Stop hook runs
   `claude-code/hooks/await-activity.mjs`, which blocks until a report is spooled: one model round trip per real event.
   `session-state.ts` publishes liveness and the rolling `keepAliveMaxMinutes` idle deadline. The MCP server refreshes
   it on watch/handoff changes and every poll tick; a lapsed heartbeat tells hooks that the server died. Confirmed
