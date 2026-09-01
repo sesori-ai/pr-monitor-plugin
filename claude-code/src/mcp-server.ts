@@ -126,6 +126,9 @@ monitorSession = new MonitorSession<ClaudeMonitorConfig>({
 })
 
 const prepareStart = async (): Promise<string | undefined> => {
+  // With a push channel the spool only carries shutdown notices; an unwritable
+  // spool must not block a start whose reports never touch it.
+  if (pushChannel !== undefined) return undefined
   try {
     probeSpool(claudePid)
     return undefined

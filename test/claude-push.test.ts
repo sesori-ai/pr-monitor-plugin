@@ -44,7 +44,7 @@ async function withUdsServer(
   try {
     await run({ socketPath, received: () => lines })
   } finally {
-    server.close()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
     await rm(dir, { recursive: true, force: true })
   }
 }

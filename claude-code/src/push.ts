@@ -49,6 +49,7 @@ export function pushMessage({ channel, text }: { channel: PushChannel; text: str
   return new Promise((resolve, reject) => {
     const socket = connect({ path: channel.socketPath })
     let failure: Error | undefined
+    let wrote = false
     let settled = false
     const settle = (error?: Error): void => {
       if (settled) return
@@ -57,7 +58,12 @@ export function pushMessage({ channel, text }: { channel: PushChannel; text: str
       if (error !== undefined) reject(error)
       else resolve()
     }
-    socket.setTimeout(SOCKET_TIMEOUT_MS, () => settle(new Error("messaging socket timed out")))
+    // A timeout after the write flushed counts as delivered: rejecting there
+    // would make the watch retry a message the server already read, injecting
+    // it twice. Only a timeout before the write is a failed delivery.
+    socket.setTimeout(SOCKET_TIMEOUT_MS, () =>
+      wrote ? settle() : settle(new Error("messaging socket timed out")),
+    )
     socket.on("error", (error) => {
       // Keep the first error for the close handler; 'close' always follows.
       failure ??= error
@@ -66,10 +72,12 @@ export function pushMessage({ channel, text }: { channel: PushChannel; text: str
       const lines: string[] = []
       if (channel.token !== undefined) lines.push(JSON.stringify({ type: "auth", token: channel.token }))
       lines.push(JSON.stringify({ type: "user", message: { role: "user", content: text } }))
-      socket.end(lines.map((line) => `${line}\n`).join(""))
+      socket.end(lines.map((line) => `${line}\n`).join(""), () => {
+        wrote = true
+      })
     })
     socket.on("close", (hadError) => {
-      settle(failure ?? (hadError ? new Error("messaging socket closed with an error") : undefined))
+      settle(failure ?? (hadError && !wrote ? new Error("messaging socket closed with an error") : undefined))
     })
   })
 }

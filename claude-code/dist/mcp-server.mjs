@@ -32631,6 +32631,7 @@ function pushMessage({ channel, text }) {
   return new Promise((resolve, reject) => {
     const socket = connect({ path: channel.socketPath });
     let failure;
+    let wrote = false;
     let settled = false;
     const settle = (error51) => {
       if (settled) return;
@@ -32639,7 +32640,10 @@ function pushMessage({ channel, text }) {
       if (error51 !== void 0) reject(error51);
       else resolve();
     };
-    socket.setTimeout(SOCKET_TIMEOUT_MS, () => settle(new Error("messaging socket timed out")));
+    socket.setTimeout(
+      SOCKET_TIMEOUT_MS,
+      () => wrote ? settle() : settle(new Error("messaging socket timed out"))
+    );
     socket.on("error", (error51) => {
       failure ??= error51;
     });
@@ -32648,10 +32652,12 @@ function pushMessage({ channel, text }) {
       if (channel.token !== void 0) lines.push(JSON.stringify({ type: "auth", token: channel.token }));
       lines.push(JSON.stringify({ type: "user", message: { role: "user", content: text } }));
       socket.end(lines.map((line) => `${line}
-`).join(""));
+`).join(""), () => {
+        wrote = true;
+      });
     });
     socket.on("close", (hadError) => {
-      settle(failure ?? (hadError ? new Error("messaging socket closed with an error") : void 0));
+      settle(failure ?? (hadError && !wrote ? new Error("messaging socket closed with an error") : void 0));
     });
   });
 }
@@ -32881,6 +32887,7 @@ monitorSession = new MonitorSession({
   statusSuffix: ({ target }) => handedOff.has(targetRegistryKey(target)) ? ", handed off for human review" : ""
 });
 var prepareStart = async () => {
+  if (pushChannel !== void 0) return void 0;
   try {
     probeSpool(claudePid);
     return void 0;
