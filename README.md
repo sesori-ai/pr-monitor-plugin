@@ -80,16 +80,25 @@ The bundled `monitor-pr` skill turns reports into work, so the normal path needs
 
 ### How reports arrive (and how that differs from opencode)
 
-Claude Code has no way for a background process to push a message into a session, so delivery is passive. The bundled MCP server spools finished reports, and plugin hooks inject them into the conversation at the next opportunity:
+On current Claude Code versions delivery is push-based, exactly like opencode: each session exposes a local
+messaging socket, and the bundled MCP server injects finished reports into the owning conversation as visible
+`[PR Monitor]` messages. A report arriving while the session sits idle starts its own turn; one arriving mid-turn
+surfaces alongside the work in progress. Claude never waits for the monitor — no sleeps, no delays, no waiter
+commands — it simply ends its turn and is woken when something happens. A push that fails is retried by the watch at
+poll cadence, and persistent failure stops the monitor with a terminal notice left in the fallback spool.
+
+On hosts without the messaging socket, delivery falls back to the passive spool: the MCP server writes reports to
+disk and plugin hooks inject them at the next opportunity —
 
 - immediately after any tool call Claude makes (`PostToolUse`),
 - when you submit a prompt (`UserPromptSubmit`),
 - when Claude tries to end its turn (`Stop`) — a pending report holds the turn open so Claude addresses it before going idle.
 
 That alone still leaves a gap: a report landing while the session sits idle waits until your next message.
-**Keep-alive** closes it. While a monitored PR does not carry the ready label, the `Stop` hook supplies an exact
-`claude-code/hooks/await-activity.mjs` command that blocks until a report is spooled. That hook-issued command is the
-only waiting mechanism Claude should run; it must never invent a delay or polling job after starting the monitor.
+**Keep-alive** closes it, on those fallback hosts only. While a monitored PR does not carry the ready label, the
+`Stop` hook supplies an exact `claude-code/hooks/await-activity.mjs` command that blocks until a report is spooled.
+That hook-issued command is the only waiting mechanism Claude should ever run; it must never invent a delay or
+polling job after starting the monitor.
 
 Bounds, so a loop can never run away:
 
@@ -97,7 +106,8 @@ Bounds, so a loop can never run away:
   MCP server goes away.
 - `keepAliveMaxMinutes` (default 120) caps *idle* waiting; every delivered report refreshes it, so an active PR keeps going and an abandoned one lets go.
 - <kbd>Esc</kbd> interrupts the wait like any other tool call, and asking Claude to stop wins over the loop.
-- Set `"keepAlive": false` to switch the whole thing off and keep the passive-delivery behavior.
+- Set `"keepAlive": false` to switch the fallback loop off and keep pure passive delivery. With push delivery
+  the loop is never armed, so the setting only matters on socketless hosts.
 
 Prefer being told out of band instead? Set `desktopNotifications: true` for an OS notification when a report is waiting.
 

@@ -36,8 +36,9 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   the prefix is identified explicitly as new human feedback rather than an earlier agent reply. Pending-review
   feedback warns that REST pull-comment results may omit it and directs the agent to inspect the listed thread via
   GraphQL before marking ready. Delivery failure restores the prior baseline and urgency. Ten consecutive poll
-  failures stop with a notice; ten consecutive delivery failures stop after logging because the failed delivery
-  channel cannot reliably carry a notice.
+  failures stop with a notice; ten consecutive delivery failures stop after logging and best-effort persist a
+  terminal stop notice through the shell's persistent channel where one exists, because the failed delivery channel
+  itself cannot carry it.
 - Merge/close produces one terminal report and removes the watch. Explicit stop, session cleanup, and failed starts
   leave no timer. Cleanup drains an already-started label mutation before unregistering the watch, so a successor
   cannot race a stale add/remove; it does not wait for a stalled fetch or report delivery. A cleanup crossing an
@@ -95,8 +96,8 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   JSON. A pushed report starts its own turn on an idle session and surfaces mid-turn on a busy one; keep-alive stays
   disarmed (`keepAlive: false`) so the Stop hook never blocks and no waiter is suggested.
 - A failed push is a delivery failure: the watch rolls back its baseline and retries at poll cadence, and
-  persistent failure stops the monitor with a truthful notice — a report is never parked on disk behind hook
-  events an idle session cannot fire. Without the socket, the MCP process spools one file per report under the
+  persistent failure stops the monitor after logging, best-effort persisting a terminal stop notice into the spool
+  for the user's return — a report is never parked on disk behind hook events an idle session cannot fire. Without the socket, the MCP process spools one file per report under the
   owning Claude process identity. Hooks claim reports exactly once, do not let Task subagents consume them, and inject them on
   prompt, tool completion, or turn end.
 - In that fallback, keep-alive publishes a liveness heartbeat and rolling idle deadline. It ends on confirmed

@@ -32187,6 +32187,17 @@ var PrWatch = class {
         this.deps.log(
           `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`
         );
+        if (this.deps.persist !== void 0) {
+          try {
+            await this.deps.persist(
+              this.stopNotice(
+                `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures. Last error: ${error51 instanceof Error ? error51.message : String(error51)}`
+              )
+            );
+          } catch (persistError) {
+            this.deps.log(`terminal stop notice could not be persisted for ${targetKey(this.target)}: ${persistError}`);
+          }
+        }
         this.stop();
       }
     }
@@ -32455,6 +32466,7 @@ ${raced.watch.statusLine()}` };
         now: this.deps.now,
         fetchSnapshot: () => this.fetchSnapshot({ target, config: config2 }),
         deliver: (report) => reportChannel.deliver({ report }),
+        persist: reportChannel.persist === void 0 ? void 0 : (report) => reportChannel.persist?.({ report }) ?? Promise.resolve(),
         log: this.deps.log,
         onStopped: () => {
           this.deps.cancel({ timer });
@@ -32657,7 +32669,8 @@ function pushMessage({ channel, text }) {
       });
     });
     socket.on("close", (hadError) => {
-      settle(failure ?? (hadError && !wrote ? new Error("messaging socket closed with an error") : void 0));
+      if (wrote) settle();
+      else settle(failure ?? (hadError ? new Error("messaging socket closed with an error") : void 0));
     });
   });
 }
