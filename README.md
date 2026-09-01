@@ -191,10 +191,10 @@ Optional, per project: use `.pr-monitor.json` for every host. Claude Code falls 
 | `ignoreCommentTag`     | `<!-- pr-monitor:reply -->` | Mandatory prefix for agent-authored GitHub replies. A local-account comment without this exact starting prefix is treated as human feedback; prefixed replies remain private acknowledgement evidence and do not count as new relevant comments. |
 | `announceOnStart`      | `true`  | Deliver a full status report immediately when a monitor starts, so the session sees its starting point and can address anything already outstanding on the PR. Set `false` to disable. |
 | `flushOnCiFailure`     | `true`  | Report a newly failing check at the next poll instead of waiting out `debounceMinutes` (and any CI hold), so CI fixes start sooner. Counts failures found while the suite is still running. At most one instant report per head commit — later failures on the same commit ride along with the debounced suite-conclusion report. Set `false` for debounce-only delivery. |
-| `desktopNotifications` | `false` | Claude Code only: emit an OS notification (macOS/Linux) when a report is spooled, so an idle session's reports aren't silently waiting. |
+| `desktopNotifications` | `false` | Claude Code only: emit an OS notification (macOS/Linux) when a report is delivered or spooled. |
 | `readyLabel`           | `ready-for-human-review` | Label managed automatically by active watches and explicitly by `mark_ready`/`unmark_ready`. |
-| `keepAlive`            | `true`  | Claude Code only: while a monitored PR lacks the ready label, refuse turn-end and have Claude wait for the next report. Set `false` for passive delivery. |
-| `keepAliveMaxMinutes`  | `120`   | Claude Code only: cap on how long the keep-alive loop waits with *nothing happening*. Refreshed by every delivered report, so it bounds idle time rather than total work time. |
+| `keepAlive`            | `true`  | Claude Code fallback hosts only (no messaging socket): while a monitored PR lacks the ready label, refuse turn-end and have Claude wait for the next report. Ignored on push-enabled hosts, where reports arrive on their own. Set `false` for passive delivery. |
+| `keepAliveMaxMinutes`  | `120`   | Claude Code fallback hosts only: cap on how long the keep-alive loop waits with *nothing happening*. Refreshed by every delivered report, so it bounds idle time rather than total work time. Ignored on push-enabled hosts. |
 
 ## Behavior details
 
