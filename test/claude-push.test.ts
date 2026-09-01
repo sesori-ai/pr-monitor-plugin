@@ -49,7 +49,13 @@ async function withUdsServer(
   }
 }
 
-test("pushMessage sends the auth line then the user message and resolves", async () => {
+// Windows cannot bind a Unix-domain socket at a filesystem path, and the
+// messaging-socket channel is a Unix feature: a Windows host provides no
+// bindable socket and takes the spool fallback, whose trigger is still covered
+// below by the connect-failure test.
+const udsSkip = process.platform === "win32" ? "Unix-domain sockets are not bindable on Windows" : false
+
+test("pushMessage sends the auth line then the user message and resolves", { skip: udsSkip }, async () => {
   await withUdsServer(async ({ socketPath, received }) => {
     await pushMessage({
       channel: { socketPath, token: "secret" },
@@ -63,7 +69,7 @@ test("pushMessage sends the auth line then the user message and resolves", async
   })
 })
 
-test("pushMessage omits the auth line when the host granted no token", async () => {
+test("pushMessage omits the auth line when the host granted no token", { skip: udsSkip }, async () => {
   await withUdsServer(async ({ socketPath, received }) => {
     await pushMessage({ channel: { socketPath, token: undefined }, text: "report" })
     const lines = (await received()).map((line) => JSON.parse(line))
