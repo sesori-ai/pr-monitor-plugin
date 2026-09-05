@@ -201,6 +201,9 @@ missing file → defaults. `ignoreCommentTag` is the mandatory local agent-reply
 
 ## Building / releasing
 
+- Always update `CHANGELOG.md` in the same PR as every change, including documentation and agent/skill
+  instructions. Add a concise, factual entry under `[Unreleased]` in the appropriate category; do not defer it
+  until release or a follow-up PR.
 - The root is a private npm workspace coordinator. `npm run build` produces ephemeral OpenCode and Pi/OMP bundles with private core/runtime embedded and rebuilds committed `claude-codex/dist/mcp-server.mjs`. Host SDKs remain external. Claude plugin installs run no build, so rebuild + commit its bundle whenever `claude-codex/src/`, `runtime/`, or `core/` changes; never commit OpenCode/Pi dist or generated package skill copies.
 - `claude-codex/hooks/drain-spool.mjs` and `claude-codex/hooks/await-activity.mjs` must stay dependency-free (node builtins only) and keep their path/format schemes in sync with `claude-codex/src/spool.ts` and `claude-codex/src/session-state.ts`. They are shipped as source, not bundled — only `claude-codex/src/` goes through esbuild.
 - `claude-codex/skills/monitor-pr/SKILL.md` is Claude's waiter-aware behavior layer. `skills/monitor-pr/SKILL.md` is the canonical push-host behavior layer copied into both npm artifacts. OpenCode injects its generated directory through `config.skills.paths`, Pi uses `package.json#pi.skills`, and OMP returns it from `resources_discover`; each host must discover exactly one `monitor-pr` skill.
