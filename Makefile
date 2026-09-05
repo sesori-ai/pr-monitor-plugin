@@ -18,7 +18,7 @@ TAG := v$(VERSION)
 MANIFEST_VERSION := $(shell node -p "require('./opencode/package.json').version")
 OPENCODE_CLI ?= $(shell command -v opencode || true)
 OMP_VERSION ?= 18.0.4
-REPO := sesori-ai/opencode-pr-monitor
+REPO := sesori-ai/pr-monitor-plugin
 
 # Output helpers: bold step banners, dim detail lines, green ticks, red failures.
 B := $(shell tput bold 2>/dev/null || true)
@@ -102,7 +102,7 @@ check:
 	@if [ -n "$(OPENCODE_CLI)" ]; then OPENCODE_CLI="$(OPENCODE_CLI)" npm run --silent host:check:opencode; \
 	  else printf '  $(D)opencode not on PATH; skipping current OpenCode host check$(N)\n'; fi
 	@OMP_VERSION=$(OMP_VERSION) npm run --silent host:check:omp
-	@git diff --exit-code --quiet -- claude-code/dist/mcp-server.mjs || $(call fail,committed Claude bundle is stale)
+	@git diff --exit-code --quiet -- claude-codex/dist/mcp-server.mjs || $(call fail,committed Claude bundle is stale)
 	@$(call ok,all checks passed)
 
 ## The release commit reaches origin before anything immutable is published.

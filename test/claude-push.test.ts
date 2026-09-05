@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { messagingChannel, pushMessage } from "../claude-code/src/push"
+import { messagingChannel, pushMessage } from "../claude-codex/src/push"
 
 test("messagingChannel resolves socket and token from the env", () => {
   assert.equal(messagingChannel({}), undefined)

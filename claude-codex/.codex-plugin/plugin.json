@@ -6,8 +6,8 @@
     "name": "Sesori",
     "url": "https://github.com/sesori-ai"
   },
-  "homepage": "https://github.com/sesori-ai/opencode-pr-monitor",
-  "repository": "https://github.com/sesori-ai/opencode-pr-monitor",
+  "homepage": "https://github.com/sesori-ai/pr-monitor-plugin",
+  "repository": "https://github.com/sesori-ai/pr-monitor-plugin",
   "license": "MIT",
   "keywords": [
     "github",
@@ -26,6 +26,6 @@
     "capabilities": [
       "Write"
     ],
-    "websiteURL": "https://github.com/sesori-ai/opencode-pr-monitor"
+    "websiteURL": "https://github.com/sesori-ai/pr-monitor-plugin"
   }
 }
