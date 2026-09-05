@@ -106,7 +106,7 @@ function parentOf(pid) {
 
 /**
  * Identity of the process holding `pid` — its start time, mirroring
- * `startToken` in claude-code/src/spool.ts, which must stay in sync. Returns
+ * `startToken` in claude-codex/src/spool.ts, which must stay in sync. Returns
  * undefined where the platform offers neither source.
  */
 function startToken(pid) {

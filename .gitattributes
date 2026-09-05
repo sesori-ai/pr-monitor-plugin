@@ -1,6 +1,6 @@
 # The Claude Code MCP server ships as a committed esbuild bundle (plugin
-# installs run no build step). It is generated from claude-code/src + runtime + core, so
+# installs run no build step). It is generated from claude-codex/src + runtime + core, so
 # collapse it in diffs and exclude it from GitHub's language stats — review the
 # sources, not the bundle. On a merge conflict here, do not hand-resolve: take
 # either side and re-run `npm run build`.
-claude-code/dist/mcp-server.mjs linguist-generated=true -diff
+claude-codex/dist/mcp-server.mjs linguist-generated=true -diff

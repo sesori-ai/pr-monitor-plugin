@@ -52,11 +52,11 @@ session that started the watch, and manages the ready-for-human-review label fro
 ### Install
 
 ```
-/plugin marketplace add sesori-ai/opencode-pr-monitor
+/plugin marketplace add sesori-ai/pr-monitor-plugin
 /plugin install pr-monitor@sesori
 ```
 
-For local development, add the marketplace from a checkout instead: `/plugin marketplace add /path/to/opencode-pr-monitor`.
+For local development, add the marketplace from a checkout instead: `/plugin marketplace add /path/to/pr-monitor-plugin`.
 
 ### Usage
 
@@ -97,7 +97,7 @@ disk and plugin hooks inject them at the next opportunity —
 
 That alone still leaves a gap: a report landing while the session sits idle waits until your next message.
 **Keep-alive** closes it, on those fallback hosts only. While a monitored PR does not carry the ready label, the
-`Stop` hook supplies an exact `claude-code/hooks/await-activity.mjs` command that blocks until a report is spooled.
+`Stop` hook supplies an exact `claude-codex/hooks/await-activity.mjs` command that blocks until a report is spooled.
 That hook-issued command is the only waiting mechanism Claude should ever run; it must never invent a delay or
 polling job after starting the monitor.
 
@@ -120,16 +120,16 @@ Further behavior notes for the Claude Code shell:
 ## Codex
 
 The Claude Code plugin root doubles as a Codex plugin: the same MCP server, hooks, and `monitor-pr` skill, declared
-through `claude-code/.codex-plugin/plugin.json` and `claude-code/.codex-mcp.json`.
+through `claude-codex/.codex-plugin/plugin.json` and `claude-codex/.codex-mcp.json`.
 
 ### Install
 
 ```sh
-codex plugin marketplace add sesori-ai/opencode-pr-monitor
+codex plugin marketplace add sesori-ai/pr-monitor-plugin
 codex plugin add pr-monitor@sesori
 ```
 
-For local development, add the marketplace from a checkout instead: `codex plugin marketplace add /path/to/opencode-pr-monitor`.
+For local development, add the marketplace from a checkout instead: `codex plugin marketplace add /path/to/pr-monitor-plugin`.
 
 On the first session after installing, Codex asks you to review the plugin's hooks; press <kbd>t</kbd> (or open
 `/hooks`) to trust them. Until they are trusted, reports cannot be injected.
@@ -280,12 +280,12 @@ runtime/         session registry/actions/timers, Node gh runner, shared tool co
 skills/          canonical monitor-pr skill for push-capable hosts
 opencode/        OpenCode adapter and npm workspace
 pi/              shared Pi/OMP adapter entries and npm workspace
-claude-code/     Claude Code + Codex shell — this directory is the plugin root for both hosts (${CLAUDE_PLUGIN_ROOT})
-.claude-plugin/  Claude marketplace.json, which stays at the repo root and points at ./claude-code
-.agents/plugins/ Codex marketplace.json, likewise at the repo root and pointing at ./claude-code
+claude-codex/     Claude Code + Codex shell — this directory is the plugin root for both hosts (${CLAUDE_PLUGIN_ROOT})
+.claude-plugin/  Claude marketplace.json, which stays at the repo root and points at ./claude-codex
+.agents/plugins/ Codex marketplace.json, likewise at the repo root and pointing at ./claude-codex
 ```
 
-Dependency flows adapter → `runtime/` → `core/`; core imports no host SDK and runtime owns common session orchestration. The root is a private npm workspace coordinator. OpenCode source stays in `opencode/`, but publication bundles it with private core/runtime into `opencode/dist/index.js`; both `.` and `./server` resolve to that sole-export bundle. Its tarball contains only the bundle and declaration, target README/license, and manifest; generated OpenCode output stays uncommitted. The Claude Code shell is bundled with esbuild into the committed `claude-code/dist/mcp-server.mjs`, since Git plugin installs run no build step; `claude-code/hooks/drain-spool.mjs` is the dependency-free hook that injects spooled reports and runs the keep-alive loop, and `claude-code/hooks/await-activity.mjs` is the blocking waiter it hands to the session; `claude-code/skills/monitor-pr/` is the behavior — when to start a monitor, what to do with each report, when to hand off; `claude-code/.mcp.json` declares the MCP server (plugin-root convention — an inline `mcpServers` field in plugin.json is not picked up). Codex reuses the same root through `claude-code/.codex-plugin/plugin.json`, which points at `claude-code/.codex-mcp.json`: Codex substitutes no `${...}` placeholders in server args and exports no plugin env to the server, so that manifest launches the bundle as a contained `./dist/mcp-server.mjs` path (shebang + exec bit, added by the build) with `cwd: "."` and a verbatim `--codex` arg that tells the server which host it is under.
+Dependency flows adapter → `runtime/` → `core/`; core imports no host SDK and runtime owns common session orchestration. The root is a private npm workspace coordinator. OpenCode source stays in `opencode/`, but publication bundles it with private core/runtime into `opencode/dist/index.js`; both `.` and `./server` resolve to that sole-export bundle. Its tarball contains only the bundle and declaration, target README/license, and manifest; generated OpenCode output stays uncommitted. The Claude Code shell is bundled with esbuild into the committed `claude-codex/dist/mcp-server.mjs`, since Git plugin installs run no build step; `claude-codex/hooks/drain-spool.mjs` is the dependency-free hook that injects spooled reports and runs the keep-alive loop, and `claude-codex/hooks/await-activity.mjs` is the blocking waiter it hands to the session; `claude-codex/skills/monitor-pr/` is the behavior — when to start a monitor, what to do with each report, when to hand off; `claude-codex/.mcp.json` declares the MCP server (plugin-root convention — an inline `mcpServers` field in plugin.json is not picked up). Codex reuses the same root through `claude-codex/.codex-plugin/plugin.json`, which points at `claude-codex/.codex-mcp.json`: Codex substitutes no `${...}` placeholders in server args and exports no plugin env to the server, so that manifest launches the bundle as a contained `./dist/mcp-server.mjs` path (shebang + exec bit, added by the build) with `cwd: "."` and a verbatim `--codex` arg that tells the server which host it is under.
 
 ## Regression coverage
 
@@ -318,8 +318,8 @@ bundle, cut the `[Unreleased]` CHANGELOG section, and commit `Release vX.Y.Z` to
 full check matrix → push `main` → publish both npm packages → verify the registry → create and push the tag. The
 manual steps, for reference:
 
-Update both workspace manifests and lock entries, `claude-code/.claude-plugin/plugin.json`,
-`claude-code/.codex-plugin/plugin.json`, the MCP server version, and `CHANGELOG.md`. From a clean candidate commit,
+Update both workspace manifests and lock entries, `claude-codex/.claude-plugin/plugin.json`,
+`claude-codex/.codex-plugin/plugin.json`, the MCP server version, and `CHANGELOG.md`. From a clean candidate commit,
 complete the full matrix before publishing:
 
 ```sh
@@ -328,7 +328,7 @@ npm run release:check # tests, types, builds, versions, exact packs, Pi floor, O
 OPENCODE_CLI="$(command -v opencode)" npm run host:check:opencode
 OMP_VERSION=18.0.4 npm run host:check:omp
 # Also complete the live Claude release-host row documented in docs/regression/plugin-installation.md.
-git diff --exit-code -- claude-code/dist/mcp-server.mjs
+git diff --exit-code -- claude-codex/dist/mcp-server.mjs
 ```
 
 Use the current supported OpenCode/OMP versions for the two current-host rows; CI records Linux/macOS coverage while

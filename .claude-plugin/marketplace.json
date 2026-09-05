@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "pr-monitor",
-      "source": "./claude-code",
+      "source": "./claude-codex",
       "description": "Manage GitHub PR readiness and report commits, CI, reviews, comments, conflicts, and completion.",
       "category": "productivity"
     }

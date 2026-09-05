@@ -7,9 +7,9 @@ import test from "node:test"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
-const hook = resolve("claude-code/hooks/drain-spool.mjs")
-const waiter = resolve("claude-code/hooks/await-activity.mjs")
-const server = resolve("claude-code/src/mcp-server.ts")
+const hook = resolve("claude-codex/hooks/drain-spool.mjs")
+const waiter = resolve("claude-codex/hooks/await-activity.mjs")
+const server = resolve("claude-codex/src/mcp-server.ts")
 
 // Exercise the actual MCP adapter and dependency-free hooks. GitHub is the
 // only fake boundary; each tool call carries Codex's real _meta.threadId shape.
@@ -176,11 +176,11 @@ test("both shipped hook manifests tolerate a missing Node executable", {
   skip: process.platform === "win32" ? "Plugin hook commands require a POSIX shell" : false,
 }, async () => {
   for (const manifest of ["hooks.json", "codex-hooks.json"]) {
-    const config = JSON.parse(await readFile(resolve("claude-code/hooks", manifest), "utf8"))
+    const config = JSON.parse(await readFile(resolve("claude-codex/hooks", manifest), "utf8"))
     for (const entries of Object.values(config.hooks) as Array<Array<{ hooks: Array<{ command: string }> }>>) {
       for (const entry of entries) for (const hook of entry.hooks) {
         const result = spawnSync("/bin/sh", ["-c", hook.command], {
-          env: { PATH: "/nonexistent", CLAUDE_PLUGIN_ROOT: resolve("claude-code") },
+          env: { PATH: "/nonexistent", CLAUDE_PLUGIN_ROOT: resolve("claude-codex") },
           encoding: "utf8", timeout: 10_000,
         })
         assert.equal(result.status, 0, `${manifest}: ${result.stderr}`)

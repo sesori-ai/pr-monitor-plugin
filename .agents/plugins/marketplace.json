@@ -8,7 +8,7 @@
       "name": "pr-monitor",
       "source": {
         "source": "local",
-        "path": "./claude-code"
+        "path": "./claude-codex"
       },
       "policy": {
         "installation": "AVAILABLE",

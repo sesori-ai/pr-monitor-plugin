@@ -91,11 +91,11 @@ skills/monitor-pr/SKILL.md
 Install from the marketplace:
 
 ```text
-/plugin marketplace add sesori-ai/opencode-pr-monitor
+/plugin marketplace add sesori-ai/pr-monitor-plugin
 /plugin install pr-monitor@sesori
 ```
 
-- Root `.claude-plugin/marketplace.json` points to `./claude-code`, which is the complete plugin root. Its tracked
+- Root `.claude-plugin/marketplace.json` points to `./claude-codex`, which is the complete plugin root. Its tracked
   payload contains exactly:
 
 ```text
@@ -121,7 +121,7 @@ src/spool.ts
 
 - Claude discovers `.mcp.json`, `hooks/hooks.json`, `commands/`, and `skills/` by convention. Runtime paths use
   `${CLAUDE_PLUGIN_ROOT}` and must not depend on the repository's checkout depth.
-- `claude-code/dist/mcp-server.mjs` is committed and must reproduce from `claude-code/src/`, `runtime/`, and `core/`.
+- `claude-codex/dist/mcp-server.mjs` is committed and must reproduce from `claude-codex/src/`, `runtime/`, and `core/`.
   Hooks remain dependency-free source and are not part of that esbuild bundle.
 - The conventional Claude skill is waiter-aware and intentionally differs from the canonical OpenCode/Pi/OMP
   push-host skill. Each installed host still discovers exactly one `monitor-pr` skill.
@@ -131,11 +131,11 @@ src/spool.ts
 Install from the marketplace:
 
 ```text
-codex plugin marketplace add sesori-ai/opencode-pr-monitor
+codex plugin marketplace add sesori-ai/pr-monitor-plugin
 codex plugin add pr-monitor@sesori
 ```
 
-- Root `.agents/plugins/marketplace.json` points at the same `./claude-code` root; `.codex-plugin/plugin.json`
+- Root `.agents/plugins/marketplace.json` points at the same `./claude-codex` root; `.codex-plugin/plugin.json`
   carries the same version and references `./skills/`, `./hooks/codex-hooks.json`, and `./.codex-mcp.json`.
 - `.codex-mcp.json` launches `./dist/mcp-server.mjs` (shebang, mode 755) with `cwd: "."` and `--codex`. Codex expands
   no placeholders in args/env, so the bundle must stay executable and self-locating.
@@ -154,9 +154,9 @@ One product version must match across:
 
 - `opencode/package.json` and its `package-lock.json` workspace entry;
 - `pi/package.json` and its lockfile workspace entry;
-- `claude-code/.claude-plugin/plugin.json`;
-- `claude-code/.codex-plugin/plugin.json`; and
-- the MCP server version in `claude-code/src/mcp-server.ts`.
+- `claude-codex/.claude-plugin/plugin.json`;
+- `claude-codex/.codex-plugin/plugin.json`; and
+- the MCP server version in `claude-codex/src/mcp-server.ts`.
 
 The private root stays `0.0.0`. `npm run version:check` rejects any product drift. Release notes remain under
 `Unreleased` until a separate release change assigns them to a version.
@@ -242,6 +242,6 @@ license, a stale Claude bundle, a missing peer, and an npm publish failure befor
 ## Sources
 
 `package.json`, `package-lock.json`, `opencode/package.json`, `pi/package.json`,
-`claude-code/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `claude-code/.mcp.json`,
+`claude-codex/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `claude-codex/.mcp.json`,
 `scripts/build-*.mjs`, `scripts/check-pack.mjs`, `scripts/check-versions.mjs`, `scripts/check-*-loader.mjs`,
 `skills/monitor-pr/SKILL.md`, `opencode/index.ts`, `pi/index.ts`, `pi/omp.ts`, and `AGENTS.md`.

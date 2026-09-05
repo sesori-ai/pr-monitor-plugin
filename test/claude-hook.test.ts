@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import test from "node:test"
 
-const hook = resolve("claude-code/hooks/drain-spool.mjs")
+const hook = resolve("claude-codex/hooks/drain-spool.mjs")
 
 type HookInput = {
   hook_event_name: "PostToolUse" | "Stop" | "UserPromptSubmit"
@@ -28,10 +28,10 @@ function runHook({ home, input }: { home: string; input: HookInput }): string {
 }
 
 test("Claude plugin root contains the exact tracked release payload", () => {
-  const files = execFileSync("git", ["ls-files", "claude-code"], { encoding: "utf8" })
+  const files = execFileSync("git", ["ls-files", "claude-codex"], { encoding: "utf8" })
     .trim()
     .split(/\r?\n/)
-    .map((path) => path.replace(/^claude-code\//, ""))
+    .map((path) => path.replace(/^claude-codex\//, ""))
   assert.deepEqual(files, [
     ".claude-plugin/plugin.json",
     ".codex-mcp.json",
@@ -55,7 +55,7 @@ test("Claude plugin root contains the exact tracked release payload", () => {
 })
 
 test("Claude handoff follows readiness transitions rather than report delivery", async () => {
-  const source = await readFile("claude-code/src/mcp-server.ts", "utf8")
+  const source = await readFile("claude-codex/src/mcp-server.ts", "utf8")
 
   assert.match(source, /onReadyChanged:.*if \(!ready\).*extendKeepAlive\(\{ config \}\)/s)
   // \r?\n: Windows checkouts read the source with CRLF endings.
@@ -134,7 +134,7 @@ test("Claude hook drains once, skips subagents, and arms only its exact waiter",
     })
     assert.equal(existsSync(waiterProof), false)
     // The waiter's real final line is the only accepted proof.
-    const waiterOutput = spawnSync(process.execPath, [resolve("claude-code/hooks/await-activity.mjs")], {
+    const waiterOutput = spawnSync(process.execPath, [resolve("claude-codex/hooks/await-activity.mjs")], {
       encoding: "utf8",
       env: { ...process.env, HOME: home, USERPROFILE: home },
     }).stdout

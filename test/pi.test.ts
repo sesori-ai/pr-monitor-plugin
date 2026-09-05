@@ -370,7 +370,7 @@ test("package manifests expose the push-host skill exactly once", async () => {
   assert.deepEqual(manifest.omp, { extensions: ["./dist/omp.js"] })
 
   const pushSkill = await readFile("skills/monitor-pr/SKILL.md", "utf8")
-  const claudeSkill = await readFile("claude-code/skills/monitor-pr/SKILL.md", "utf8")
+  const claudeSkill = await readFile("claude-codex/skills/monitor-pr/SKILL.md", "utf8")
   for (const skill of [pushSkill, claudeSkill]) {
     assert.match(skill, /monitor owns polling/i)
     assert.match(skill, /never.*sleep/is)

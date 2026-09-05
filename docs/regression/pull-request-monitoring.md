@@ -229,6 +229,6 @@ issue, and terminal PR.
 ## Sources
 
 `core/watch.ts`, `core/activity.ts`, `core/readiness.ts`, `core/report.ts`, `core/github.ts`, `core/label.ts`,
-`runtime/monitor-session.ts`, `runtime/tool.ts`, `opencode/index.ts`, `claude-code/src/`, `claude-code/hooks/`,
+`runtime/monitor-session.ts`, `runtime/tool.ts`, `opencode/index.ts`, `claude-codex/src/`, `claude-codex/hooks/`,
 `pi/extension.ts`, `pi/index.ts`, `pi/omp.ts`, `skills/monitor-pr/SKILL.md`,
-`claude-code/skills/monitor-pr/SKILL.md`, and `test/*.test.ts`.
+`claude-codex/skills/monitor-pr/SKILL.md`, and `test/*.test.ts`.

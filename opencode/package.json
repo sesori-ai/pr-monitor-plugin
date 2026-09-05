@@ -25,11 +25,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sesori-ai/opencode-pr-monitor.git"
+    "url": "git+https://github.com/sesori-ai/pr-monitor-plugin.git"
   },
-  "homepage": "https://github.com/sesori-ai/opencode-pr-monitor#readme",
+  "homepage": "https://github.com/sesori-ai/pr-monitor-plugin#readme",
   "bugs": {
-    "url": "https://github.com/sesori-ai/opencode-pr-monitor/issues"
+    "url": "https://github.com/sesori-ai/pr-monitor-plugin/issues"
   },
   "author": {
     "name": "Sesori",
