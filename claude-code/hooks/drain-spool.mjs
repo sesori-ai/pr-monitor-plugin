@@ -328,7 +328,10 @@ function main() {
       mkdirSync(contexts, { recursive: true })
       const path = join(contexts, `${input.session_id}.json`)
       const tmp = `${path}.${process.pid}.tmp`
-      writeFileSync(tmp, JSON.stringify({ cwd: input.cwd }), "utf8")
+      // Bind registration to the current host lifetime, including /mcp
+      // reconnects. A resumed thread must not reuse an old app-server's proof.
+      const owners = [...candidatePids()].map((pid) => ({ pid, token: startToken(pid) }))
+      writeFileSync(tmp, JSON.stringify({ cwd: input.cwd, owners }), "utf8")
       renameSync(tmp, path)
     }
   }

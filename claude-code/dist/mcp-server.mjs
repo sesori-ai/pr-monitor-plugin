@@ -33271,11 +33271,15 @@ var adapterFor = (meta3) => {
   let projectDir;
   try {
     const context = JSON.parse(readFileSync2(join3(SPOOL_ROOT, "codex-contexts", `${sessionId}.json`), "utf8"));
-    projectDir = context.cwd;
+    const token = startToken(claudePid);
+    const registeredHere = Array.isArray(context.owners) && context.owners.some(
+      (owner) => owner?.pid === claudePid && owner.token === token
+    );
+    if (registeredHere) projectDir = context.cwd;
   } catch {
   }
   if (typeof projectDir !== "string" || !isAbsolute(projectDir)) {
-    throw new Error("Cannot start monitoring: the PR Monitor delivery hook has not registered this Codex conversation. Enable and trust the plugin hooks (/hooks in the CLI), then send a new prompt and retry. No monitor was started; reports cannot be delivered until hooks run.");
+    throw new Error("Cannot start monitoring: the PR Monitor delivery hook has not registered this Codex conversation in the current host. Enable and trust the plugin hooks (/hooks in the CLI), then send a new prompt and retry. No monitor was started; reports cannot be delivered until hooks run.");
   }
   const adapter = createAdapter({ sessionId, projectDir });
   adapters.set(sessionId, adapter);

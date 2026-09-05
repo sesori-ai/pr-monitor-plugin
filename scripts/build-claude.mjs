@@ -27,7 +27,9 @@ chmodSync(output, 0o755)
 const hooksUrl = new URL("../claude-code/hooks/hooks.json", import.meta.url)
 const codexHooks = JSON.parse(readFileSync(hooksUrl, "utf8"))
 for (const entries of Object.values(codexHooks.hooks)) {
-  for (const entry of entries) for (const hook of entry.hooks) hook.command += " --codex"
+  for (const entry of entries) for (const hook of entry.hooks) {
+    hook.command = hook.command.replace(/ \|\| true$/, " --codex || true")
+  }
 }
 codexHooks.hooks.SessionStart = codexHooks.hooks.UserPromptSubmit
 writeFileSync(new URL("codex-hooks.json", hooksUrl), JSON.stringify(codexHooks, null, 2) + "\n")

@@ -87,6 +87,17 @@ else console.log('{}');
     const traversal = await call("status", "../thread-a")
     assert.equal(traversal.isError, true)
 
+    // A resumed thread's old registration cannot authorize a new host.
+    const contexts = join(root, "codex-contexts")
+    await mkdir(contexts, { recursive: true })
+    await writeFile(join(contexts, "thread-a.json"), JSON.stringify({
+      cwd: projectA, owners: [{ pid: process.pid, token: "previous-host-lifetime" }],
+    }))
+    const staleHook = await call("start", "thread-a", "sesori/example#42")
+    assert.equal(staleHook.isError, true)
+    assert.match(text(staleHook), /current host/)
+    assert.deepEqual(await readdir(hostSpool), ["owner"])
+
     // Hooks register exact conversation cwd before any report exists.
     assert.equal(runHook({ hook_event_name: "SessionStart", session_id: "thread-a", cwd: projectA }), "")
     assert.equal(runHook({ hook_event_name: "UserPromptSubmit", session_id: "thread-b", cwd: projectB }), "")
@@ -142,5 +153,39 @@ else console.log('{}');
     await client.close()
     await transport?.close()
     await rm(home, { recursive: true, force: true })
+  }
+})
+
+
+test("the waiter handles malformed thread arguments once and completes without writing proof", async () => {
+  const home = await mkdtemp(join(tmpdir(), "pr-monitor-invalid-waiter-"))
+  try {
+    const result = spawnSync(process.execPath, [waiter, "--session", String(process.pid), "--thread", "../other"], {
+      env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: "utf8", timeout: 10_000,
+    })
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /Invalid --thread identifier/)
+    assert.match(result.stdout, /pr-monitor-waiter: done/)
+    assert.deepEqual(await readdir(home), [])
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test("both shipped hook manifests tolerate a missing Node executable", {
+  skip: process.platform === "win32" ? "Plugin hook commands require a POSIX shell" : false,
+}, async () => {
+  for (const manifest of ["hooks.json", "codex-hooks.json"]) {
+    const config = JSON.parse(await readFile(resolve("claude-code/hooks", manifest), "utf8"))
+    for (const entries of Object.values(config.hooks) as Array<Array<{ hooks: Array<{ command: string }> }>>) {
+      for (const entry of entries) for (const hook of entry.hooks) {
+        const result = spawnSync("/bin/sh", ["-c", hook.command], {
+          env: { PATH: "/nonexistent", CLAUDE_PLUGIN_ROOT: resolve("claude-code") },
+          encoding: "utf8", timeout: 10_000,
+        })
+        assert.equal(result.status, 0, `${manifest}: ${result.stderr}`)
+        if (manifest === "codex-hooks.json") assert.match(hook.command, / --codex \|\| true$/)
+      }
+    }
   }
 })

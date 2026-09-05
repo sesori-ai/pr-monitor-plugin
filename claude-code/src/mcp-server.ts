@@ -33,7 +33,7 @@ import {
 } from "../../runtime/tool"
 import { messagingChannel, pushMessage } from "./push"
 import { writeSessionState } from "./session-state"
-import { claimSpool, collectDeadSpools, notifyDesktop, probeSpool, spoolReport, SPOOL_ROOT } from "./spool"
+import { claimSpool, collectDeadSpools, notifyDesktop, probeSpool, spoolReport, SPOOL_ROOT, startToken } from "./spool"
 
 const claudePid = process.ppid
 const isCodex = process.argv.includes("--codex")
@@ -253,12 +253,16 @@ const adapterFor = (meta: Record<string, unknown> | undefined): Adapter => {
   let projectDir: unknown
   try {
     const context = JSON.parse(readFileSync(join(SPOOL_ROOT, "codex-contexts", `${sessionId}.json`), "utf8"))
-    projectDir = context.cwd
+    const token = startToken(claudePid)
+    const registeredHere = Array.isArray(context.owners) && context.owners.some(
+      (owner: { pid?: unknown; token?: unknown }) => owner?.pid === claudePid && owner.token === token,
+    )
+    if (registeredHere) projectDir = context.cwd
   } catch {
     // Give the caller a delivery error instead of silently using plugin/host cwd.
   }
   if (typeof projectDir !== "string" || !isAbsolute(projectDir)) {
-    throw new Error("Cannot start monitoring: the PR Monitor delivery hook has not registered this Codex conversation. " +
+    throw new Error("Cannot start monitoring: the PR Monitor delivery hook has not registered this Codex conversation in the current host. " +
       "Enable and trust the plugin hooks (/hooks in the CLI), then send a new prompt and retry. " +
       "No monitor was started; reports cannot be delivered until hooks run.")
   }

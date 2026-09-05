@@ -83,7 +83,8 @@ Codex 0.153 source). A Codex app-server can own multiple conversations, so its P
 conversation. The adapter creates one MonitorSession per thread and spools under `<host pid>/<thread id>`;
 the PID owner token and dead-process GC still govern the outer directory. Codex hooks only drain the matching
 thread subdirectory, never legacy PID-only reports. They record conversation `cwd` in
-`spool/codex-contexts/<thread id>.json`; an unregistered conversation cannot start a monitor and receives an
+`spool/codex-contexts/<thread id>.json`, bound to the current host PID/start token. A resumed thread needs fresh
+registration after a host restart; an unregistered conversation cannot start a monitor and receives an
 explicit hook setup error. The generated `hooks/codex-hooks.json` adds `--codex` to the shared hooks and registers
 SessionStart. Codex plugin hooks require trust confirmation. Codex has no messaging socket and uses the
 thread-scoped spool/keep-alive path. Synthetic tests do not substitute for a real model-driven host check.

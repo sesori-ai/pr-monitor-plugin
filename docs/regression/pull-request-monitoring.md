@@ -111,8 +111,12 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 - The trusted SessionStart/UserPromptSubmit hook records the conversation's `cwd`; load `.pr-monitor.json`, then
   `.codex/pr-monitor.json`, then `.opencode/pr-monitor.json` there. Never infer a conversation from the host PID or
   use the plugin/app-server cwd as its project directory.
+- Hook registration is bound to the current host PID/start token. Resuming a thread under a new host requires
+  fresh hook registration; a stale file cannot establish delivery.
 - Missing thread metadata or hook registration returns an explicit error without starting a monitor. Enable/trust
   the hooks and send another prompt before retrying. A successful file write alone does not establish host delivery.
+- Both hook manifests retain a successful shell exit when Node is missing or fails before the script loads.
+  Malformed waiter arguments exit cleanly without writing completion proof for an unvalidated target.
 - The Stop hook supplies a waiter with the exact thread ID. The waiter ignores reports in other conversations;
   manual readiness disarms only the owning thread's keep-alive. The Stop report instructs the agent to inspect
   no-op feedback and use `mark_ready` when no actionable work remains.

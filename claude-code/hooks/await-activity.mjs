@@ -66,8 +66,7 @@ function readState(dir) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-async function main() {
-  const { session, thread, timeout } = parseArgs(process.argv.slice(2))
+async function main({ session, thread, timeout }) {
   if (session === undefined) {
     console.log("pr-monitor: no --session pid given, nothing to wait for.")
     return
@@ -115,8 +114,10 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   })
 }
 
+let args
 try {
-  await main()
+  args = parseArgs(process.argv.slice(2))
+  await main(args)
 } catch (error) {
   console.log(`pr-monitor: wait ended early (${error?.message ?? error}).`)
 } finally {
@@ -125,7 +126,7 @@ try {
   // (node missing, script unreadable) leaves this untouched, while a session
   // that is genuinely looping keeps refreshing it. Written last so it records
   // a completed wait, not merely a start.
-  const { session, thread } = parseArgs(process.argv.slice(2))
+  const { session, thread } = args ?? {}
   if (session !== undefined) {
     try {
       writeFileSync(join(SPOOL_ROOT, String(session), ...(thread === undefined ? [] : [thread]), ".waiter"), String(Date.now()), "utf8")
