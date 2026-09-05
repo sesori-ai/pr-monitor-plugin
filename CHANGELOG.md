@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name, so existing marketplace installs keep working. The Claude Code + Codex plugin root moved from `claude-code/`
   to `claude-codex/`, since it serves both hosts. Plugin and package names are unchanged.
 
+- Monitor startup now preserves the existing ready label and asks the agent to assess current-head CI, expected
+  automated reviews, and feedback before marking a settled PR ready. Empty results on a newly opened PR or fresh
+  commit do not establish readiness; later activity retains automatic readiness across all hosts.
+- Monitor skills require an immediate readiness assessment after a restart and manual `mark_ready` when only
+  non-actionable feedback remains, without waiting for another event or replying to bot acknowledgements.
+- Repository instructions now require a changelog update in every PR, including documentation and instruction changes.
+
+### Fixed
+
+- Codex reports, project configuration, and keep-alive state are scoped to the owning conversation instead of the
+  shared app-server process. Hook registration is bound to the current host lifetime so a resumed conversation
+  cannot silently reuse stale delivery setup after a restart.
+- Automatic readiness still runs when CI completes or feedback is handled before a failed startup report is
+  retried or manually flushed. An unchanged startup retry continues to require agent assessment.
+- Hook commands retain their shell-level failure fallback, and malformed waiter arguments are handled without
+  an uncaught second parsing error.
+
 ## [0.4.0]
 
 ### Added
