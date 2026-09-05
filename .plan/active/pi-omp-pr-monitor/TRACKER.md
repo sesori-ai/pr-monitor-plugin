@@ -5,7 +5,7 @@
 - **Plan slug:** `pi-omp-pr-monitor`
 - **Plan status:** Step 5/6 merged; Step 6/6 open, with retirement gated on its final CI rows
 - **Current branch:** `pi-omp-pr-monitor-step-6`
-- **Current PR:** Step 6 [#17](https://github.com/sesori-ai/opencode-pr-monitor/pull/17)
+- **Current PR:** Step 6 [#17](https://github.com/sesori-ai/pr-monitor-plugin/pull/17)
 - **Implementation started:** yes
 - **Next action:** address Step 6 reports, record final CI evidence, and retire only when every row is `Pass`
 - **Retirement:** blocked until every required row in `PLAN.md` passes
@@ -14,12 +14,12 @@
 
 | Done | Step | Exact PR title | Complexity | Soft line target | State |
 |---|---|---|---|---:|---|
-| [x] | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan, exact skill copy, and regression baseline | 1,150 | [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) merged |
-| [x] | 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,100 | [PR #11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11) merged |
-| [x] | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 | [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12) merged |
-| [x] | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 3,500 | [PR #14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14) merged |
-| [x] | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 | [PR #15](https://github.com/sesori-ai/opencode-pr-monitor/pull/15) merged |
-| [ ] | 6/6 | `⚙️ [pi-omp-pr-monitor] test: verify Pi and OMP and retire the plan [step 6/6]` | Moderate packaged, live-host, and external verification | 700 | [PR #17](https://github.com/sesori-ai/opencode-pr-monitor/pull/17) open; final CI rows pending |
+| [x] | 1/6 | `🌱 [pi-omp-pr-monitor] docs: plan Pi and OMP support [step 1/6]` | Trivial plan, exact skill copy, and regression baseline | 1,150 | [PR #10](https://github.com/sesori-ai/pr-monitor-plugin/pull/10) merged |
+| [x] | 2/6 | `🚧 [pi-omp-pr-monitor] refactor: centralize monitor session orchestration [step 2/6]` | Complex shared concurrency/lifecycle boundary refactor | 2,100 | [PR #11](https://github.com/sesori-ai/pr-monitor-plugin/pull/11) merged |
+| [x] | 3/6 | `⚙️ [pi-omp-pr-monitor] build: split harness distribution workspaces [step 3/6]` | Moderate package/build/release migration | 1,200 | [PR #12](https://github.com/sesori-ai/pr-monitor-plugin/pull/12) merged |
+| [x] | 4/6 | `🚧 [pi-omp-pr-monitor] feat(pi): add Pi and OMP monitoring [step 4/6]` | Complex host compatibility and background delivery | 3,500 | [PR #14](https://github.com/sesori-ai/pr-monitor-plugin/pull/14) merged |
+| [x] | 5/6 | `🌱 [pi-omp-pr-monitor] docs: document cross-harness regression coverage [step 5/6]` | Trivial documentation reconciliation | 700 | [PR #15](https://github.com/sesori-ai/pr-monitor-plugin/pull/15) merged |
+| [ ] | 6/6 | `⚙️ [pi-omp-pr-monitor] test: verify Pi and OMP and retire the plan [step 6/6]` | Moderate packaged, live-host, and external verification | 700 | [PR #17](https://github.com/sesori-ai/pr-monitor-plugin/pull/17) open; final CI rows pending |
 
 The six milestone titles and total are fixed. Emergent defects use separately tracked
 `🐛 [pi-omp-pr-monitor] fix: <description> [repair <n>]` PRs without renumbering milestones; the blocked milestone
@@ -76,7 +76,7 @@ resumes only after its repair passes. Do not silently exceed the 1,500-line soft
 - [x] Add shared-runtime/config/lifecycle/label tests and update the Claude `monitor-pr` skill.
 - [x] Rebuild the committed Claude Code bundle and update current architecture/config documentation.
 - [x] Complete final tests, direct source review, dependency/line-width checks, and diff/line-count checks.
-- [x] Commit `a1d0e2e`, push, and open [PR #11](https://github.com/sesori-ai/opencode-pr-monitor/pull/11).
+- [x] Commit `a1d0e2e`, push, and open [PR #11](https://github.com/sesori-ai/pr-monitor-plugin/pull/11).
 
 The Step 2 diff is expected near 2,100 changed lines and is intentionally above the 1,500-line soft cap. The runtime,
 both shipping adapters, transitional package allowlist, and tests form one atomic ownership migration; splitting an
@@ -94,7 +94,7 @@ because the implementation moves concurrency and lifecycle ownership.
 - [x] Preserve the committed Claude plugin root/bundle and add Linux/macOS/Windows Node 22 CI.
 - [x] Update development/release/architecture docs and regenerate the workspace lockfile.
 - [x] Complete a clean `npm ci`, release checks, prepack check, actionlint, line-width, and diff checks.
-- [x] Rebase onto merged Step 2, push, and open [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12).
+- [x] Rebase onto merged Step 2, push, and open [PR #12](https://github.com/sesori-ai/pr-monitor-plugin/pull/12).
 
 ## Step 4 Checklist
 
@@ -208,7 +208,7 @@ incomplete host contract.
 - [x] `git diff --check` passes.
 - [x] Changed lines: 1,065, within the revised 1,150-line Step 1 target.
 - [x] TypeScript, host, and bundle suites not run: this step changes only plans and agent skills.
-- [x] Commit `17b1562` pushed and [PR #10](https://github.com/sesori-ai/opencode-pr-monitor/pull/10) opened with the exact Step 1 title.
+- [x] Commit `17b1562` pushed and [PR #10](https://github.com/sesori-ai/pr-monitor-plugin/pull/10) opened with the exact Step 1 title.
 - [x] User clarification incorporated: preserve reliable Claude ready-label handoff, discover the Pi/OMP skill once,
   and make autonomous notification/no-agent-delay behavior an explicit tested contract.
 - [x] PR review incorporated: available regression baseline, correct Pi-versus-OMP replacement lifecycles, canceled
@@ -234,7 +234,7 @@ incomplete host contract.
 - [x] Claude committed bundle unchanged; root/target licenses byte-identical; `actionlint` and `git diff --check` pass.
 - [x] Linux, macOS, and Windows CI pass after the shell-independent npm fix.
 - [x] Review-fixed diff: 601 textual changed lines including PR/plan bookkeeping, within the 1,200-line target.
-- [x] Final head `4ca99b1` merged as `e7a725c` through [PR #12](https://github.com/sesori-ai/opencode-pr-monitor/pull/12).
+- [x] Final head `4ca99b1` merged as `e7a725c` through [PR #12](https://github.com/sesori-ai/pr-monitor-plugin/pull/12).
 
 ### Step 4/6
 
@@ -252,7 +252,7 @@ incomplete host contract.
   `git diff --check` pass.
 - [x] Diff: 3,419 textual changed lines within the revised 3,500 target; 1,845 are generated lockfile changes and
   1,574 are source, skills, tests, scripts, docs, bundle, and tracker evidence.
-- [x] Final head `6a14ac6` merged as `429068d` through [PR #14](https://github.com/sesori-ai/opencode-pr-monitor/pull/14).
+- [x] Final head `6a14ac6` merged as `429068d` through [PR #14](https://github.com/sesori-ai/pr-monitor-plugin/pull/14).
 
 ### Step 5/6
 
@@ -262,7 +262,7 @@ incomplete host contract.
 - [x] Diff: 493 textual changed lines within the 700-line target.
 - [x] TypeScript/build suites not run: Step 5 changes documentation only; Step 4 verification remains unchanged.
 - [x] Initial implementation commit `3f09065` pushed and
-  [PR #15](https://github.com/sesori-ai/opencode-pr-monitor/pull/15) opened.
+  [PR #15](https://github.com/sesori-ai/pr-monitor-plugin/pull/15) opened.
 - [x] Final head `bc38fd1` merged as `053e105` after all documentation review threads were resolved.
 
 ### Step 6/6 (preliminary; retirement still blocked)
@@ -273,13 +273,13 @@ transcript, account identity, raw log, or host configuration is retained.
 
 | Area | Result | Privacy-safe evidence |
 |---|---|---|
-| Core watch semantics | Pass | 34 local Node 22 tests; final Step 4 CI run [32717896376](https://github.com/sesori-ai/opencode-pr-monitor/actions/runs/32717896376) passed Ubuntu, macOS, and Windows. |
+| Core watch semantics | Pass | 34 local Node 22 tests; final Step 4 CI run [32717896376](https://github.com/sesori-ai/pr-monitor-plugin/actions/runs/32717896376) passed Ubuntu, macOS, and Windows. |
 | Shared monitor session | Pass | Runtime/action/race/timer/label tests represent all adapters; actual host sessions exercised the shared actions. |
 | OpenCode artifact | Partial | Exact tarball install plus OpenCode 1.17.0/1.18.21 macOS loaders exposed one tool/skill; Linux actual-host rows await Step 6 CI. |
 | Claude Code plugin | Pass | Exact tracked root and hook drain/subagent/keep-alive tests; live 2.1.237 Git-root session performed authenticated start, hook injection, status, and stop. |
 | Pi package | Pass | Exact tarball install and one skill; Pi 0.84.2 model sessions delivered while busy and from idle; prior CI covers three OSes and the floor is current. |
 | OMP package | Partial | Exact tarball install; 18.0.3 covers three OSes and live model delivery; 18.0.4 passes macOS, with Linux current-host row awaiting Step 6 CI. |
-| Cross-host GitHub flow | Pass | Disposable draft [#16](https://github.com/sesori-ai/opencode-pr-monitor/pull/16) produced initial, ordinary-comment, urgent failing-CI, ready-label add/remove, and terminal-close reports in Pi/OMP; Claude and packed-host starts used open PR #15 without mutation. |
+| Cross-host GitHub flow | Pass | Disposable draft [#16](https://github.com/sesori-ai/pr-monitor-plugin/pull/16) produced initial, ordinary-comment, urgent failing-CI, ready-label add/remove, and terminal-close reports in Pi/OMP; Claude and packed-host starts used open PR #15 without mutation. |
 | Release contents | Pass | Exact files/types/exports/peers/versions, clean Claude rebuild, disposable installs, and byte-identical repeated packs pass. |
 
 - [x] `npm ci`; 34 tests; typecheck; build; version, exact pack, Pi/OMP host, actionlint, and diff checks pass.
@@ -291,11 +291,11 @@ transcript, account identity, raw log, or host configuration is retained.
   Pi/OMP tarball `8f7f059ef0531a98ccf9509a15e72bd16d6d81f638a42a7937923b0ba2dd787f`; Claude bundle
   `0c029044b04b731e72a52592f68461192253842aeaaf48cf5d64ee9db47ebcde`.
 - [x] Fixture #16's intentional failing CI is retained only as run
-  [32733809249](https://github.com/sesori-ai/opencode-pr-monitor/actions/runs/32733809249). The PR is closed; its
+  [32733809249](https://github.com/sesori-ai/pr-monitor-plugin/actions/runs/32733809249). The PR is closed; its
   remote/local branch, comments, and labels are removed. All host processes, temporary installs/config, spools, and
   sessions were stopped or removed.
 - [x] Review diff: 342 textual changed lines within the 700-line target.
-- [x] Implementation commit `77faeb0` pushed and [PR #17](https://github.com/sesori-ai/opencode-pr-monitor/pull/17) opened.
+- [x] Implementation commit `77faeb0` pushed and [PR #17](https://github.com/sesori-ai/pr-monitor-plugin/pull/17) opened.
 - [ ] Replace both `Partial` rows after final Step 6 CI passes and only then retire the plan.
 
 Do not mark a regression row passed without the boundary and host/platform matrix required by `PLAN.md`.

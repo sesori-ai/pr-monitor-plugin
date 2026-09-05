@@ -14,8 +14,8 @@ const root = new URL("../", import.meta.url)
 const manifests = [
   "opencode/package.json",
   "pi/package.json",
-  "claude-code/.claude-plugin/plugin.json",
-  "claude-code/.codex-plugin/plugin.json",
+  "claude-codex/.claude-plugin/plugin.json",
+  "claude-codex/.codex-plugin/plugin.json",
 ]
 for (const path of manifests) {
   const url = new URL(path, root)
@@ -27,7 +27,7 @@ for (const path of manifests) {
   await writeFile(url, text.replace(field, `$1"${version}"`))
 }
 
-const serverUrl = new URL("claude-code/src/mcp-server.ts", root)
+const serverUrl = new URL("claude-codex/src/mcp-server.ts", root)
 const server = await readFile(serverUrl, "utf8")
 const serverField = /new McpServer\(\{ name: "pr-monitor", version: "[^"]+" \}\)/
 if (!serverField.test(server)) throw new Error("mcp-server.ts: McpServer version not found")

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Repository renamed from `sesori-ai/opencode-pr-monitor` to `sesori-ai/pr-monitor-plugin`; GitHub redirects the old
+  name, so existing marketplace installs keep working. The Claude Code + Codex plugin root moved from `claude-code/`
+  to `claude-codex/`, since it serves both hosts. Plugin and package names are unchanged.
+
 ## [0.4.0]
 
 ### Added

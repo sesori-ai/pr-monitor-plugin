@@ -33,7 +33,7 @@ jobs:
       - run: npm run version:check
       - run: npm run build
       - name: Verify committed Claude bundle
-        run: git diff --exit-code -- claude-code/dist/mcp-server.mjs
+        run: git diff --exit-code -- claude-codex/dist/mcp-server.mjs
       - run: npm run pack:check
       - run: npm run host:check
       - name: Install minimum OpenCode host
