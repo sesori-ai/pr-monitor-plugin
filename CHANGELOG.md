@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0]
+
 ### Added
 
+- Claude Code delivery is push-first: the MCP server injects each report over the session's messaging socket
+  (`CLAUDE_CODE_MESSAGING_SOCKET`/`_TOKEN`) as a visible `[PR Monitor]` message, starting a turn when the session is
+  idle. With a working socket the keep-alive Stop block and waiter are never armed; the spool + hooks + keep-alive
+  loop remains only as the fallback for hosts without the socket.
+- Inline-feedback reports list the exact changed review-thread locations (path and line), mark comments that belong
+  to a pending review, state that an unprefixed local-account comment is new human feedback, and warn that
+  pending-review comments may be missing from REST results so agents inspect the listed thread via GraphQL.
+- `make bump VERSION=X.Y.Z` and `make publish` script the lockstep version bump and the ordered
+  check → npm publish → registry verify → tag release procedure.
 - Codex support. The Claude Code plugin root is now also a Codex plugin (`.codex-plugin/plugin.json`,
   `.codex-mcp.json`, root `.agents/plugins/marketplace.json`) sharing the MCP server, hooks, and skill. Codex has no
   messaging socket, so it always uses the spool + hooks delivery with the keep-alive waiter; the server detects the

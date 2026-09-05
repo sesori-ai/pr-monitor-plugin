@@ -20,20 +20,18 @@ const manifests = [
 for (const path of manifests) {
   const url = new URL(path, root)
   const text = await readFile(url, "utf8")
-  // Textual replace keeps each file's formatting untouched.
-  const next = text.replace(/^(\s*"version":\s*)"[^"]+"/m, `$1"${version}"`)
-  if (next === text) throw new Error(`${path}: no version field replaced`)
-  await writeFile(url, next)
+  // Textual replace keeps each file's formatting untouched. Idempotent: an
+  // already-matching version is fine (re-running bump only cuts the CHANGELOG).
+  const field = /^(\s*"version":\s*)"[^"]+"/m
+  if (!field.test(text)) throw new Error(`${path}: no version field found`)
+  await writeFile(url, text.replace(field, `$1"${version}"`))
 }
 
 const serverUrl = new URL("claude-code/src/mcp-server.ts", root)
 const server = await readFile(serverUrl, "utf8")
-const nextServer = server.replace(
-  /new McpServer\(\{ name: "pr-monitor", version: "[^"]+" \}\)/,
-  `new McpServer({ name: "pr-monitor", version: "${version}" })`,
-)
-if (nextServer === server) throw new Error("mcp-server.ts: McpServer version not replaced")
-await writeFile(serverUrl, nextServer)
+const serverField = /new McpServer\(\{ name: "pr-monitor", version: "[^"]+" \}\)/
+if (!serverField.test(server)) throw new Error("mcp-server.ts: McpServer version not found")
+await writeFile(serverUrl, server.replace(serverField, `new McpServer({ name: "pr-monitor", version: "${version}" })`))
 
 const changelogUrl = new URL("CHANGELOG.md", root)
 const changelog = await readFile(changelogUrl, "utf8")
