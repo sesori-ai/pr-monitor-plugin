@@ -307,6 +307,7 @@ test("session cleanup keeps a stopped watch registered until its label mutation 
     pr: "sesori/example#42",
     start: backgroundStart,
   })
+  const marking = session.execute({ action: MonitorAction.markReady, pr: "sesori/example#42" })
   await mutationStarted
   const stopping = session.stopAll({})
   const raced = await session.execute({
@@ -318,6 +319,7 @@ test("session cleanup keeps a stopped watch registered until its label mutation 
   assert.match(raced.text, /Already monitoring/)
   assert.equal(session.list().length, 1)
   releaseMutation()
+  await marking
   await stopping
   assert.equal(session.list().length, 0)
 })

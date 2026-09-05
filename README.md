@@ -154,6 +154,9 @@ Behavior notes for the Codex shell:
 - The slash commands are Claude Code only; use the `pr_monitor` tool directly (`status`, `stop`, `mark_ready`, ...).
 - The report spool is shared with Claude Code at `~/.claude/pr-monitor/spool/`. Codex queues are nested under
   `<host pid>/<thread id>`; hooks and waiters select only that conversation. Claude Code retains process routing.
+- Startup observes the existing ready label. The agent must assess the initial report, including after a harness
+  restart, and immediately mark an already-settled PR ready. Empty results after creation or a fresh push do not
+  establish readiness; age alone is insufficient. Automatic readiness continues for later observed activity.
 - Across all hosts, clean review summaries, review quota notices and other no-op feedback still require agent
   judgment. After inspecting them and confirming no work remains, the agent calls `mark_ready` explicitly.
 

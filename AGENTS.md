@@ -137,6 +137,10 @@ where the plugin root sits in the repo.
 - Reports never include comment bodies. They include factual counts/authors/readiness plus explicit workflow
   direction when the PR is unready or new feedback needs inspection.
 - **The monitor owns waiting.** Tool descriptions and every shipped skill forbid agent-created sleeps, delays, timeouts, scheduled checks, background polling, repeated `gh pr checks`, and routine `status`/`flush`. All shells end the turn and rely on push delivery; only a legacy Claude host without the messaging socket may be handed the exact `await-activity.mjs` command by a keep-alive message, and Claude may run only that.
+- **Startup readiness** — observe the existing label without auto-adding it, including disabled/retried initial
+  announcements. The initial report and all skills require agent assessment of current-head checks, expected
+  automated reviews and feedback. A restarted settled PR can be marked immediately; empty fresh results and age
+  alone cannot justify handoff. Later observed activity retains automatic readiness.
 - **Automatic readiness** (`core/readiness.ts`, `core/watch.ts`) — adds the label after green/no CI, definite
   mergeability, and prefixed local replies on every feedback channel. A later head, relevant comment/summary,
   acknowledgement edit/deletion, CI regression, or conflict withdraws it urgently. Mixed same-second

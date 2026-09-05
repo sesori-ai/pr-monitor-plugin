@@ -46,7 +46,8 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 
 ### Ready-label lifecycle
 
-- An active watch automatically adds `readyLabel` when CI is passing or absent, mergeability is `MERGEABLE`, every
+- After startup, an active watch automatically adds `readyLabel` as observed activity settles when CI is passing
+  or absent, mergeability is `MERGEABLE`, every
   review thread ends in a prefixed local reply, and flat issue/review-summary feedback is followed by a prefixed
   local reply. Resolution state, stale `CHANGES_REQUESTED`, pending review requests, and draft state do not block.
 - A later head, relevant comment/summary, acknowledgement edit/deletion, CI regression, or definite conflict
@@ -65,6 +66,18 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 - Every report and stop notice states last-known readiness. An open, unready report instructs the agent to continue
   work or use `mark_ready` when judgment says no action remains. Terminal reports preserve the label and omit that
   work instruction.
+
+### Startup and restart assessment
+
+- Startup reports preserve the existing label without adding it automatically. This also applies when startup
+  announcements are disabled or initial delivery is retried. Unchanged polls or a flush of unchanged initial state
+  do not add the label. Later observed CI completion and feedback handling retain automatic readiness.
+- An initial report requires the same substantive attention as later reports. After a harness restart, an agent
+  inspects current-head CI, expected automated reviews and existing feedback, then calls `mark_ready` immediately
+  if the PR is settled and nothing remains. It must not wait for new activity that may never occur.
+- A freshly created PR or recently pushed head with no reported issues is not evidence of completed checks/reviews.
+  The agent keeps monitoring for expected results. PR age alone is not a readiness rule; an old PR can have a new
+  head. Pending human review is compatible with handoff to that reviewer.
 
 ### Autonomous ownership
 

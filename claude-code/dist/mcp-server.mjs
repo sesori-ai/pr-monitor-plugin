@@ -32135,7 +32135,7 @@ var PrWatch = class {
     this.readinessMutation = tracked;
     return tracked;
   }
-  /** Reconcile the initial label before the startup report is rendered. */
+  /** Observe the existing label; the agent assesses the initial handoff. */
   async initializeReadiness() {
     if (this.stopped) return;
     await this.runExclusive(async () => {
@@ -32143,9 +32143,6 @@ var PrWatch = class {
       const readiness = this.deps.readiness;
       if (this.stopped || snapshot === void 0 || readiness === void 0) return;
       this.notifyReadyChanged(hasReadyLabel(snapshot, readiness.label));
-      if (snapshot.state === "OPEN" && !hasReadyLabel(snapshot, readiness.label) && assessAutomaticReadiness(snapshot).eligible) {
-        this.snapshot = await this.changeSnapshotReadiness(snapshot, true);
-      }
     });
   }
   /** Manual actions are serialized with polling and accept all current state. */
@@ -32311,8 +32308,6 @@ var PrWatch = class {
     if (readiness !== void 0) {
       this.notifyReadyChanged(hasReadyLabel(this.snapshot, readiness.label));
     }
-    await this.prepareAutomaticReady();
-    if (this.stopped) return false;
     const report = this.buildCurrentReport({ baselineMs: 0 });
     if (await this.deliverOrLog(report)) {
       this.deliveryFailures = 0;
@@ -32362,7 +32357,7 @@ var PrWatch = class {
 (note: refresh failed \u2014 ${error51.message}; data is from the previous poll; baseline NOT reset)`;
     }
     if (this.stopped) return `${targetKey(this.target)}: flush skipped \u2014 monitor stopped.`;
-    if (!this.autoReadyAfterInvalidation) await this.prepareAutomaticReady();
+    if (this.dirty && !this.autoReadyAfterInvalidation) await this.prepareAutomaticReady();
     if (this.stopped) return `${targetKey(this.target)}: flush skipped \u2014 monitor stopped.`;
     const report = this.flush(void 0);
     this.afterReportDelivered();
@@ -32490,7 +32485,7 @@ var PrWatch = class {
   async prepareAutomaticReady() {
     const snapshot = this.snapshot;
     const readiness = this.deps.readiness;
-    if (snapshot === void 0 || readiness === void 0 || snapshot.state !== "OPEN" || hasReadyLabel(snapshot, readiness.label) || !assessAutomaticReadiness(snapshot).eligible) {
+    if (snapshot === void 0 || readiness === void 0 || this.initialAnnouncementPending || snapshot.state !== "OPEN" || hasReadyLabel(snapshot, readiness.label) || !assessAutomaticReadiness(snapshot).eligible) {
       return;
     }
     this.snapshot = await this.changeSnapshotReadiness(snapshot, true);
@@ -32580,7 +32575,7 @@ var PrWatch = class {
     forcedHoldMinutes
   }) {
     const readiness = this.deps.readiness;
-    return buildReport(this.target, this.snapshot, {
+    const report = buildReport(this.target, this.snapshot, {
       baselineMs,
       baselineSnapshot,
       forcedHoldMinutes,
@@ -32588,6 +32583,8 @@ var PrWatch = class {
       replyPrefix: readiness?.replyPrefix,
       readinessError: this.readinessError
     });
+    if (!this.initialAnnouncementPending || this.snapshot?.state !== "OPEN") return report;
+    return report + "\n- Startup/restart assessment: inspect the current head's checks, expected automated reviews, and existing feedback now. If already settled with nothing left to do, call mark_ready without waiting for a new event. Empty results after creation or a fresh push do not prove readiness; PR age alone is insufficient.";
   }
   flush(forcedHoldMinutes) {
     const snapshot = this.snapshot;
@@ -32624,7 +32621,7 @@ function buildMonitorToolDescription({
   lifecycle,
   waiting
 }) {
-  return `Monitor a GitHub PR in the background. Detects head changes, CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states whether the configured ready label is present and tells the agent to keep working or manually mark ready when judgment says no action remains. The monitor automatically adds readiness when CI is passing (or absent), mergeability is definite, and every feedback channel ends in a correctly prefixed local-account reply. It withdraws readiness on later commits, relevant comments, CI regression, or conflict. A newly failing check (when flushOnCiFailure is enabled), readiness withdrawal, merge conflict, or terminal state skips debounce. The monitor owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a later clean assessment). Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Tuning lives in ${configPath}. ${lifecycle}`;
+  return `Monitor a GitHub PR in the background. Detects head changes, CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states whether the configured ready label is present and tells the agent to keep working or manually mark ready when judgment says no action remains. Startup reports observe the existing label; assess current-head checks, automated reviews and feedback immediately, including after restarting a monitor. Mark an already-settled PR ready without waiting for a new event, but never infer readiness from empty results after creation or a fresh push. On later activity, the monitor automatically adds readiness when CI is passing (or absent), mergeability is definite, and every feedback channel ends in a correctly prefixed local-account reply. It withdraws readiness on later commits, relevant comments, CI regression, or conflict. A newly failing check (when flushOnCiFailure is enabled), readiness withdrawal, merge conflict, or terminal state skips debounce. The monitor owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a later clean assessment). Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Tuning lives in ${configPath}. ${lifecycle}`;
 }
 
 // runtime/monitor-session.ts

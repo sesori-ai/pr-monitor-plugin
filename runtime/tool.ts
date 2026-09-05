@@ -32,7 +32,10 @@ export function buildMonitorToolDescription({
     "(including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is " +
     `aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states ` +
     "whether the configured ready label is present and tells the agent to keep working or manually mark ready when " +
-    "judgment says no action remains. The monitor automatically adds readiness when CI is passing (or absent), " +
+    "judgment says no action remains. Startup reports observe the existing label; assess current-head checks, " +
+    "automated reviews and feedback immediately, including after restarting a monitor. Mark an already-settled PR " +
+    "ready without waiting for a new event, but never infer readiness from empty results after creation or a fresh push. " +
+    "On later activity, the monitor automatically adds readiness when CI is passing (or absent), " +
     "mergeability is definite, and every feedback channel ends in a correctly prefixed local-account reply. It " +
     "withdraws readiness on later commits, relevant comments, CI regression, or conflict. A newly failing check " +
     "(when flushOnCiFailure is enabled), readiness withdrawal, merge conflict, or terminal state skips debounce. " +
