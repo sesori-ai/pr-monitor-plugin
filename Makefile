@@ -1,10 +1,10 @@
-# Release automation. Two commands:
+# Release automation — one command, run on a clean, up-to-date main:
 #
-#   make bump VERSION=X.Y.Z   set the version everywhere and cut the CHANGELOG section (then commit + PR as usual)
-#   make publish              from a clean, up-to-date main: full check matrix, publish both npm packages,
-#                             verify the registry, then create and push the annotated Claude/Codex plugin tag
+#   make publish VERSION=X.Y.Z   (VERSION defaults to the current manifest version)
 #
-# Every step is a separate recipe line, so a failure stops exactly where it happened and nothing after it runs.
+# In order, stopping at the first failure: preflight guards → write the version everywhere and cut the
+# CHANGELOG section (committed to main as "Release vX.Y.Z" when anything changed) → full check matrix →
+# push main → publish both npm packages → verify the registry → create and push the annotated plugin tag.
 # npm versions are immutable, which is why both publishes and both registry checks happen before the tag.
 
 SHELL := /bin/bash
@@ -15,21 +15,34 @@ TAG := v$(VERSION)
 OPENCODE_CLI ?= $(shell command -v opencode || true)
 OMP_VERSION ?= 18.0.4
 
-.PHONY: help bump check publish preflight publish-npm verify-npm tag
+.PHONY: help publish preflight bump check push-main publish-npm verify-npm tag
 
 help:
 	@sed -n '2,8p' Makefile | sed 's/^# \{0,1\}//'
 
-## make bump VERSION=X.Y.Z — one version across both npm workspaces, the lockfile, both plugin manifests,
-## the MCP server, and CHANGELOG.md.
+## Refuse to release anything that is not a clean, current main.
+preflight:
+	@test -z "$$(git status --porcelain)" || { echo "working tree is not clean"; exit 1; }
+	@test "$$(git branch --show-current)" = main || { echo "run from main (current: $$(git branch --show-current))"; exit 1; }
+	git fetch -q origin main
+	@test "$$(git rev-parse HEAD)" = "$$(git rev-parse origin/main)" || { echo "local main differs from origin/main"; exit 1; }
+	@! git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null || { echo "$(TAG) already exists locally"; exit 1; }
+	@! git ls-remote --exit-code --tags origin "refs/tags/$(TAG)" >/dev/null || { echo "$(TAG) already exists on origin"; exit 1; }
+	npm whoami
+	@! npm view @sesori/pr-monitor-opencode@$(VERSION) version >/dev/null 2>&1 || { echo "@sesori/pr-monitor-opencode@$(VERSION) is already published"; exit 1; }
+	@! npm view @sesori/pr-monitor-pi@$(VERSION) version >/dev/null 2>&1 || { echo "@sesori/pr-monitor-pi@$(VERSION) is already published"; exit 1; }
+	@echo "preflight ok: releasing $(VERSION) from $$(git rev-parse --short HEAD)"
+
+## One version across both npm workspaces, the lockfile, both plugin manifests, the MCP server (and its committed
+## bundle), and CHANGELOG.md — committed to main only if anything actually changed.
 bump:
-	@test -n "$(filter-out $(shell node -p "require('./opencode/package.json').version"),$(VERSION))" || \
-	  echo "manifests already at $(VERSION); only the CHANGELOG section will be cut"
 	node scripts/bump-version.mjs $(VERSION)
 	npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 	npm run build:claude
 	npm run version:check
-	@echo "Bumped to $(VERSION). Review CHANGELOG.md, then commit and open the release PR."
+	@grep -q '^## \[$(VERSION)\]' CHANGELOG.md || { echo "CHANGELOG.md has no [$(VERSION)] section"; exit 1; }
+	@if [ -n "$$(git status --porcelain)" ]; then git add -A && git commit -q -m "Release $(TAG)" && echo "committed Release $(TAG)"; \
+	  else echo "already at $(VERSION); nothing to commit"; fi
 
 ## The complete pre-publish matrix from the README, on a fresh install.
 check:
@@ -40,19 +53,9 @@ check:
 	OMP_VERSION=$(OMP_VERSION) npm run host:check:omp
 	git diff --exit-code -- claude-code/dist/mcp-server.mjs
 
-## Refuse to publish anything that is not the reviewed main commit.
-preflight:
-	@test -z "$$(git status --porcelain)" || { echo "working tree is not clean"; exit 1; }
-	@test "$$(git branch --show-current)" = main || { echo "publish from main (current: $$(git branch --show-current))"; exit 1; }
-	git fetch -q origin main
-	@test "$$(git rev-parse HEAD)" = "$$(git rev-parse origin/main)" || { echo "local main differs from origin/main"; exit 1; }
-	@! git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null || { echo "$(TAG) already exists locally"; exit 1; }
-	@! git ls-remote --exit-code --tags origin "refs/tags/$(TAG)" >/dev/null || { echo "$(TAG) already exists on origin"; exit 1; }
-	@grep -q '^## \[$(VERSION)\]' CHANGELOG.md || { echo "CHANGELOG.md has no [$(VERSION)] section (run make bump)"; exit 1; }
-	npm whoami
-	@! npm view @sesori/pr-monitor-opencode@$(VERSION) version >/dev/null 2>&1 || { echo "@sesori/pr-monitor-opencode@$(VERSION) is already published"; exit 1; }
-	@! npm view @sesori/pr-monitor-pi@$(VERSION) version >/dev/null 2>&1 || { echo "@sesori/pr-monitor-pi@$(VERSION) is already published"; exit 1; }
-	@echo "preflight ok: publishing $(VERSION) from $$(git rev-parse --short HEAD)"
+## The release commit reaches origin before anything immutable is published.
+push-main:
+	git push origin main
 
 publish-npm:
 	npm publish --workspace @sesori/pr-monitor-opencode --access public
@@ -67,5 +70,4 @@ tag:
 	git push origin $(TAG)
 	@echo "released $(TAG): both npm packages published, plugin tag pushed"
 
-## make publish — everything above, in order, stopping at the first failure.
-publish: preflight check publish-npm verify-npm tag
+publish: preflight bump check push-main publish-npm verify-npm tag
