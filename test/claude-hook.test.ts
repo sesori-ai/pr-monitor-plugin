@@ -12,6 +12,7 @@ type HookInput = {
   hook_event_name: "PostToolUse" | "Stop" | "UserPromptSubmit"
   agent_id?: string
   tool_input?: unknown
+  tool_response?: unknown
 }
 
 function runHook({ home, input }: { home: string; input: HookInput }): string {
@@ -113,11 +114,22 @@ test("Claude hook drains once, skips subagents, and arms only its exact waiter",
     // waiter proof itself when the finished tool call was the waiter.
     const waiterProof = join(spool, ".waiter")
     assert.equal(existsSync(waiterProof), false)
+    const waiterCommand = { command: "node '/x/await-activity.mjs' --session 1" }
     runHook({ home, input: { hook_event_name: "PostToolUse", tool_input: { command: "ls" } } })
+    assert.equal(existsSync(waiterProof), false)
+    // A waiter that never ran (node missing, script unreadable) leaves no proof.
+    runHook({
+      home,
+      input: { hook_event_name: "PostToolUse", tool_input: waiterCommand, tool_response: "node: command not found" },
+    })
     assert.equal(existsSync(waiterProof), false)
     runHook({
       home,
-      input: { hook_event_name: "PostToolUse", tool_input: { command: "node '/x/await-activity.mjs' --session 1" } },
+      input: {
+        hook_event_name: "PostToolUse",
+        tool_input: waiterCommand,
+        tool_response: { stdout: "pr-monitor: no PR activity in the last 9m." },
+      },
     })
     assert.equal(existsSync(waiterProof), true)
   } finally {

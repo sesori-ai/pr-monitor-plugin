@@ -32859,7 +32859,13 @@ var parentCwd = (pid) => {
   }
   return void 0;
 };
-var projectDir = process5.env["CLAUDE_PROJECT_DIR"] ?? (isCodex ? parentCwd(claudePid) : void 0) ?? process5.cwd();
+var hostCwd = isCodex ? parentCwd(claudePid) : void 0;
+if (isCodex && hostCwd === void 0 && process5.env["CLAUDE_PROJECT_DIR"] === void 0) {
+  console.error(
+    `[pr-monitor] cannot resolve the Codex process working directory (no /proc, no lsof); looking for pr-monitor.json under ${process5.cwd()} (the plugin root) instead of the project`
+  );
+}
+var projectDir = process5.env["CLAUDE_PROJECT_DIR"] ?? hostCwd ?? process5.cwd();
 var configPaths = [
   join3(projectDir, ".pr-monitor.json"),
   join3(projectDir, isCodex ? ".codex" : ".claude", "pr-monitor.json"),

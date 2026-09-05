@@ -67,8 +67,14 @@ const parentCwd = (pid: number): string | undefined => {
   return undefined
 }
 
-const projectDir =
-  process.env["CLAUDE_PROJECT_DIR"] ?? (isCodex ? parentCwd(claudePid) : undefined) ?? process.cwd()
+const hostCwd = isCodex ? parentCwd(claudePid) : undefined
+if (isCodex && hostCwd === undefined && process.env["CLAUDE_PROJECT_DIR"] === undefined) {
+  console.error(
+    `[pr-monitor] cannot resolve the Codex process working directory (no /proc, no lsof); ` +
+      `looking for pr-monitor.json under ${process.cwd()} (the plugin root) instead of the project`,
+  )
+}
+const projectDir = process.env["CLAUDE_PROJECT_DIR"] ?? hostCwd ?? process.cwd()
 const configPaths = [
   join(projectDir, ".pr-monitor.json"),
   join(projectDir, isCodex ? ".codex" : ".claude", "pr-monitor.json"),

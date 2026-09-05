@@ -321,7 +321,15 @@ function main() {
   // Codex runs the waiter inside its sandbox, where the spool dir is read-only
   // and the waiter cannot leave its own `.waiter` proof; this hook runs outside
   // it, so the PostToolUse that follows the waiter's exit stamps on its behalf.
-  if (event === "PostToolUse" && JSON.stringify(input.tool_input ?? "").includes("await-activity.mjs")) {
+  // Only a *completed* wait counts: the waiter always ends by printing a
+  // `pr-monitor:` line, while a missing node or unreadable script prints none —
+  // stamping on the command alone would let a broken waiter reset the Stop
+  // guard's streak and reopen the unbounded loop it bounds.
+  if (
+    event === "PostToolUse" &&
+    JSON.stringify(input.tool_input ?? "").includes("await-activity.mjs") &&
+    JSON.stringify(input.tool_response ?? "").includes("pr-monitor:")
+  ) {
     for (const { dir } of spools) {
       try {
         writeFileSync(join(dir, WAITER_MARKER), String(Date.now()), "utf8")
