@@ -7200,9 +7200,8 @@ var require_dist = __commonJS({
 });
 
 // claude-codex/src/mcp-server.ts
-import { execFileSync as execFileSync2 } from "node:child_process";
-import { readlinkSync } from "node:fs";
-import { join as join3 } from "node:path";
+import { readFileSync as readFileSync2 } from "node:fs";
+import { isAbsolute, join as join3 } from "node:path";
 import process5 from "node:process";
 
 // node_modules/zod/v3/helpers/util.js
@@ -32136,7 +32135,7 @@ var PrWatch = class {
     this.readinessMutation = tracked;
     return tracked;
   }
-  /** Reconcile the initial label before the startup report is rendered. */
+  /** Observe the existing label; the agent assesses the initial handoff. */
   async initializeReadiness() {
     if (this.stopped) return;
     await this.runExclusive(async () => {
@@ -32144,9 +32143,6 @@ var PrWatch = class {
       const readiness = this.deps.readiness;
       if (this.stopped || snapshot === void 0 || readiness === void 0) return;
       this.notifyReadyChanged(hasReadyLabel(snapshot, readiness.label));
-      if (snapshot.state === "OPEN" && !hasReadyLabel(snapshot, readiness.label) && assessAutomaticReadiness(snapshot).eligible) {
-        this.snapshot = await this.changeSnapshotReadiness(snapshot, true);
-      }
     });
   }
   /** Manual actions are serialized with polling and accept all current state. */
@@ -32312,8 +32308,6 @@ var PrWatch = class {
     if (readiness !== void 0) {
       this.notifyReadyChanged(hasReadyLabel(this.snapshot, readiness.label));
     }
-    await this.prepareAutomaticReady();
-    if (this.stopped) return false;
     const report = this.buildCurrentReport({ baselineMs: 0 });
     if (await this.deliverOrLog(report)) {
       this.deliveryFailures = 0;
@@ -32363,7 +32357,7 @@ var PrWatch = class {
 (note: refresh failed \u2014 ${error51.message}; data is from the previous poll; baseline NOT reset)`;
     }
     if (this.stopped) return `${targetKey(this.target)}: flush skipped \u2014 monitor stopped.`;
-    if (!this.autoReadyAfterInvalidation) await this.prepareAutomaticReady();
+    if (this.dirty && !this.autoReadyAfterInvalidation) await this.prepareAutomaticReady();
     if (this.stopped) return `${targetKey(this.target)}: flush skipped \u2014 monitor stopped.`;
     const report = this.flush(void 0);
     this.afterReportDelivered();
@@ -32491,7 +32485,9 @@ var PrWatch = class {
   async prepareAutomaticReady() {
     const snapshot = this.snapshot;
     const readiness = this.deps.readiness;
-    if (snapshot === void 0 || readiness === void 0 || snapshot.state !== "OPEN" || hasReadyLabel(snapshot, readiness.label) || !assessAutomaticReadiness(snapshot).eligible) {
+    if (snapshot === void 0 || readiness === void 0 || // Failed delivery alone is not new activity. Keep unchanged startup
+    // retries for agent assessment, but allow activity since that snapshot.
+    this.initialAnnouncementPending && assessAutomaticReadiness(this.lastFlushedSnapshot).eligible && !detectActivity(this.lastFlushedSnapshot, snapshot, this.lastFlushedSnapshot.mergeable) || snapshot.state !== "OPEN" || hasReadyLabel(snapshot, readiness.label) || !assessAutomaticReadiness(snapshot).eligible) {
       return;
     }
     this.snapshot = await this.changeSnapshotReadiness(snapshot, true);
@@ -32581,7 +32577,7 @@ var PrWatch = class {
     forcedHoldMinutes
   }) {
     const readiness = this.deps.readiness;
-    return buildReport(this.target, this.snapshot, {
+    const report = buildReport(this.target, this.snapshot, {
       baselineMs,
       baselineSnapshot,
       forcedHoldMinutes,
@@ -32589,6 +32585,8 @@ var PrWatch = class {
       replyPrefix: readiness?.replyPrefix,
       readinessError: this.readinessError
     });
+    if (!this.initialAnnouncementPending || this.snapshot?.state !== "OPEN") return report;
+    return report + "\n- Startup/restart assessment: inspect the current head's checks, expected automated reviews, and existing feedback now. If already settled with nothing left to do, call mark_ready without waiting for a new event. Empty results after creation or a fresh push do not prove readiness; PR age alone is insufficient.";
   }
   flush(forcedHoldMinutes) {
     const snapshot = this.snapshot;
@@ -32625,7 +32623,7 @@ function buildMonitorToolDescription({
   lifecycle,
   waiting
 }) {
-  return `Monitor a GitHub PR in the background. Detects head changes, CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states whether the configured ready label is present and tells the agent to keep working or manually mark ready when judgment says no action remains. The monitor automatically adds readiness when CI is passing (or absent), mergeability is definite, and every feedback channel ends in a correctly prefixed local-account reply. It withdraws readiness on later commits, relevant comments, CI regression, or conflict. A newly failing check (when flushOnCiFailure is enabled), readiness withdrawal, merge conflict, or terminal state skips debounce. The monitor owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a later clean assessment). Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Tuning lives in ${configPath}. ${lifecycle}`;
+  return `Monitor a GitHub PR in the background. Detects head changes, CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states whether the configured ready label is present and tells the agent to keep working or manually mark ready when judgment says no action remains. Startup reports observe the existing label; assess current-head checks, automated reviews and feedback immediately, including after restarting a monitor. Mark an already-settled PR ready without waiting for a new event, but never infer readiness from empty results after creation or a fresh push. On later activity, the monitor automatically adds readiness when CI is passing (or absent), mergeability is definite, and every feedback channel ends in a correctly prefixed local-account reply. It withdraws readiness on later commits, relevant comments, CI regression, or conflict. A newly failing check (when flushOnCiFailure is enabled), readiness withdrawal, merge conflict, or terminal state skips debounce. The monitor owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a later clean assessment). Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Tuning lives in ${configPath}. ${lifecycle}`;
 }
 
 // runtime/monitor-session.ts
@@ -32985,8 +32983,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 var SPOOL_ROOT = join(homedir(), ".claude", "pr-monitor", "spool");
 var OWNER_FILE = "owner";
-function spoolDirFor(claudePid2) {
-  return join(SPOOL_ROOT, String(claudePid2));
+function spoolDirFor(claudePid2, sessionId) {
+  const root = join(SPOOL_ROOT, String(claudePid2));
+  return sessionId === void 0 ? root : join(root, sessionId);
 }
 var seq = 0;
 function startToken(pid) {
@@ -33053,17 +33052,17 @@ function assertOwned(claudePid2, dir) {
     `spool ${dir} is no longer owned by this server (the Claude Code process it belonged to is gone); refusing to write`
   );
 }
-function probeSpool(claudePid2) {
-  const dir = spoolDirFor(claudePid2);
+function probeSpool(claudePid2, sessionId) {
+  const dir = spoolDirFor(claudePid2, sessionId);
   mkdirSync(dir, { recursive: true });
   const probe = join(dir, `.probe-${process.pid}`);
   writeFileSync(probe, "", "utf8");
   rmSync(probe, { force: true });
 }
-function spoolReport(claudePid2, report) {
-  const dir = spoolDirFor(claudePid2);
+function spoolReport(claudePid2, report, sessionId) {
+  const dir = spoolDirFor(claudePid2, sessionId);
+  assertOwned(claudePid2, spoolDirFor(claudePid2));
   mkdirSync(dir, { recursive: true });
-  assertOwned(claudePid2, dir);
   seq += 1;
   const name = `${Date.now()}-${process.pid}-${String(seq).padStart(4, "0")}`;
   const tmp = join(dir, `${name}.tmp`);
@@ -33108,8 +33107,8 @@ function notifyDesktop(title, body) {
 
 // claude-codex/src/session-state.ts
 var SESSION_STATE_FILE = "session.json";
-function writeSessionState(claudePid2, state) {
-  const dir = spoolDirFor(claudePid2);
+function writeSessionState(claudePid2, state, sessionId) {
+  const dir = spoolDirFor(claudePid2, sessionId);
   const path = join2(dir, SESSION_STATE_FILE);
   if (!ownsSpool(claudePid2)) return;
   try {
@@ -33123,153 +33122,125 @@ function writeSessionState(claudePid2, state) {
 
 // claude-codex/src/mcp-server.ts
 var claudePid = process5.ppid;
-var pushChannel = messagingChannel();
 var isCodex = process5.argv.includes("--codex");
+var pushChannel = isCodex ? void 0 : messagingChannel();
 var hostName = isCodex ? "Codex" : "Claude Code";
-var parentCwd = (pid) => {
-  try {
-    return readlinkSync(`/proc/${pid}/cwd`);
-  } catch {
-  }
-  try {
-    const out = execFileSync2("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
-    });
-    const line = out.split("\n").find((entry) => entry.startsWith("n/"));
-    if (line !== void 0) return line.slice(1);
-  } catch {
-  }
-  return void 0;
-};
-var hostCwd = isCodex ? parentCwd(claudePid) : void 0;
-if (isCodex && hostCwd === void 0 && process5.env["CLAUDE_PROJECT_DIR"] === void 0) {
-  console.error(
-    `[pr-monitor] cannot resolve the Codex process working directory (no /proc, no lsof); looking for pr-monitor.json under ${process5.cwd()} (the plugin root) instead of the project`
-  );
-}
-var projectDir = process5.env["CLAUDE_PROJECT_DIR"] ?? hostCwd ?? process5.cwd();
-var configPaths = [
-  join3(projectDir, ".pr-monitor.json"),
-  join3(projectDir, isCodex ? ".codex" : ".claude", "pr-monitor.json"),
-  join3(projectDir, ".opencode", "pr-monitor.json")
-];
-var handedOff = /* @__PURE__ */ new Set();
-var keepAliveUntilMs = 0;
-var STATE_LIVENESS_FLOOR_MS = 5 * 6e4;
-var log = (message) => {
-  console.error(`[pr-monitor] ${message}`);
-};
+var log = (message) => console.error(`[pr-monitor] ${message}`);
 var runGh = createNodeGhRunner();
-var monitorSession;
-var refreshSessionState = () => {
-  const watches = monitorSession.list();
-  const active = watches.filter(({ target }) => !handedOff.has(targetRegistryKey(target)));
-  const pollMs = Math.max(...watches.map(({ config: config2 }) => config2.pollIntervalSeconds * 1e3), 0);
-  writeSessionState(claudePid, {
-    version: 1,
-    // With a push channel the session may go idle freely — the next report
-    // wakes it by itself, so the Stop hook must not hold turn-end. A failed
-    // push is retried by the watch at poll cadence (see deliver), never parked
-    // behind hooks an idle session cannot fire.
-    keepAlive: pushChannel === void 0 && active.some(({ config: config2 }) => config2.keepAlive),
-    expiresAtMs: Date.now() + Math.max(pollMs * 3 + 6e4, STATE_LIVENESS_FLOOR_MS),
-    keepAliveUntilMs,
-    monitors: active.map(({ target }) => targetKey(target))
-  });
-};
-var extendKeepAlive = ({ config: config2 }) => {
-  keepAliveUntilMs = Math.max(keepAliveUntilMs, Date.now() + config2.keepAliveMaxMinutes * 6e4);
-};
-var deliver = async ({
-  target,
-  config: config2,
-  report
-}) => {
-  if (pushChannel !== void 0) {
-    await pushMessage({ channel: pushChannel, text: report });
+var createAdapter = ({ sessionId, projectDir }) => {
+  const configPaths = [
+    join3(projectDir, ".pr-monitor.json"),
+    join3(projectDir, isCodex ? ".codex" : ".claude", "pr-monitor.json"),
+    join3(projectDir, ".opencode", "pr-monitor.json")
+  ];
+  const handedOff = /* @__PURE__ */ new Set();
+  let keepAliveUntilMs = 0;
+  const STATE_LIVENESS_FLOOR_MS = 5 * 6e4;
+  let monitorSession;
+  const refreshSessionState = () => {
+    const watches = monitorSession.list();
+    const active = watches.filter(({ target }) => !handedOff.has(targetRegistryKey(target)));
+    const pollMs = Math.max(...watches.map(({ config: config2 }) => config2.pollIntervalSeconds * 1e3), 0);
+    writeSessionState(claudePid, {
+      version: 1,
+      // With a push channel the session may go idle freely — the next report
+      // wakes it by itself, so the Stop hook must not hold turn-end. A failed
+      // push is retried by the watch at poll cadence (see deliver), never parked
+      // behind hooks an idle session cannot fire.
+      keepAlive: pushChannel === void 0 && active.some(({ config: config2 }) => config2.keepAlive),
+      expiresAtMs: Date.now() + Math.max(pollMs * 3 + 6e4, STATE_LIVENESS_FLOOR_MS),
+      keepAliveUntilMs,
+      monitors: active.map(({ target }) => targetKey(target))
+    }, sessionId);
+  };
+  const extendKeepAlive = ({ config: config2 }) => {
+    keepAliveUntilMs = Math.max(keepAliveUntilMs, Date.now() + config2.keepAliveMaxMinutes * 6e4);
+  };
+  const deliver = async ({
+    target,
+    config: config2,
+    report
+  }) => {
+    if (pushChannel !== void 0) {
+      await pushMessage({ channel: pushChannel, text: report });
+      extendKeepAlive({ config: config2 });
+      refreshSessionState();
+      if (config2.desktopNotifications) {
+        notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report delivered to your ${hostName} session`);
+      }
+      return;
+    }
+    spoolReport(claudePid, report, sessionId);
     extendKeepAlive({ config: config2 });
     refreshSessionState();
     if (config2.desktopNotifications) {
-      notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report delivered to your ${hostName} session`);
+      notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report waiting in your ${hostName} session`);
     }
-    return;
-  }
-  spoolReport(claudePid, report);
-  extendKeepAlive({ config: config2 });
-  refreshSessionState();
-  if (config2.desktopNotifications) {
-    notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report waiting in your ${hostName} session`);
-  }
-};
-monitorSession = new MonitorSession({
-  runGh,
-  loadConfig: () => loadClaudeConfig({ paths: configPaths, log }),
-  log,
-  onWatchChanged: ({ type, target, config: config2 }) => {
-    if (type === "started" /* started */) extendKeepAlive({ config: config2 });
-    else handedOff.delete(targetRegistryKey(target));
-    refreshSessionState();
-  },
-  onTickSettled: refreshSessionState,
-  onReadyChanged: ({ target, ready, watched, config: config2 }) => {
-    if (ready && watched) handedOff.add(targetRegistryKey(target));
-    if (!ready) {
-      handedOff.delete(targetRegistryKey(target));
-      if (watched) extendKeepAlive({ config: config2 });
-    }
-    refreshSessionState();
-  },
-  statusSuffix: ({ target }) => handedOff.has(targetRegistryKey(target)) ? ", handed off for human review" : ""
-});
-var prepareStart = async () => {
-  if (pushChannel !== void 0) return void 0;
-  try {
-    probeSpool(claudePid);
-    return void 0;
-  } catch (error51) {
-    return `Cannot start monitor: the report spool is not writable (${error51.message}). Reports could not be delivered. Check permissions on ~/.claude/pr-monitor.`;
-  }
-};
-var formatResult = ({ result }) => {
-  if (result.start !== void 0) {
-    const { config: config2, announcement } = result.start;
-    const replyPrefix = config2.ignoreCommentTag ?? "<!-- pr-monitor:reply -->";
-    return `${result.text}
-` + (config2.announceOnStart ? announcement === "delivered" /* delivered */ ? pushChannel !== void 0 ? "An initial [PR Monitor] report has been delivered into this session. " : "An initial [PR Monitor] report is spooled for the next hook event. " : "Initial delivery failed and will retry at the next poll without losing its baseline. " : "") + (pushChannel !== void 0 ? `Polling every ${config2.pollIntervalSeconds}s; settled activity arrives on its own as a '[PR Monitor]' message after ${config2.debounceMinutes} quiet minutes \u2014 even while this session is idle. ` : `Polling every ${config2.pollIntervalSeconds}s; settled activity is injected automatically at the next tool call, user message, or turn end after ${config2.debounceMinutes} quiet minutes. `) + (config2.flushOnCiFailure ? "A failing check is reported at the next poll without waiting for the quiet window or the rest of CI. " : "") + `A new merge conflict or terminal state is also immediate. Readiness is managed automatically; agent-authored GitHub replies must begin with \`${replyPrefix}\`. Use mark_ready when new feedback is non-actionable and no reply should be posted. Never invent sleeps, delays, timeouts, scheduled checks, polling loops, repeated CI checks, or routine status/flush calls \u2014 the monitor delivers on its own. The monitor stops on merge/close and does not survive this ${hostName} session.` + (pushChannel !== void 0 ? "\nEnd the turn when there is nothing left to handle; a new report starts its own turn." : config2.keepAlive ? "\nKeep-alive follows the ready label. Run only the exact await-activity command supplied by a [PR Monitor keep-alive] message; do not create another waiting mechanism." : "");
-  }
-  if (result.ready?.ready && result.ready.watched) {
-    return `${result.text}
-Still monitoring it, but it no longer holds this session open; new activity re-opens the work loop.`;
-  }
-  return result.text;
-};
-var handle = async ({
-  action,
-  pr
-}) => {
-  const result = await monitorSession.execute({
-    action,
-    pr,
-    start: action === "start" /* start */ ? {
-      prepare: prepareStart,
-      announcementMode: "await_delivery" /* awaitDelivery */,
-      createChannel: ({ target, config: config2 }) => ({
-        deliver: ({ report }) => deliver({ target, config: config2, report }),
-        persist: ({ report }) => {
-          spoolReport(claudePid, report);
-          return Promise.resolve();
-        }
-      })
-    } : void 0
+  };
+  monitorSession = new MonitorSession({
+    runGh,
+    loadConfig: () => loadClaudeConfig({ paths: configPaths, log }),
+    log,
+    onWatchChanged: ({ type, target, config: config2 }) => {
+      if (type === "started" /* started */) extendKeepAlive({ config: config2 });
+      else handedOff.delete(targetRegistryKey(target));
+      refreshSessionState();
+    },
+    onTickSettled: refreshSessionState,
+    onReadyChanged: ({ target, ready, watched, config: config2 }) => {
+      if (ready && watched) handedOff.add(targetRegistryKey(target));
+      if (!ready) {
+        handedOff.delete(targetRegistryKey(target));
+        if (watched) extendKeepAlive({ config: config2 });
+      }
+      refreshSessionState();
+    },
+    statusSuffix: ({ target }) => handedOff.has(targetRegistryKey(target)) ? ", handed off for human review" : ""
   });
-  return formatResult({ result });
-};
-var shuttingDown = false;
-var shutdown = () => {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  void (async () => {
+  const prepareStart = async () => {
+    if (pushChannel !== void 0) return void 0;
+    try {
+      probeSpool(claudePid, sessionId);
+      return void 0;
+    } catch (error51) {
+      return `Cannot start monitor: the report spool is not writable (${error51.message}). Reports could not be delivered. Check permissions on ~/.claude/pr-monitor.`;
+    }
+  };
+  const formatResult = ({ result }) => {
+    if (result.start !== void 0) {
+      const { config: config2, announcement } = result.start;
+      const replyPrefix = config2.ignoreCommentTag ?? "<!-- pr-monitor:reply -->";
+      return `${result.text}
+` + (config2.announceOnStart ? announcement === "delivered" /* delivered */ ? pushChannel !== void 0 ? "An initial [PR Monitor] report has been delivered into this session. " : "An initial [PR Monitor] report is spooled for the next hook event. " : "Initial delivery failed and will retry at the next poll without losing its baseline. " : "") + (pushChannel !== void 0 ? `Polling every ${config2.pollIntervalSeconds}s; settled activity arrives on its own as a '[PR Monitor]' message after ${config2.debounceMinutes} quiet minutes \u2014 even while this session is idle. ` : `Polling every ${config2.pollIntervalSeconds}s; settled activity is injected automatically at the next tool call, user message, or turn end after ${config2.debounceMinutes} quiet minutes. `) + (config2.flushOnCiFailure ? "A failing check is reported at the next poll without waiting for the quiet window or the rest of CI. " : "") + `A new merge conflict or terminal state is also immediate. Readiness is managed automatically; agent-authored GitHub replies must begin with \`${replyPrefix}\`. Use mark_ready when new feedback is non-actionable and no reply should be posted. Never invent sleeps, delays, timeouts, scheduled checks, polling loops, repeated CI checks, or routine status/flush calls \u2014 the monitor delivers on its own. The monitor stops on merge/close and does not survive this ${hostName} session.` + (pushChannel !== void 0 ? "\nEnd the turn when there is nothing left to handle; a new report starts its own turn." : config2.keepAlive ? "\nKeep-alive follows the ready label. Run only the exact await-activity command supplied by a [PR Monitor keep-alive] message; do not create another waiting mechanism." : "");
+    }
+    if (result.ready?.ready && result.ready.watched) {
+      return `${result.text}
+Still monitoring it, but it no longer holds this session open; new activity re-opens the work loop.`;
+    }
+    return result.text;
+  };
+  const handle = async ({
+    action,
+    pr
+  }) => {
+    const result = await monitorSession.execute({
+      action,
+      pr,
+      start: action === "start" /* start */ ? {
+        prepare: prepareStart,
+        announcementMode: "await_delivery" /* awaitDelivery */,
+        createChannel: ({ target, config: config2 }) => ({
+          deliver: ({ report }) => deliver({ target, config: config2, report }),
+          persist: ({ report }) => {
+            spoolReport(claudePid, report, sessionId);
+            return Promise.resolve();
+          }
+        })
+      } : void 0
+    });
+    return formatResult({ result });
+  };
+  const shutdown2 = async () => {
     await monitorSession.stopAll({
       notice: `Monitor stopped: the pr-monitor MCP server is shutting down (${hostName} session ended or server restarted). Re-start monitoring if still needed.`,
       channel: "persistent" /* persistent */
@@ -33280,9 +33251,47 @@ var shutdown = () => {
       expiresAtMs: 0,
       keepAliveUntilMs: 0,
       monitors: []
-    });
-    process5.exit(0);
-  })();
+    }, sessionId);
+  };
+  return { handle, shutdown: shutdown2 };
+};
+var adapters = /* @__PURE__ */ new Map();
+if (!isCodex) {
+  adapters.set("claude", createAdapter({
+    sessionId: void 0,
+    projectDir: process5.env["CLAUDE_PROJECT_DIR"] ?? process5.cwd()
+  }));
+}
+var adapterFor = (meta3) => {
+  if (!isCodex) return adapters.get("claude");
+  const sessionId = meta3?.["threadId"];
+  if (typeof sessionId !== "string" || !/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+    throw new Error("Cannot route this monitor: Codex did not supply a valid MCP threadId. Update Codex and reconnect the plugin.");
+  }
+  const existing = adapters.get(sessionId);
+  if (existing !== void 0) return existing;
+  let projectDir;
+  try {
+    const context = JSON.parse(readFileSync2(join3(SPOOL_ROOT, "codex-contexts", `${sessionId}.json`), "utf8"));
+    const token = startToken(claudePid);
+    const registeredHere = Array.isArray(context.owners) && context.owners.some(
+      (owner) => owner?.pid === claudePid && owner.token === token
+    );
+    if (registeredHere) projectDir = context.cwd;
+  } catch {
+  }
+  if (typeof projectDir !== "string" || !isAbsolute(projectDir)) {
+    throw new Error("Cannot start monitoring: the PR Monitor delivery hook has not registered this Codex conversation in the current host. Enable and trust the plugin hooks (/hooks in the CLI), then send a new prompt and retry. No monitor was started; reports cannot be delivered until hooks run.");
+  }
+  const adapter = createAdapter({ sessionId, projectDir });
+  adapters.set(sessionId, adapter);
+  return adapter;
+};
+var shuttingDown = false;
+var shutdown = () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  void Promise.all([...adapters.values()].map((adapter) => adapter.shutdown())).finally(() => process5.exit(0));
 };
 process5.stdin.on("end", shutdown);
 process5.stdin.on("close", shutdown);
@@ -33307,7 +33316,15 @@ server.registerTool(
       )
     }
   },
-  async ({ action, pr }) => ({ content: [{ type: "text", text: await handle({ action, pr }) }] })
+  async ({ action, pr }, extra) => {
+    try {
+      const text = await adapterFor(extra._meta).handle({ action, pr });
+      return { content: [{ type: "text", text }] };
+    } catch (error51) {
+      log(String(error51));
+      return { isError: true, content: [{ type: "text", text: String(error51) }] };
+    }
+  }
 );
 await server.connect(new StdioServerTransport());
-log(`pr-monitor MCP server ready (${hostName} pid ${claudePid}, project ${projectDir})`);
+log(`pr-monitor MCP server ready (${hostName} host pid ${claudePid})`);

@@ -12,7 +12,7 @@
 //
 // Only the MCP server writes this file; the two hook scripts only read it. It
 // lives inside the session's spool dir so it shares that dir's lifecycle —
-// pid-keyed, and garbage-collected by the same dead-pid sweep. The drain hook
+// scoped by host PID (plus thread ID for Codex), and collected by the same dead-pid sweep. The drain hook
 // reads `.md` files exclusively, so a sibling `.json` never looks like a report.
 //
 // The two independent deadlines are both required:
@@ -54,8 +54,8 @@ export type SessionState = {
  * `ownsSpool`); here it goes quiet rather than throwing, because there is no
  * caller to report to.
  */
-export function writeSessionState(claudePid: number, state: SessionState): void {
-  const dir = spoolDirFor(claudePid)
+export function writeSessionState(claudePid: number, state: SessionState, sessionId?: string): void {
+  const dir = spoolDirFor(claudePid, sessionId)
   const path = join(dir, SESSION_STATE_FILE)
   if (!ownsSpool(claudePid)) return
   try {

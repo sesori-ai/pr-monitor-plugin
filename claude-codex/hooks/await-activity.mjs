@@ -27,12 +27,16 @@ const POLL_MS = 2000
 const DEFAULT_TIMEOUT_SECONDS = 540
 
 function parseArgs(argv) {
-  const args = { session: undefined, timeout: DEFAULT_TIMEOUT_SECONDS }
+  const args = { session: undefined, thread: undefined, timeout: DEFAULT_TIMEOUT_SECONDS }
   for (let i = 0; i < argv.length; i += 1) {
     const value = argv[i + 1]
     if (argv[i] === "--session" && value !== undefined) {
       const pid = Number(value)
       if (Number.isInteger(pid) && pid > 0) args.session = pid
+      i += 1
+    } else if (argv[i] === "--thread" && value !== undefined) {
+      if (/^[a-zA-Z0-9_-]+$/.test(value)) args.thread = value
+      else throw new Error("Invalid --thread identifier")
       i += 1
     } else if (argv[i] === "--timeout" && value !== undefined) {
       const seconds = Number(value)
@@ -62,13 +66,12 @@ function readState(dir) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-async function main() {
-  const { session, timeout } = parseArgs(process.argv.slice(2))
+async function main({ session, thread, timeout }) {
   if (session === undefined) {
     console.log("pr-monitor: no --session pid given, nothing to wait for.")
     return
   }
-  const dir = join(SPOOL_ROOT, String(session))
+  const dir = join(SPOOL_ROOT, String(session), ...(thread === undefined ? [] : [thread]))
   const deadline = Date.now() + timeout * 1000
 
   for (;;) {
@@ -111,8 +114,10 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   })
 }
 
+let args
 try {
-  await main()
+  args = parseArgs(process.argv.slice(2))
+  await main(args)
 } catch (error) {
   console.log(`pr-monitor: wait ended early (${error?.message ?? error}).`)
 } finally {
@@ -121,10 +126,10 @@ try {
   // (node missing, script unreadable) leaves this untouched, while a session
   // that is genuinely looping keeps refreshing it. Written last so it records
   // a completed wait, not merely a start.
-  const { session } = parseArgs(process.argv.slice(2))
+  const { session, thread } = args ?? {}
   if (session !== undefined) {
     try {
-      writeFileSync(join(SPOOL_ROOT, String(session), ".waiter"), String(Date.now()), "utf8")
+      writeFileSync(join(SPOOL_ROOT, String(session), ...(thread === undefined ? [] : [thread]), ".waiter"), String(Date.now()), "utf8")
     } catch {
       // best-effort: the guard degrades to giving up after a few blocks
     }

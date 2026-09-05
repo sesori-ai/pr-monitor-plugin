@@ -47,7 +47,7 @@ pi/                  # @sesori/pr-monitor-pi workspace shared by upstream Pi and
 
 claude-codex/         # Claude Code + Codex shell. THIS DIRECTORY IS THE PLUGIN ROOT for both (= ${CLAUDE_PLUGIN_ROOT}).
   .codex-plugin/
-    plugin.json      # Codex manifest: same metadata/version, points at ./skills/, ./hooks/hooks.json, ./.codex-mcp.json.
+    plugin.json      # Codex manifest: same metadata/version, points at ./skills/, ./hooks/codex-hooks.json, ./.codex-mcp.json.
   .codex-mcp.json    # Codex server declaration: command "./dist/mcp-server.mjs" (shebang + exec bit), cwd ".", args ["--codex"].
                      # Codex 0.153 expands NO ${...} placeholders in args/env and exports NO plugin/project env to the server;
                      # a relative cwd resolves against the plugin root; a contained ./ command resolves against that cwd.
@@ -78,16 +78,16 @@ claude-codex/         # Claude Code + Codex shell. THIS DIRECTORY IS THE PLUGIN 
   marketplace.json # Codex marketplace, also repo-root ("codex plugin marketplace add <repo>"); local source ./claude-codex.
 ```
 
-**Codex host facts (verified on codex-cli 0.153.0):** plugin MCP servers and hooks are children of the Codex TUI
-process (hooks through a shell), so the pid-keyed spool routing below applies unchanged and the spool root is shared
-with Claude Code. Hook commands get `${CLAUDE_PLUGIN_ROOT}` expanded and receive `PLUGIN_ROOT`/`PLUGIN_DATA` (+
-`CLAUDE_*` aliases) in their env; the MCP server gets none of that. Plugin hooks need a one-time trust confirmation
-(`/hooks`, or `t` at the first-session prompt). Codex has no messaging socket, so it always takes the spool + hooks
-+ keep-alive path; the server learns the host from the verbatim `--codex` arg, reads the project directory from the
-Codex process cwd (`/proc/<pid>/cwd`, else `lsof`), and looks for `.codex/pr-monitor.json`. The Codex sandbox keeps
-the waiter from writing its `.waiter` proof, so `drain-spool.mjs` stamps it on the PostToolUse that follows a waiter
-run. Hook injection (`additionalContext`, Stop `decision: block`) follows the same wire format as Claude Code per the
-Codex hooks docs; a live model-driven session was not exercised.
+**Codex host facts:** MCP calls include `_meta.threadId`; hook `session_id` is that thread ID (verified in
+Codex 0.153 source). A Codex app-server can own multiple conversations, so its PID and cwd do not identify a
+conversation. The adapter creates one MonitorSession per thread and spools under `<host pid>/<thread id>`;
+the PID owner token and dead-process GC still govern the outer directory. Codex hooks only drain the matching
+thread subdirectory, never legacy PID-only reports. They record conversation `cwd` in
+`spool/codex-contexts/<thread id>.json`, bound to the current host PID/start token. A resumed thread needs fresh
+registration after a host restart; an unregistered conversation cannot start a monitor and receives an
+explicit hook setup error. The generated `hooks/codex-hooks.json` adds `--codex` to the shared hooks and registers
+SessionStart. Codex plugin hooks require trust confirmation. Codex has no messaging socket and uses the
+thread-scoped spool/keep-alive path. Synthetic tests do not substitute for a real model-driven host check.
 
 Everything under `claude-codex/` is addressed plugin-root-relative at runtime, so
 `.mcp.json` and `hooks.json` (which use `${CLAUDE_PLUGIN_ROOT}`) are unaffected by
@@ -138,6 +138,10 @@ where the plugin root sits in the repo.
 - Reports never include comment bodies. They include factual counts/authors/readiness plus explicit workflow
   direction when the PR is unready or new feedback needs inspection.
 - **The monitor owns waiting.** Tool descriptions and every shipped skill forbid agent-created sleeps, delays, timeouts, scheduled checks, background polling, repeated `gh pr checks`, and routine `status`/`flush`. All shells end the turn and rely on push delivery; only a legacy Claude host without the messaging socket may be handed the exact `await-activity.mjs` command by a keep-alive message, and Claude may run only that.
+- **Startup readiness** — observe the existing label without auto-adding it, including disabled/retried initial
+  announcements. The initial report and all skills require agent assessment of current-head checks, expected
+  automated reviews and feedback. A restarted settled PR can be marked immediately; empty fresh results and age
+  alone cannot justify handoff. Later observed activity retains automatic readiness.
 - **Automatic readiness** (`core/readiness.ts`, `core/watch.ts`) — adds the label after green/no CI, definite
   mergeability, and prefixed local replies on every feedback channel. A later head, relevant comment/summary,
   acknowledgement edit/deletion, CI regression, or conflict withdraws it urgently. Mixed same-second

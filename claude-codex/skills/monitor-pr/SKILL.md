@@ -34,6 +34,32 @@ written by the agent **must begin with that exact prefix** (default
 `<!-- pr-monitor:reply -->`). The human owner may comment through the same
 GitHub account; an unprefixed local-account comment is therefore human feedback.
 
+## Assess the initial report, including after a restart
+
+Startup observes the existing label without automatically adding it. Treat
+the initial PR state as an actionable report. Restarting the harness
+kills its monitors; when you start one again, assess readiness immediately.
+Do not wait for a new commit, comment, or CI transition to make an already
+settled PR eligible for handoff.
+
+Inspect the current head's checks, expected automated review activity, and the
+full existing feedback. Use the PR creation and latest-push history as context:
+
+- **Just created or recently pushed:** no checks, reviews, or issues may mean
+  results have not arrived yet. Do not call `mark_ready` from that absence.
+  Keep monitoring for the expected checks and automated reviews to settle.
+- **Already settled, including after a harness restart:** if checks and
+  automated reviews have completed or are not applicable, the PR is mergeable,
+  and all feedback is handled or verified non-actionable, call `mark_ready`
+  now and confirm success. Feedback predating this monitor still needs that
+  judgment; no later event is required.
+
+PR age alone proves nothing: an old PR can have a new head. Assess the current
+head and repository workflow, not a fixed age cutoff. Requested human review
+can remain pending; this label hands the PR to that reviewer. If evidence is
+incomplete, keep the monitor active and use its delivered reports rather than
+creating sleeps or polling loops.
+
 ## 2. Handle every report
 
 - For failing CI, inspect the named check, fix the root cause, test, commit, and
@@ -79,6 +105,12 @@ the bot acknowledge another acknowledgement. Instead call:
 ```
 pr_monitor(action: "mark_ready", pr: "owner/repo#123")
 ```
+
+This also applies to clean review summaries (such as "0 issues found"), review
+quota notices, and other no-op feedback. Fetch and inspect the full text first.
+They do not qualify for automatic readiness merely because a bot posted them.
+When CI is green, the PR is mergeable, and no actionable work remains, use
+`mark_ready` yourself; do not wait for another bot reply to clear the gate.
 
 `mark_ready` unconditionally accepts all activity currently observed by the
 watch and adds the label. Only later invalidating activity withdraws it. Claim

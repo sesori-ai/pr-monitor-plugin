@@ -1,4 +1,4 @@
-import { chmodSync } from "node:fs"
+import { chmodSync, readFileSync, writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { build } from "esbuild"
 
@@ -21,3 +21,15 @@ await build({
   },
 })
 chmodSync(output, 0o755)
+
+// Keep both hosts on the same hook implementation and events. Codex also needs
+// SessionStart to register the conversation before the first MCP call.
+const hooksUrl = new URL("../claude-codex/hooks/hooks.json", import.meta.url)
+const codexHooks = JSON.parse(readFileSync(hooksUrl, "utf8"))
+for (const entries of Object.values(codexHooks.hooks)) {
+  for (const entry of entries) for (const hook of entry.hooks) {
+    hook.command = hook.command.replace(/ \|\| true$/, " --codex || true")
+  }
+}
+codexHooks.hooks.SessionStart = codexHooks.hooks.UserPromptSubmit
+writeFileSync(new URL("codex-hooks.json", hooksUrl), JSON.stringify(codexHooks, null, 2) + "\n")

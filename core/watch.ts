@@ -149,7 +149,7 @@ export class PrWatch {
     return tracked
   }
 
-  /** Reconcile the initial label before the startup report is rendered. */
+  /** Observe the existing label; the agent assesses the initial handoff. */
   async initializeReadiness(): Promise<void> {
     if (this.stopped) return
     await this.runExclusive(async () => {
@@ -157,13 +157,6 @@ export class PrWatch {
       const readiness = this.deps.readiness
       if (this.stopped || snapshot === undefined || readiness === undefined) return
       this.notifyReadyChanged(hasReadyLabel(snapshot, readiness.label))
-      if (
-        snapshot.state === "OPEN" &&
-        !hasReadyLabel(snapshot, readiness.label) &&
-        assessAutomaticReadiness(snapshot).eligible
-      ) {
-        this.snapshot = await this.changeSnapshotReadiness(snapshot, true)
-      }
     })
   }
 
@@ -349,8 +342,6 @@ export class PrWatch {
     if (readiness !== undefined) {
       this.notifyReadyChanged(hasReadyLabel(this.snapshot, readiness.label))
     }
-    await this.prepareAutomaticReady()
-    if (this.stopped) return false
     const report = this.buildCurrentReport({ baselineMs: 0 })
     if (await this.deliverOrLog(report)) {
       this.deliveryFailures = 0
@@ -404,7 +395,7 @@ export class PrWatch {
       )
     }
     if (this.stopped) return `${targetKey(this.target)}: flush skipped — monitor stopped.`
-    if (!this.autoReadyAfterInvalidation) await this.prepareAutomaticReady()
+    if (this.dirty && !this.autoReadyAfterInvalidation) await this.prepareAutomaticReady()
     if (this.stopped) return `${targetKey(this.target)}: flush skipped — monitor stopped.`
     const report = this.flush(undefined)
     this.afterReportDelivered()
@@ -546,6 +537,11 @@ export class PrWatch {
     if (
       snapshot === undefined ||
       readiness === undefined ||
+      // Failed delivery alone is not new activity. Keep unchanged startup
+      // retries for agent assessment, but allow activity since that snapshot.
+      (this.initialAnnouncementPending &&
+        assessAutomaticReadiness(this.lastFlushedSnapshot).eligible &&
+        !detectActivity(this.lastFlushedSnapshot, snapshot, this.lastFlushedSnapshot.mergeable)) ||
       snapshot.state !== "OPEN" ||
       hasReadyLabel(snapshot, readiness.label) ||
       !assessAutomaticReadiness(snapshot).eligible
@@ -658,7 +654,7 @@ export class PrWatch {
     forcedHoldMinutes?: number
   }): string {
     const readiness = this.deps.readiness
-    return buildReport(this.target, this.snapshot!, {
+    const report = buildReport(this.target, this.snapshot!, {
       baselineMs,
       baselineSnapshot,
       forcedHoldMinutes,
@@ -666,6 +662,10 @@ export class PrWatch {
       replyPrefix: readiness?.replyPrefix,
       readinessError: this.readinessError,
     })
+    if (!this.initialAnnouncementPending || this.snapshot?.state !== "OPEN") return report
+    return report + "\n- Startup/restart assessment: inspect the current head's checks, expected automated reviews, " +
+      "and existing feedback now. If already settled with nothing left to do, call mark_ready without waiting " +
+      "for a new event. Empty results after creation or a fresh push do not prove readiness; PR age alone is insufficient."
   }
 
   private flush(forcedHoldMinutes: number | undefined): string {
