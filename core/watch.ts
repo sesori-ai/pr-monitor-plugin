@@ -537,7 +537,11 @@ export class PrWatch {
     if (
       snapshot === undefined ||
       readiness === undefined ||
-      this.initialAnnouncementPending ||
+      // Failed delivery alone is not new activity. Keep unchanged startup
+      // retries for agent assessment, but allow activity since that snapshot.
+      (this.initialAnnouncementPending &&
+        assessAutomaticReadiness(this.lastFlushedSnapshot).eligible &&
+        !detectActivity(this.lastFlushedSnapshot, snapshot, this.lastFlushedSnapshot.mergeable)) ||
       snapshot.state !== "OPEN" ||
       hasReadyLabel(snapshot, readiness.label) ||
       !assessAutomaticReadiness(snapshot).eligible

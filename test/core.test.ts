@@ -315,6 +315,40 @@ test("startup preserves an existing ready label and retries delivery without aut
   assert.match(retry.reports[0]!, /Startup\/restart assessment/)
 })
 
+test("startup delivery retries still auto-label when CI finishes or feedback is handled", async () => {
+  const comment = { author: "reviewer", createdAt: "2026-08-03T11:00:00Z" }
+  const cases = [
+    [
+      snapshot({ checks: [{ name: "tests", outcome: "pending" }] }),
+      snapshot({ checks: [{ name: "tests", outcome: "success" }] }),
+    ],
+    [
+      snapshot({ reviewThreads: [thread("thread-1", false, [comment])] }),
+      snapshot({
+        reviewThreads: [thread("thread-1", false, [
+          comment,
+          { author: "owner", createdAt: "2026-08-03T12:01:00Z", isLocal: true, isAgentReply: true },
+        ])],
+      }),
+    ],
+  ] as const
+  for (const [initial, changed] of cases) {
+    for (const manual of [false, true]) {
+      const harness = watchHarness(initial, [changed], config(), { readiness: true, deliveryFailures: 1 })
+      assert.equal(await harness.watch.announceInitial(), false)
+      let report: string
+      if (manual) {
+        report = await harness.watch.manualFlush()
+      } else {
+        await harness.watch.tick()
+        report = harness.reports[0]!
+      }
+      assert.deepEqual(harness.readyChanges, [true])
+      assert.match(report, /Ready for human review: YES/)
+    }
+  }
+})
+
 test("checks completing after startup still trigger automatic readiness", async () => {
   const initial = snapshot({ checks: [{ name: "tests", outcome: "pending" }] })
   const passed = snapshot({ checks: [{ name: "tests", outcome: "success" }] })

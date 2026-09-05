@@ -32485,7 +32485,9 @@ var PrWatch = class {
   async prepareAutomaticReady() {
     const snapshot = this.snapshot;
     const readiness = this.deps.readiness;
-    if (snapshot === void 0 || readiness === void 0 || this.initialAnnouncementPending || snapshot.state !== "OPEN" || hasReadyLabel(snapshot, readiness.label) || !assessAutomaticReadiness(snapshot).eligible) {
+    if (snapshot === void 0 || readiness === void 0 || // Failed delivery alone is not new activity. Keep unchanged startup
+    // retries for agent assessment, but allow activity since that snapshot.
+    this.initialAnnouncementPending && assessAutomaticReadiness(this.lastFlushedSnapshot).eligible && !detectActivity(this.lastFlushedSnapshot, snapshot, this.lastFlushedSnapshot.mergeable) || snapshot.state !== "OPEN" || hasReadyLabel(snapshot, readiness.label) || !assessAutomaticReadiness(snapshot).eligible) {
       return;
     }
     this.snapshot = await this.changeSnapshotReadiness(snapshot, true);

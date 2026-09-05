@@ -71,7 +71,8 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 
 - Startup reports preserve the existing label without adding it automatically. This also applies when startup
   announcements are disabled or initial delivery is retried. Unchanged polls or a flush of unchanged initial state
-  do not add the label. Later observed CI completion and feedback handling retain automatic readiness.
+  do not add the label. Later observed CI completion and feedback handling retain automatic readiness, including
+  when that activity arrives before a failed initial delivery is retried or manually flushed.
 - An initial report requires the same substantive attention as later reports. After a harness restart, an agent
   inspects current-head CI, expected automated reviews and existing feedback, then calls `mark_ready` immediately
   if the PR is settled and nothing remains. It must not wait for new activity that may never occur.
