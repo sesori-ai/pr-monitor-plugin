@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Codex support. The Claude Code plugin root is now also a Codex plugin (`.codex-plugin/plugin.json`,
+  `.codex-mcp.json`, root `.agents/plugins/marketplace.json`) sharing the MCP server, hooks, and skill. Codex has no
+  messaging socket, so it always uses the spool + hooks delivery with the keep-alive waiter; the server detects the
+  host from a verbatim `--codex` arg, reads the project directory from the Codex process, and falls back to
+  `.codex/pr-monitor.json` for config. The PostToolUse hook now records waiter runs itself because Codex's sandbox
+  keeps the waiter from writing its own proof.
+
 ## [0.3.1]
 
 ### Added

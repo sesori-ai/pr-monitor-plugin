@@ -11,6 +11,7 @@ const hook = resolve("claude-code/hooks/drain-spool.mjs")
 type HookInput = {
   hook_event_name: "PostToolUse" | "Stop" | "UserPromptSubmit"
   agent_id?: string
+  tool_input?: unknown
 }
 
 function runHook({ home, input }: { home: string; input: HookInput }): string {
@@ -32,6 +33,8 @@ test("Claude plugin root contains the exact tracked release payload", () => {
     .map((path) => path.replace(/^claude-code\//, ""))
   assert.deepEqual(files, [
     ".claude-plugin/plugin.json",
+    ".codex-mcp.json",
+    ".codex-plugin/plugin.json",
     ".mcp.json",
     "commands/ready.md",
     "commands/status.md",
@@ -105,6 +108,18 @@ test("Claude hook drains once, skips subagents, and arms only its exact waiter",
     assert.match(keepAlive.reason, /automatic readiness is waiting/)
     assert.match(keepAlive.reason, /non-actionable.*mark_ready/)
     assert.match(keepAlive.reason, /await-activity\.mjs' --session/)
+
+    // Codex sandboxes the waiter away from the spool, so the hook stamps the
+    // waiter proof itself when the finished tool call was the waiter.
+    const waiterProof = join(spool, ".waiter")
+    assert.equal(existsSync(waiterProof), false)
+    runHook({ home, input: { hook_event_name: "PostToolUse", tool_input: { command: "ls" } } })
+    assert.equal(existsSync(waiterProof), false)
+    runHook({
+      home,
+      input: { hook_event_name: "PostToolUse", tool_input: { command: "node '/x/await-activity.mjs' --session 1" } },
+    })
+    assert.equal(existsSync(waiterProof), true)
   } finally {
     await rm(home, { recursive: true, force: true })
   }

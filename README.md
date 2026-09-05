@@ -1,8 +1,8 @@
 # pr-monitor
 
 A GitHub PR monitor for coding agents, available for [OpenCode](https://opencode.ai),
-[Claude Code](https://code.claude.com), [Pi](https://github.com/earendil-works/pi), and
-[Oh My Pi](https://omp.sh). It watches pull requests in the background, delivers `[PR Monitor]` reports into the
+[Claude Code](https://code.claude.com), [Codex](https://developers.openai.com/codex),
+[Pi](https://github.com/earendil-works/pi), and [Oh My Pi](https://omp.sh). It watches pull requests in the background, delivers `[PR Monitor]` reports into the
 session that started the watch, and manages the ready-for-human-review label from observable GitHub state.
 
 ## What it does
@@ -42,6 +42,7 @@ session that started the watch, and manages the ready-for-human-review label fro
 
 - [GitHub CLI](https://cli.github.com) (`gh`) installed and authenticated (`gh auth status`).
 - For Claude Code: Node.js >= 18 on `PATH` (runs the bundled MCP server), macOS or Linux.
+- For Codex: Codex CLI >= 0.153 with plugins enabled, Node.js >= 18 on `PATH`, macOS or Linux.
 - For OpenCode: OpenCode >= 1.17.
 - For Pi: Pi >= 0.84.2 and Node.js >= 22.19.
 - For OMP: OMP >= 18.0.3.
@@ -115,6 +116,42 @@ Further behavior notes for the Claude Code shell:
 
 - Monitors belong to the Claude Code process. They survive `/clear` (the new conversation keeps receiving reports) and die with the process; they do not survive quitting Claude Code or `claude --resume` into a new process. If the MCP server is restarted while Claude Code keeps running (e.g. `/reload-plugins`), each active monitor delivers a `Monitor stopped` notice; when Claude Code itself exits, monitors simply die with it (no notice — there is no session left to deliver to).
 - Config first uses repository `.pr-monitor.json`, then falls back to `.claude/pr-monitor.json` and `.opencode/pr-monitor.json`.
+
+## Codex
+
+The Claude Code plugin root doubles as a Codex plugin: the same MCP server, hooks, and `monitor-pr` skill, declared
+through `claude-code/.codex-plugin/plugin.json` and `claude-code/.codex-mcp.json`.
+
+### Install
+
+```sh
+codex plugin marketplace add sesori-ai/opencode-pr-monitor
+codex plugin add pr-monitor@sesori
+```
+
+For local development, add the marketplace from a checkout instead: `codex plugin marketplace add /path/to/opencode-pr-monitor`.
+
+On the first session after installing, Codex asks you to review the plugin's hooks; press <kbd>t</kbd> (or open
+`/hooks`) to trust them. Until they are trusted, reports cannot be injected.
+
+### How reports arrive
+
+Codex has no messaging socket, so it always uses the spool + hooks path described above for Claude Code fallback
+hosts: the MCP server spools each report, plugin hooks inject it at the next `UserPromptSubmit`, `PostToolUse`, or
+`Stop` event, and while a monitored PR lacks the ready label the `Stop` hook keeps the session on the PR by handing
+it the exact `await-activity.mjs` waiter command (run with the shell tool's `timeout_ms: 600000`). All the keep-alive
+bounds and `keepAlive` / `keepAliveMaxMinutes` / `desktopNotifications` settings apply unchanged.
+
+Behavior notes for the Codex shell:
+
+- Monitors belong to the Codex TUI process and die with it. Codex starts plugin MCP servers in the plugin root and
+  exports no project path, so the server reads the project directory from the Codex process itself (`/proc` on
+  Linux, `lsof` on macOS).
+- Config first uses repository `.pr-monitor.json`, then falls back to `.codex/pr-monitor.json` and
+  `.opencode/pr-monitor.json`.
+- The slash commands are Claude Code only; use the `pr_monitor` tool directly (`status`, `stop`, `mark_ready`, ...).
+- The report spool is shared with Claude Code at `~/.claude/pr-monitor/spool/`; routing is by owning process, so
+  concurrent Claude Code and Codex sessions never see each other's reports.
 
 ## opencode
 
@@ -236,11 +273,12 @@ runtime/         session registry/actions/timers, Node gh runner, shared tool co
 skills/          canonical monitor-pr skill for push-capable hosts
 opencode/        OpenCode adapter and npm workspace
 pi/              shared Pi/OMP adapter entries and npm workspace
-claude-code/     Claude Code shell — this directory is the plugin root (${CLAUDE_PLUGIN_ROOT})
-.claude-plugin/  marketplace.json, which stays at the repo root and points at ./claude-code
+claude-code/     Claude Code + Codex shell — this directory is the plugin root for both hosts (${CLAUDE_PLUGIN_ROOT})
+.claude-plugin/  Claude marketplace.json, which stays at the repo root and points at ./claude-code
+.agents/plugins/ Codex marketplace.json, likewise at the repo root and pointing at ./claude-code
 ```
 
-Dependency flows adapter → `runtime/` → `core/`; core imports no host SDK and runtime owns common session orchestration. The root is a private npm workspace coordinator. OpenCode source stays in `opencode/`, but publication bundles it with private core/runtime into `opencode/dist/index.js`; both `.` and `./server` resolve to that sole-export bundle. Its tarball contains only the bundle and declaration, target README/license, and manifest; generated OpenCode output stays uncommitted. The Claude Code shell is bundled with esbuild into the committed `claude-code/dist/mcp-server.mjs`, since Git plugin installs run no build step; `claude-code/hooks/drain-spool.mjs` is the dependency-free hook that injects spooled reports and runs the keep-alive loop, and `claude-code/hooks/await-activity.mjs` is the blocking waiter it hands to the session; `claude-code/skills/monitor-pr/` is the behavior — when to start a monitor, what to do with each report, when to hand off; `claude-code/.mcp.json` declares the MCP server (plugin-root convention — an inline `mcpServers` field in plugin.json is not picked up).
+Dependency flows adapter → `runtime/` → `core/`; core imports no host SDK and runtime owns common session orchestration. The root is a private npm workspace coordinator. OpenCode source stays in `opencode/`, but publication bundles it with private core/runtime into `opencode/dist/index.js`; both `.` and `./server` resolve to that sole-export bundle. Its tarball contains only the bundle and declaration, target README/license, and manifest; generated OpenCode output stays uncommitted. The Claude Code shell is bundled with esbuild into the committed `claude-code/dist/mcp-server.mjs`, since Git plugin installs run no build step; `claude-code/hooks/drain-spool.mjs` is the dependency-free hook that injects spooled reports and runs the keep-alive loop, and `claude-code/hooks/await-activity.mjs` is the blocking waiter it hands to the session; `claude-code/skills/monitor-pr/` is the behavior — when to start a monitor, what to do with each report, when to hand off; `claude-code/.mcp.json` declares the MCP server (plugin-root convention — an inline `mcpServers` field in plugin.json is not picked up). Codex reuses the same root through `claude-code/.codex-plugin/plugin.json`, which points at `claude-code/.codex-mcp.json`: Codex substitutes no `${...}` placeholders in server args and exports no plugin env to the server, so that manifest launches the bundle as a contained `./dist/mcp-server.mjs` path (shebang + exec bit, added by the build) with `cwd: "."` and a verbatim `--codex` arg that tells the server which host it is under.
 
 ## Regression coverage
 

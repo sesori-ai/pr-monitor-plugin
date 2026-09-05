@@ -4,7 +4,7 @@ Quick orientation for agents working on this repo. Read this before exploring; i
 
 ## What this is
 
-`pr-monitor` is a GitHub PR watcher that posts factual status updates back into the owning agent session. It targets **OpenCode** (`opencode/`), **Claude Code** (`claude-code/`), and the shared **Pi/OMP** package (`pi/`), all built on the same core (`core/`) and session runtime (`runtime/`).
+`pr-monitor` is a GitHub PR watcher that posts factual status updates back into the owning agent session. It targets **OpenCode** (`opencode/`), **Claude Code and Codex** (`claude-code/`, one plugin root serving both hosts), and the shared **Pi/OMP** package (`pi/`), all built on the same core (`core/`) and session runtime (`runtime/`).
 
 ## Project layout
 
@@ -45,7 +45,12 @@ pi/                  # @sesori/pr-monitor-pi workspace shared by upstream Pi and
   extension.ts  # Shared Pi-family tool, delivery, config, and MonitorSession ownership.
   dist/         # Ephemeral publish output, ignored; never commit.
 
-claude-code/         # Claude Code shell. THIS DIRECTORY IS THE PLUGIN ROOT (= ${CLAUDE_PLUGIN_ROOT}).
+claude-code/         # Claude Code + Codex shell. THIS DIRECTORY IS THE PLUGIN ROOT for both (= ${CLAUDE_PLUGIN_ROOT}).
+  .codex-plugin/
+    plugin.json      # Codex manifest: same metadata/version, points at ./skills/, ./hooks/hooks.json, ./.codex-mcp.json.
+  .codex-mcp.json    # Codex server declaration: command "./dist/mcp-server.mjs" (shebang + exec bit), cwd ".", args ["--codex"].
+                     # Codex 0.153 expands NO ${...} placeholders in args/env and exports NO plugin/project env to the server;
+                     # a relative cwd resolves against the plugin root; a contained ./ command resolves against that cwd.
   src/               # Bundled; never executed from source.
     mcp-server.ts# MCP stdio adapter: MonitorSession wiring, push-first delivery with spool fallback, handoff, shutdown notices.
     push.ts      # active delivery: injects reports as user messages over the session's uds-messaging socket (env CLAUDE_CODE_MESSAGING_SOCKET/TOKEN).
@@ -69,7 +74,20 @@ claude-code/         # Claude Code shell. THIS DIRECTORY IS THE PLUGIN ROOT (= $
   marketplace.json # MUST stay at the repo root — `/plugin marketplace add <repo>` reads it from there.
                    # Its plugin entry points at the plugin root with "source": "./claude-code";
                    # relative sources resolve against the directory containing .claude-plugin/.
+.agents/plugins/
+  marketplace.json # Codex marketplace, also repo-root ("codex plugin marketplace add <repo>"); local source ./claude-code.
 ```
+
+**Codex host facts (verified on codex-cli 0.153.0):** plugin MCP servers and hooks are children of the Codex TUI
+process (hooks through a shell), so the pid-keyed spool routing below applies unchanged and the spool root is shared
+with Claude Code. Hook commands get `${CLAUDE_PLUGIN_ROOT}` expanded and receive `PLUGIN_ROOT`/`PLUGIN_DATA` (+
+`CLAUDE_*` aliases) in their env; the MCP server gets none of that. Plugin hooks need a one-time trust confirmation
+(`/hooks`, or `t` at the first-session prompt). Codex has no messaging socket, so it always takes the spool + hooks
++ keep-alive path; the server learns the host from the verbatim `--codex` arg, reads the project directory from the
+Codex process cwd (`/proc/<pid>/cwd`, else `lsof`), and looks for `.codex/pr-monitor.json`. The Codex sandbox keeps
+the waiter from writing its `.waiter` proof, so `drain-spool.mjs` stamps it on the PostToolUse that follows a waiter
+run. Hook injection (`additionalContext`, Stop `decision: block`) follows the same wire format as Claude Code per the
+Codex hooks docs; a live model-driven session was not exercised.
 
 Everything under `claude-code/` is addressed plugin-root-relative at runtime, so
 `.mcp.json` and `hooks.json` (which use `${CLAUDE_PLUGIN_ROOT}`) are unaffected by

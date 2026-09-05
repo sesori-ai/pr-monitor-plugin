@@ -1,10 +1,16 @@
-// pr-monitor — Claude Code adapter. The MCP process owns one logical session.
+// pr-monitor — Claude Code / Codex adapter. The MCP process owns one logical session.
 // Reports are pushed straight into that session over its messaging socket
 // (see push.ts) so they arrive on their own — even while the session is idle —
 // exactly like the OpenCode and Pi channels. A failed push rejects so the
 // watch retries it at poll cadence; only hosts without the socket fall back to
 // spooling for the hooks to inject, guarded by the keep-alive loop.
+//
+// Codex has no messaging socket, so it always runs the spool + hooks path. It
+// launches this bundle from .codex-mcp.json with cwd = plugin root, passes the
+// args verbatim, and exports no plugin or project env (verified on 0.153).
 
+import { execFileSync } from "node:child_process"
+import { readlinkSync } from "node:fs"
 import { join } from "node:path"
 import process from "node:process"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
@@ -32,10 +38,40 @@ import { claimSpool, collectDeadSpools, notifyDesktop, probeSpool, spoolReport }
 
 const claudePid = process.ppid
 const pushChannel = messagingChannel()
-const projectDir = process.env["CLAUDE_PROJECT_DIR"] ?? process.cwd()
+// ponytail: `--codex` from .codex-mcp.json is the whole host handshake — Codex
+// substitutes nothing and exports nothing, so a verbatim arg is all there is.
+const isCodex = process.argv.includes("--codex")
+const hostName = isCodex ? "Codex" : "Claude Code"
+
+/**
+ * Working directory of the host process. Codex starts plugin servers in the
+ * plugin root and names the project nowhere, so the project is wherever the
+ * Codex process itself runs: /proc on Linux, lsof on macOS.
+ */
+const parentCwd = (pid: number): string | undefined => {
+  try {
+    return readlinkSync(`/proc/${pid}/cwd`)
+  } catch {
+    // not Linux -> try lsof
+  }
+  try {
+    const out = execFileSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+    const line = out.split("\n").find((entry) => entry.startsWith("n/"))
+    if (line !== undefined) return line.slice(1)
+  } catch {
+    // no lsof -> unknown
+  }
+  return undefined
+}
+
+const projectDir =
+  process.env["CLAUDE_PROJECT_DIR"] ?? (isCodex ? parentCwd(claudePid) : undefined) ?? process.cwd()
 const configPaths = [
   join(projectDir, ".pr-monitor.json"),
-  join(projectDir, ".claude", "pr-monitor.json"),
+  join(projectDir, isCodex ? ".codex" : ".claude", "pr-monitor.json"),
   join(projectDir, ".opencode", "pr-monitor.json"),
 ]
 
@@ -91,7 +127,7 @@ const deliver = async ({
     extendKeepAlive({ config })
     refreshSessionState()
     if (config.desktopNotifications) {
-      notifyDesktop(`PR Monitor — ${targetKey(target)}`, "New report delivered to your Claude Code session")
+      notifyDesktop(`PR Monitor — ${targetKey(target)}`, `New report delivered to your ${hostName} session`)
     }
     return
   }
@@ -99,7 +135,7 @@ const deliver = async ({
   extendKeepAlive({ config })
   refreshSessionState()
   if (config.desktopNotifications) {
-    notifyDesktop(`PR Monitor — ${targetKey(target)}`, "New report waiting in your Claude Code session")
+    notifyDesktop(`PR Monitor — ${targetKey(target)}`, `New report waiting in your ${hostName} session`)
   }
 }
 
@@ -166,7 +202,7 @@ const formatResult = ({ result }: { result: MonitorActionResult<ClaudeMonitorCon
       "Use mark_ready when new feedback is non-actionable and no reply should be posted. " +
       "Never invent sleeps, delays, timeouts, scheduled checks, polling loops, repeated CI checks, or routine " +
       "status/flush calls — the monitor delivers on its own. " +
-      "The monitor stops on merge/close and does not survive this Claude Code session." +
+      `The monitor stops on merge/close and does not survive this ${hostName} session.` +
       (pushChannel !== undefined
         ? "\nEnd the turn when there is nothing left to handle; a new report starts its own turn."
         : config.keepAlive
@@ -222,7 +258,7 @@ const shutdown = (): void => {
     await monitorSession.stopAll({
       notice:
         "Monitor stopped: the pr-monitor MCP server is shutting down " +
-        "(Claude Code session ended or server restarted). Re-start monitoring if still needed.",
+        `(${hostName} session ended or server restarted). Re-start monitoring if still needed.`,
       channel: StopNoticeChannel.persistent,
     })
     writeSessionState(claudePid, {
@@ -253,9 +289,8 @@ server.registerTool(
         pushChannel !== undefined
           ? "reports are pushed into THIS session as visible '[PR Monitor]' messages, even while it is idle."
           : "reports are injected into THIS session as '[PR Monitor]' messages at hook events.",
-      configPath:
-        ".pr-monitor.json (falling back to .claude/pr-monitor.json, then .opencode/pr-monitor.json)",
-      lifecycle: "Monitors are per-session and do not survive Claude Code restarts.",
+      configPath: `.pr-monitor.json (falling back to ${isCodex ? ".codex" : ".claude"}/pr-monitor.json, then .opencode/pr-monitor.json)`,
+      lifecycle: `Monitors are per-session and do not survive ${hostName} restarts.`,
       waiting:
         pushChannel !== undefined
           ? "The monitor delivers on its own; never set up delays, timeouts, or waiters for it. End the turn when " +
@@ -278,4 +313,4 @@ server.registerTool(
 )
 
 await server.connect(new StdioServerTransport())
-log(`pr-monitor MCP server ready (claude pid ${claudePid}, project ${projectDir})`)
+log(`pr-monitor MCP server ready (${hostName} pid ${claudePid}, project ${projectDir})`)

@@ -100,6 +100,8 @@ Install from the marketplace:
 
 ```text
 .claude-plugin/plugin.json
+.codex-mcp.json
+.codex-plugin/plugin.json
 .mcp.json
 commands/ready.md
 commands/status.md
@@ -123,13 +125,32 @@ src/spool.ts
 - The conventional Claude skill is waiter-aware and intentionally differs from the canonical OpenCode/Pi/OMP
   push-host skill. Each installed host still discovers exactly one `monitor-pr` skill.
 
+### Codex plugin
+
+Install from the marketplace:
+
+```text
+codex plugin marketplace add sesori-ai/opencode-pr-monitor
+codex plugin add pr-monitor@sesori
+```
+
+- Root `.agents/plugins/marketplace.json` points at the same `./claude-code` root; `.codex-plugin/plugin.json`
+  carries the same version and references `./skills/`, `./hooks/hooks.json`, and `./.codex-mcp.json`.
+- `.codex-mcp.json` launches `./dist/mcp-server.mjs` (shebang, mode 755) with `cwd: "."` and `--codex`. Codex expands
+  no placeholders in args/env, so the bundle must stay executable and self-locating.
+- Host floor: codex-cli 0.153.0 (plugins, hooks stable). Verified there: install from a local marketplace, MCP server
+  spawn with the plugin-root cwd and verbatim args, hook trust prompt, and `UserPromptSubmit`/`SessionStart` hook
+  firing with `${CLAUDE_PLUGIN_ROOT}` expanded. Not verified (no model quota at the time): a model-driven
+  `pr_monitor` start, report injection through `additionalContext`, and the Stop-block keep-alive loop.
+
 ## Release Metadata And Order
 
 One product version must match across:
 
 - `opencode/package.json` and its `package-lock.json` workspace entry;
 - `pi/package.json` and its lockfile workspace entry;
-- `claude-code/.claude-plugin/plugin.json`; and
+- `claude-code/.claude-plugin/plugin.json`;
+- `claude-code/.codex-plugin/plugin.json`; and
 - the MCP server version in `claude-code/src/mcp-server.ts`.
 
 The private root stays `0.0.0`. `npm run version:check` rejects any product drift. Release notes remain under

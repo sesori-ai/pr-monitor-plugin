@@ -25,9 +25,9 @@ After `gh pr create`:
 pr_monitor(action: "start", pr: "owner/repo#123")
 ```
 
-Always pass an explicit PR. Watches belong to this Claude process and do not
-survive a restart. In a fresh session, use `status` once and restart anything
-missing.
+Always pass an explicit PR. Watches belong to this agent process (Claude Code
+or Codex) and do not survive a restart. In a fresh session, use `status` once
+and restart anything missing.
 
 The start result states the configured agent-reply prefix. Every GitHub reply
 written by the agent **must begin with that exact prefix** (default
@@ -59,7 +59,7 @@ after handling one.
 
 Every report explicitly says `Ready for human review: YES` or `NO`.
 
-- `YES`: the label is present and Claude keep-alive is handed off. A
+- `YES`: the label is present and keep-alive is handed off. A
   resolution-only or approval report must not cause `unmark_ready`.
 - `NO`: keep working, or use manual `mark_ready` when inspection shows nothing
   actionable remains.
@@ -97,13 +97,14 @@ polling loop, repeated `gh pr checks`, routine `status`/`flush` calls, or any
 other delay/timeout mechanism to wait for the monitor. When nothing is left to
 handle, end the turn — the next report re-opens the work by itself.
 
-Only on legacy hosts without push delivery, the plugin may inject a
-`[PR Monitor keep-alive]` message containing an exact waiter command
-(`node "<plugin>/hooks/await-activity.mjs" --session <pid> --timeout 540`).
-Run that exact command, with Bash `timeout: 600000`, only when such a message
-explicitly asks; never wrap it in another delay and never start it unasked. If
-no keep-alive message asks, end the turn. If the user asks to stop, call
-`pr_monitor(action: "stop", pr: "all")`.
+Only on hosts without push delivery (Codex, or a legacy Claude Code), the plugin
+may inject a `[PR Monitor keep-alive]` message containing an exact waiter
+command (`node "<plugin>/hooks/await-activity.mjs" --session <pid> --timeout 540`).
+Run that exact command with your shell tool and a 600000 ms timeout (Claude
+Code Bash `timeout: 600000`; Codex shell `timeout_ms: 600000`), only when such
+a message explicitly asks; never wrap it in another delay and never start it
+unasked. If no keep-alive message asks, end the turn. If the user asks to stop,
+call `pr_monitor(action: "stop", pr: "all")`.
 
 ## Other actions
 

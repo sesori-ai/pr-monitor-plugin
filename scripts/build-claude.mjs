@@ -1,3 +1,4 @@
+import { chmodSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { build } from "esbuild"
 
@@ -12,6 +13,11 @@ await build({
   target: "node18",
   logLevel: "warning",
   banner: {
-    js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+    // Shebang + exec bit: Codex can only launch a plugin server as a contained
+    // `./` path (see claude-code/.codex-mcp.json); Claude Code runs it via node.
+    js:
+      "#!/usr/bin/env node\n" +
+      "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
   },
 })
+chmodSync(output, 0o755)
