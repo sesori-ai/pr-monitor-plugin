@@ -118,11 +118,16 @@ _publish-npm:
 	@npm publish --workspace @sesori/pr-monitor-pi --access public
 	@$(call ok,@sesori/pr-monitor-pi@$(VERSION))
 
+## The registry's read replicas lag a publish by up to a few minutes, so poll rather than fail on first sight.
+NPM_VERIFY_ATTEMPTS ?= 30   # x 10s = 5 minutes
 _verify-npm:
 	@$(call step,6/7 Verify registry)
-	@test "$$(npm view @sesori/pr-monitor-opencode@$(VERSION) version)" = "$(VERSION)" || $(call fail,registry does not serve @sesori/pr-monitor-opencode@$(VERSION))
-	@test "$$(npm view @sesori/pr-monitor-pi@$(VERSION) version)" = "$(VERSION)" || $(call fail,registry does not serve @sesori/pr-monitor-pi@$(VERSION))
-	@$(call ok,both packages resolve to $(VERSION))
+	@for pkg in @sesori/pr-monitor-opencode @sesori/pr-monitor-pi; do \
+	  n=0; until [ "$$(npm view $$pkg@$(VERSION) version 2>/dev/null)" = "$(VERSION)" ]; do \
+	    n=$$((n + 1)); [ $$n -lt $(NPM_VERIFY_ATTEMPTS) ] || $(call fail,$$pkg@$(VERSION) not served after $(NPM_VERIFY_ATTEMPTS) attempts); \
+	    printf '  $(D)waiting for %s@%s to replicate (%d/%d)$(N)\n' "$$pkg" "$(VERSION)" "$$n" "$(NPM_VERIFY_ATTEMPTS)"; sleep 10; \
+	  done; $(call ok,$$pkg@$(VERSION)); \
+	done
 
 _tag:
 	@$(call step,7/7 Tag $(TAG))
