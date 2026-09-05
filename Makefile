@@ -1,6 +1,6 @@
 # Release automation — one command, run on a clean, up-to-date main:
 #
-#   make publish VERSION=X.Y.Z   (VERSION defaults to the current manifest version)
+#   make publish                 (asks for the new version; pass VERSION=X.Y.Z to skip the prompt)
 #
 # In order, stopping at the first failure: preflight guards → write the version everywhere and cut the
 # CHANGELOG section (committed to main as "Release vX.Y.Z" when anything changed) → full check matrix →
@@ -10,12 +10,13 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-VERSION ?= $(shell node -p "require('./opencode/package.json').version")
+VERSION ?=
 TAG := v$(VERSION)
+MANIFEST_VERSION := $(shell node -p "require('./opencode/package.json').version")
 OPENCODE_CLI ?= $(shell command -v opencode || true)
 OMP_VERSION ?= 18.0.4
 
-.PHONY: help publish preflight bump check push-main publish-npm verify-npm tag
+.PHONY: help publish release preflight bump check push-main publish-npm verify-npm tag
 
 help:
 	@sed -n '2,8p' Makefile | sed 's/^# \{0,1\}//'
@@ -70,4 +71,14 @@ tag:
 	git push origin $(TAG)
 	@echo "released $(TAG): both npm packages published, plugin tag pushed"
 
-publish: preflight bump check push-main publish-npm verify-npm tag
+## Entry point. Without VERSION, show where things stand and ask; then run the ordered release with it set.
+publish:
+	@if [ -z "$(VERSION)" ]; then \
+	  published="$$(npm view @sesori/pr-monitor-opencode version 2>/dev/null || echo none)"; \
+	  last_tag="$$(git describe --tags --abbrev=0 2>/dev/null || echo none)"; \
+	  echo "Last published version is $$published (last tag $$last_tag, manifests at $(MANIFEST_VERSION))"; \
+	  read -r -p "What should the new version be? [$(MANIFEST_VERSION)] " answer </dev/tty; \
+	  exec $(MAKE) release VERSION="$${answer:-$(MANIFEST_VERSION)}"; \
+	else exec $(MAKE) release VERSION="$(VERSION)"; fi
+
+release: preflight bump check push-main publish-npm verify-npm tag

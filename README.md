@@ -301,7 +301,7 @@ Claude Code Git-plugin release. The private root cannot be published, and there 
 The whole procedure is one command, run on a clean, up-to-date `main`:
 
 ```sh
-make publish VERSION=X.Y.Z   # VERSION defaults to the current manifest version
+make publish                 # asks for the new version (pass VERSION=X.Y.Z to skip the prompt)
 ```
 
 It runs each step below in order and stops at the first failure: preflight guards (clean tree, on `main` equal to
