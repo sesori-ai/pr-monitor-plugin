@@ -298,8 +298,19 @@ A release uses one version for all targets. The OpenCode workspace publishes `@s
 Pi workspace publishes the shared Pi/OMP package `@sesori/pr-monitor-pi`; and the annotated `vX.Y.Z` tag marks the
 Claude Code Git-plugin release. The private root cannot be published, and there is no separate GitHub Release step.
 
-Update both workspace manifests and lock entries, `claude-code/.claude-plugin/plugin.json`, the MCP server version,
-and `CHANGELOG.md`. From a clean candidate commit, complete the full matrix before publishing:
+The whole procedure is scripted in the `Makefile`:
+
+```sh
+make bump VERSION=X.Y.Z   # on a branch: version everywhere + CHANGELOG section; review, commit, open the release PR
+make publish              # on clean, up-to-date main after the merge: checks, npm publishes, registry verify, tag push
+```
+
+`make publish` runs each step below in order and stops at the first failure; it refuses to run off `main`, with a
+dirty tree, with an existing tag, or against a version the registry already has. The manual steps, for reference:
+
+Update both workspace manifests and lock entries, `claude-code/.claude-plugin/plugin.json`,
+`claude-code/.codex-plugin/plugin.json`, the MCP server version, and `CHANGELOG.md`. From a clean candidate commit,
+complete the full matrix before publishing:
 
 ```sh
 npm ci
