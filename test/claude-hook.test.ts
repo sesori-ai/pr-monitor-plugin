@@ -131,6 +131,17 @@ test("Claude hook drains once, skips subagents, and arms only its exact waiter",
         tool_response: { stdout: "pr-monitor: no PR activity in the last 9m." },
       },
     })
+    assert.equal(existsSync(waiterProof), false)
+    // The waiter's real final line is the only accepted proof.
+    const waiterOutput = spawnSync(process.execPath, [resolve("claude-code/hooks/await-activity.mjs")], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    }).stdout
+    assert.match(waiterOutput, /pr-monitor-waiter: done\s*$/)
+    runHook({
+      home,
+      input: { hook_event_name: "PostToolUse", tool_input: waiterCommand, tool_response: { stdout: waiterOutput } },
+    })
     assert.equal(existsSync(waiterProof), true)
   } finally {
     await rm(home, { recursive: true, force: true })

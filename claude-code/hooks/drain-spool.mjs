@@ -48,6 +48,7 @@ const WAIT_SECONDS = 540
 const MAX_BLOCKS_WITHOUT_WAIT = 5
 const KEEPALIVE_MARKER = ".keepalive"
 const WAITER_MARKER = ".waiter" // written by await-activity.mjs when a wait completes
+const WAITER_DONE_TOKEN = "pr-monitor-waiter: done" // await-activity.mjs's final output line
 
 /**
  * Single-quote a path for a shell command line. The waiter path is interpolated
@@ -321,14 +322,14 @@ function main() {
   // Codex runs the waiter inside its sandbox, where the spool dir is read-only
   // and the waiter cannot leave its own `.waiter` proof; this hook runs outside
   // it, so the PostToolUse that follows the waiter's exit stamps on its behalf.
-  // Only a *completed* wait counts: the waiter always ends by printing a
-  // `pr-monitor:` line, while a missing node or unreadable script prints none —
+  // Only a *completed* wait counts: the waiter's last line is a token nothing
+  // else prints, while a missing node or unreadable script prints none —
   // stamping on the command alone would let a broken waiter reset the Stop
   // guard's streak and reopen the unbounded loop it bounds.
   if (
     event === "PostToolUse" &&
     JSON.stringify(input.tool_input ?? "").includes("await-activity.mjs") &&
-    JSON.stringify(input.tool_response ?? "").includes("pr-monitor:")
+    JSON.stringify(input.tool_response ?? "").includes(WAITER_DONE_TOKEN)
   ) {
     for (const { dir } of spools) {
       try {
