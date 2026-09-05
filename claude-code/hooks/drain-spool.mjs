@@ -21,7 +21,9 @@
 // `sh -c`, so this process's parent is that sh and its grandparent is the
 // Claude Code process: "my spool" = the dir named by my parent or grandparent
 // pid, and matching the `owner` token the server wrote there (a pid alone is
-// not an identity — the OS recycles them). The walk deliberately stops at the
+// not an identity — the OS recycles them). Codex is the same shape: its plugin
+// hooks and MCP servers are children of the Codex TUI process, hooks via a
+// shell (verified on 0.153). The walk deliberately stops at the
 // grandparent — a full ancestry walk would reach an OUTER Claude Code session
 // when sessions nest (session A's Bash tool runs `claude -p ...` → session B),
 // letting B's hooks steal A's reports. Ancestry comes from /proc where it
@@ -46,6 +48,7 @@ const WAIT_SECONDS = 540
 const MAX_BLOCKS_WITHOUT_WAIT = 5
 const KEEPALIVE_MARKER = ".keepalive"
 const WAITER_MARKER = ".waiter" // written by await-activity.mjs when a wait completes
+const WAITER_DONE_TOKEN = "pr-monitor-waiter: done" // await-activity.mjs's final output line
 
 /**
  * Single-quote a path for a shell command line. The waiter path is interpolated
@@ -316,6 +319,25 @@ function main() {
   const reports = drainReports(spools)
   const text = reports.join("\n\n")
 
+  // Codex runs the waiter inside its sandbox, where the spool dir is read-only
+  // and the waiter cannot leave its own `.waiter` proof; this hook runs outside
+  // it, so the PostToolUse that follows the waiter's exit stamps on its behalf.
+  // Only a *completed* wait counts: the waiter's last line is a token nothing
+  // else prints, while a missing node or unreadable script prints none —
+  // stamping on the command alone would let a broken waiter reset the Stop
+  // guard's streak and reopen the unbounded loop it bounds.
+  if (
+    event === "PostToolUse" &&
+    JSON.stringify(input.tool_input ?? "").includes("await-activity.mjs") &&
+    JSON.stringify(input.tool_response ?? "").includes(WAITER_DONE_TOKEN)
+  ) {
+    for (const { dir } of spools) {
+      try {
+        writeFileSync(join(dir, WAITER_MARKER), String(Date.now()), "utf8")
+      } catch {}
+    }
+  }
+
   if (event === "Stop") {
     if (reports.length > 0) {
       process.stdout.write(
@@ -367,7 +389,8 @@ function keepAliveReason({ pid, monitors }) {
       "should not receive another reply): call `pr_monitor` with action `mark_ready` to accept the current state " +
       "manually.",
     "3. Nothing to do right now: automatic readiness is waiting for CI, prefixed replies, or its quiet window. " +
-      "Wait for the next report by running this with the Bash tool, passing `timeout: 600000`:",
+      "Wait for the next report by running this with your shell tool and a 600000 ms timeout " +
+      "(Claude Code Bash: `timeout: 600000`; Codex shell: `timeout_ms: 600000`):",
     "",
     `   node ${shellQuote(WAITER)} --session ${pid} --timeout ${WAIT_SECONDS}`,
     "",

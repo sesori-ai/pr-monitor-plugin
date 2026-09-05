@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "pr-monitor": {
+      "command": "./dist/mcp-server.mjs",
+      "args": ["--codex"],
+      "cwd": "."
+    }
+  }
+}

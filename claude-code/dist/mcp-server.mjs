@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -6916,6 +6917,8 @@ var require_dist = __commonJS({
 });
 
 // claude-code/src/mcp-server.ts
+import { execFileSync as execFileSync2 } from "node:child_process";
+import { readlinkSync } from "node:fs";
 import { join as join3 } from "node:path";
 import process5 from "node:process";
 
@@ -32838,10 +32841,34 @@ function writeSessionState(claudePid2, state) {
 // claude-code/src/mcp-server.ts
 var claudePid = process5.ppid;
 var pushChannel = messagingChannel();
-var projectDir = process5.env["CLAUDE_PROJECT_DIR"] ?? process5.cwd();
+var isCodex = process5.argv.includes("--codex");
+var hostName = isCodex ? "Codex" : "Claude Code";
+var parentCwd = (pid) => {
+  try {
+    return readlinkSync(`/proc/${pid}/cwd`);
+  } catch {
+  }
+  try {
+    const out = execFileSync2("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    const line = out.split("\n").find((entry) => entry.startsWith("n/"));
+    if (line !== void 0) return line.slice(1);
+  } catch {
+  }
+  return void 0;
+};
+var hostCwd = isCodex ? parentCwd(claudePid) : void 0;
+if (isCodex && hostCwd === void 0 && process5.env["CLAUDE_PROJECT_DIR"] === void 0) {
+  console.error(
+    `[pr-monitor] cannot resolve the Codex process working directory (no /proc, no lsof); looking for pr-monitor.json under ${process5.cwd()} (the plugin root) instead of the project`
+  );
+}
+var projectDir = process5.env["CLAUDE_PROJECT_DIR"] ?? hostCwd ?? process5.cwd();
 var configPaths = [
   join3(projectDir, ".pr-monitor.json"),
-  join3(projectDir, ".claude", "pr-monitor.json"),
+  join3(projectDir, isCodex ? ".codex" : ".claude", "pr-monitor.json"),
   join3(projectDir, ".opencode", "pr-monitor.json")
 ];
 var handedOff = /* @__PURE__ */ new Set();
@@ -32881,7 +32908,7 @@ var deliver = async ({
     extendKeepAlive({ config: config2 });
     refreshSessionState();
     if (config2.desktopNotifications) {
-      notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, "New report delivered to your Claude Code session");
+      notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report delivered to your ${hostName} session`);
     }
     return;
   }
@@ -32889,7 +32916,7 @@ var deliver = async ({
   extendKeepAlive({ config: config2 });
   refreshSessionState();
   if (config2.desktopNotifications) {
-    notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, "New report waiting in your Claude Code session");
+    notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report waiting in your ${hostName} session`);
   }
 };
 monitorSession = new MonitorSession({
@@ -32926,7 +32953,7 @@ var formatResult = ({ result }) => {
     const { config: config2, announcement } = result.start;
     const replyPrefix = config2.ignoreCommentTag ?? "<!-- pr-monitor:reply -->";
     return `${result.text}
-` + (config2.announceOnStart ? announcement === "delivered" /* delivered */ ? pushChannel !== void 0 ? "An initial [PR Monitor] report has been delivered into this session. " : "An initial [PR Monitor] report is spooled for the next hook event. " : "Initial delivery failed and will retry at the next poll without losing its baseline. " : "") + (pushChannel !== void 0 ? `Polling every ${config2.pollIntervalSeconds}s; settled activity arrives on its own as a '[PR Monitor]' message after ${config2.debounceMinutes} quiet minutes \u2014 even while this session is idle. ` : `Polling every ${config2.pollIntervalSeconds}s; settled activity is injected automatically at the next tool call, user message, or turn end after ${config2.debounceMinutes} quiet minutes. `) + (config2.flushOnCiFailure ? "A failing check is reported at the next poll without waiting for the quiet window or the rest of CI. " : "") + `A new merge conflict or terminal state is also immediate. Readiness is managed automatically; agent-authored GitHub replies must begin with \`${replyPrefix}\`. Use mark_ready when new feedback is non-actionable and no reply should be posted. Never invent sleeps, delays, timeouts, scheduled checks, polling loops, repeated CI checks, or routine status/flush calls \u2014 the monitor delivers on its own. The monitor stops on merge/close and does not survive this Claude Code session.` + (pushChannel !== void 0 ? "\nEnd the turn when there is nothing left to handle; a new report starts its own turn." : config2.keepAlive ? "\nKeep-alive follows the ready label. Run only the exact await-activity command supplied by a [PR Monitor keep-alive] message; do not create another waiting mechanism." : "");
+` + (config2.announceOnStart ? announcement === "delivered" /* delivered */ ? pushChannel !== void 0 ? "An initial [PR Monitor] report has been delivered into this session. " : "An initial [PR Monitor] report is spooled for the next hook event. " : "Initial delivery failed and will retry at the next poll without losing its baseline. " : "") + (pushChannel !== void 0 ? `Polling every ${config2.pollIntervalSeconds}s; settled activity arrives on its own as a '[PR Monitor]' message after ${config2.debounceMinutes} quiet minutes \u2014 even while this session is idle. ` : `Polling every ${config2.pollIntervalSeconds}s; settled activity is injected automatically at the next tool call, user message, or turn end after ${config2.debounceMinutes} quiet minutes. `) + (config2.flushOnCiFailure ? "A failing check is reported at the next poll without waiting for the quiet window or the rest of CI. " : "") + `A new merge conflict or terminal state is also immediate. Readiness is managed automatically; agent-authored GitHub replies must begin with \`${replyPrefix}\`. Use mark_ready when new feedback is non-actionable and no reply should be posted. Never invent sleeps, delays, timeouts, scheduled checks, polling loops, repeated CI checks, or routine status/flush calls \u2014 the monitor delivers on its own. The monitor stops on merge/close and does not survive this ${hostName} session.` + (pushChannel !== void 0 ? "\nEnd the turn when there is nothing left to handle; a new report starts its own turn." : config2.keepAlive ? "\nKeep-alive follows the ready label. Run only the exact await-activity command supplied by a [PR Monitor keep-alive] message; do not create another waiting mechanism." : "");
   }
   if (result.ready?.ready && result.ready.watched) {
     return `${result.text}
@@ -32961,7 +32988,7 @@ var shutdown = () => {
   shuttingDown = true;
   void (async () => {
     await monitorSession.stopAll({
-      notice: "Monitor stopped: the pr-monitor MCP server is shutting down (Claude Code session ended or server restarted). Re-start monitoring if still needed.",
+      notice: `Monitor stopped: the pr-monitor MCP server is shutting down (${hostName} session ended or server restarted). Re-start monitoring if still needed.`,
       channel: "persistent" /* persistent */
     });
     writeSessionState(claudePid, {
@@ -32986,8 +33013,8 @@ server.registerTool(
   {
     description: buildMonitorToolDescription({
       delivery: pushChannel !== void 0 ? "reports are pushed into THIS session as visible '[PR Monitor]' messages, even while it is idle." : "reports are injected into THIS session as '[PR Monitor]' messages at hook events.",
-      configPath: ".pr-monitor.json (falling back to .claude/pr-monitor.json, then .opencode/pr-monitor.json)",
-      lifecycle: "Monitors are per-session and do not survive Claude Code restarts.",
+      configPath: `.pr-monitor.json (falling back to ${isCodex ? ".codex" : ".claude"}/pr-monitor.json, then .opencode/pr-monitor.json)`,
+      lifecycle: `Monitors are per-session and do not survive ${hostName} restarts.`,
       waiting: pushChannel !== void 0 ? "The monitor delivers on its own; never set up delays, timeouts, or waiters for it. End the turn when idle \u2014 a new report starts its own turn." : "End the turn when idle. If a [PR Monitor keep-alive] message supplies an await-activity command, run only that exact event waiter; never invent another delay or polling mechanism."
     }),
     inputSchema: {
@@ -33000,4 +33027,4 @@ server.registerTool(
   async ({ action, pr }) => ({ content: [{ type: "text", text: await handle({ action, pr }) }] })
 );
 await server.connect(new StdioServerTransport());
-log(`pr-monitor MCP server ready (claude pid ${claudePid}, project ${projectDir})`);
+log(`pr-monitor MCP server ready (${hostName} pid ${claudePid}, project ${projectDir})`);

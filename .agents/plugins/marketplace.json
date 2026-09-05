@@ -1,0 +1,20 @@
+{
+  "name": "sesori",
+  "interface": {
+    "displayName": "Sesori"
+  },
+  "plugins": [
+    {
+      "name": "pr-monitor",
+      "source": {
+        "source": "local",
+        "path": "./claude-code"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

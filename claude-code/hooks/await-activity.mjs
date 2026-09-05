@@ -129,4 +129,8 @@ try {
       // best-effort: the guard degrades to giving up after a few blocks
     }
   }
+  // Completion token for drain-spool.mjs, which stamps `.waiter` on our behalf
+  // where a sandbox (Codex) keeps the write above from landing. Printed last so
+  // it proves a finished wait, and nothing else prints it.
+  console.log("pr-monitor-waiter: done")
 }

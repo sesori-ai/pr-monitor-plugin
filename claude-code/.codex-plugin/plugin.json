@@ -1,0 +1,31 @@
+{
+  "name": "pr-monitor",
+  "version": "0.4.0",
+  "description": "Manage GitHub PR readiness and report commits, CI, reviews, comments, conflicts, and completion.",
+  "author": {
+    "name": "Sesori",
+    "url": "https://github.com/sesori-ai"
+  },
+  "homepage": "https://github.com/sesori-ai/opencode-pr-monitor",
+  "repository": "https://github.com/sesori-ai/opencode-pr-monitor",
+  "license": "MIT",
+  "keywords": [
+    "github",
+    "pull-request",
+    "monitor",
+    "ci"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.codex-mcp.json",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "PR Monitor",
+    "shortDescription": "Background GitHub PR monitoring and readiness handoff",
+    "developerName": "Sesori",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Write"
+    ],
+    "websiteURL": "https://github.com/sesori-ai/opencode-pr-monitor"
+  }
+}

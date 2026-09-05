@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises"
 const manifests = [
   ["OpenCode", new URL("../opencode/package.json", import.meta.url)],
   ["Claude Code", new URL("../claude-code/.claude-plugin/plugin.json", import.meta.url)],
+  ["Codex", new URL("../claude-code/.codex-plugin/plugin.json", import.meta.url)],
   ["Pi/OMP", new URL("../pi/package.json", import.meta.url)],
 ]
 
