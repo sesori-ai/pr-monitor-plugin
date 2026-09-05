@@ -109,6 +109,7 @@ commands/unready.md
 commands/watch.md
 dist/mcp-server.mjs
 hooks/await-activity.mjs
+hooks/codex-hooks.json
 hooks/drain-spool.mjs
 hooks/hooks.json
 skills/monitor-pr/SKILL.md
@@ -135,13 +136,17 @@ codex plugin add pr-monitor@sesori
 ```
 
 - Root `.agents/plugins/marketplace.json` points at the same `./claude-code` root; `.codex-plugin/plugin.json`
-  carries the same version and references `./skills/`, `./hooks/hooks.json`, and `./.codex-mcp.json`.
+  carries the same version and references `./skills/`, `./hooks/codex-hooks.json`, and `./.codex-mcp.json`.
 - `.codex-mcp.json` launches `./dist/mcp-server.mjs` (shebang, mode 755) with `cwd: "."` and `--codex`. Codex expands
   no placeholders in args/env, so the bundle must stay executable and self-locating.
+- The Codex hook manifest is generated from the Claude manifest with `--codex` and a SessionStart registration
+  hook. Both hosts execute the same hook/waiter implementation. Rebuild it with `npm run build:claude`.
 - Host floor: codex-cli 0.153.0 (plugins, hooks stable). Verified there: install from a local marketplace, MCP server
   spawn with the plugin-root cwd and verbatim args, hook trust prompt, and `UserPromptSubmit`/`SessionStart` hook
-  firing with `${CLAUDE_PLUGIN_ROOT}` expanded. Not verified (no model quota at the time): a model-driven
-  `pr_monitor` start, report injection through `additionalContext`, and the Stop-block keep-alive loop.
+  firing with `${CLAUDE_PLUGIN_ROOT}` expanded. A model-driven Codex 0.153.4 `exec` smoke test additionally verified
+  real thread metadata, conversation config loading, PostToolUse report injection, `mark_ready`, and stop with
+  disposable hook state and a fake GitHub backend. Multi-conversation isolation and Stop/waiter scoping have
+  MCP/hook integration coverage; the live Codex app UI and model-driven idle Stop/waiter loop were not exercised.
 
 ## Release Metadata And Order
 

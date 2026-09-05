@@ -1,6 +1,6 @@
 // Report spool shared with hooks/drain-spool.mjs: the MCP server writes one
-// file per report under `~/.claude/pr-monitor/spool/<claude pid>/`; the hook
-// scripts running under the same Claude Code process drain them into the
+// file per report under `~/.claude/pr-monitor/spool/<host pid>/`, with a
+// thread-ID subdirectory for Codex. The owning hook drains them into the
 // conversation. The path scheme and file protocol (write `.tmp`, rename to
 // `.md`; hooks only read `.md`; owner token in `owner`) must stay in sync with
 // hooks/drain-spool.mjs, which is dependency-free and cannot import this
@@ -16,8 +16,9 @@ export const SPOOL_ROOT = join(homedir(), ".claude", "pr-monitor", "spool")
 /** Owner-token file inside a spool dir; see `startToken`. */
 export const OWNER_FILE = "owner"
 
-export function spoolDirFor(claudePid: number): string {
-  return join(SPOOL_ROOT, String(claudePid))
+export function spoolDirFor(claudePid: number, sessionId?: string): string {
+  const root = join(SPOOL_ROOT, String(claudePid))
+  return sessionId === undefined ? root : join(root, sessionId)
 }
 
 let seq = 0
@@ -166,8 +167,8 @@ function assertOwned(claudePid: number, dir: string): void {
  * an unwritable spool must be surfaced before a monitor starts claiming that
  * reports will arrive.
  */
-export function probeSpool(claudePid: number): void {
-  const dir = spoolDirFor(claudePid)
+export function probeSpool(claudePid: number, sessionId?: string): void {
+  const dir = spoolDirFor(claudePid, sessionId)
   mkdirSync(dir, { recursive: true })
   const probe = join(dir, `.probe-${process.pid}`)
   writeFileSync(probe, "", "utf8")
@@ -186,10 +187,10 @@ export function probeSpool(claudePid: number): void {
  * millisecond and silently lose a report. The millisecond stays the leading,
  * fixed-width component so the hook's lexicographic sort remains chronological.
  */
-export function spoolReport(claudePid: number, report: string): void {
-  const dir = spoolDirFor(claudePid)
+export function spoolReport(claudePid: number, report: string, sessionId?: string): void {
+  const dir = spoolDirFor(claudePid, sessionId)
+  assertOwned(claudePid, spoolDirFor(claudePid))
   mkdirSync(dir, { recursive: true })
-  assertOwned(claudePid, dir)
   seq += 1
   const name = `${Date.now()}-${process.pid}-${String(seq).padStart(4, "0")}`
   const tmp = join(dir, `${name}.tmp`)

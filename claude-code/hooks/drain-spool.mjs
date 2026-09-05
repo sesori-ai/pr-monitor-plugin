@@ -21,9 +21,9 @@
 // `sh -c`, so this process's parent is that sh and its grandparent is the
 // Claude Code process: "my spool" = the dir named by my parent or grandparent
 // pid, and matching the `owner` token the server wrote there (a pid alone is
-// not an identity — the OS recycles them). Codex is the same shape: its plugin
-// hooks and MCP servers are children of the Codex TUI process, hooks via a
-// shell (verified on 0.153). The walk deliberately stops at the
+// not an identity — the OS recycles them). Codex instead selects the nested
+// thread-ID directory: one app-server process can own several conversations.
+// The Claude ancestry walk deliberately stops at the
 // grandparent — a full ancestry walk would reach an OUTER Claude Code session
 // when sessions nest (session A's Bash tool runs `claude -p ...` → session B),
 // letting B's hooks steal A's reports. Ancestry comes from /proc where it
@@ -33,13 +33,14 @@
 // from the conversation that owned it.
 
 import { execFileSync } from "node:child_process"
-import { readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, isAbsolute, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const SPOOL_ROOT = join(homedir(), ".claude", "pr-monitor", "spool")
 const OWNER_FILE = "owner"
+const isCodex = process.argv.includes("--codex")
 // Resolved from this file rather than CLAUDE_PLUGIN_ROOT: the waiter path ends
 // up inside a command the model runs, and must be correct however the hook was
 // invoked.
@@ -170,7 +171,7 @@ function candidatePids() {
  * token mismatches is only skipped, never deleted (see below).
  * Returns `[{ pid, dir }]`.
  */
-function ownedSpools() {
+function ownedSpools(sessionId) {
   let entries
   try {
     entries = readdirSync(SPOOL_ROOT)
@@ -190,6 +191,12 @@ function ownedSpools() {
     live.push({ pid, dir: join(SPOOL_ROOT, entry) })
   }
 
+  if (isCodex) {
+    if (typeof sessionId !== "string" || !/^[a-zA-Z0-9_-]+$/.test(sessionId)) return []
+    return live.filter(({ pid, dir }) => ownerMatches(pid, dir)).map(({ pid, dir }) => ({
+      pid, dir: join(dir, sessionId), sessionId,
+    }))
+  }
   const candidates = candidatePids()
   // Skipped, never deleted: a mismatch here means the pid was recycled, and the
   // server now holding it is concurrently claiming this dir (claimSpool wipes
@@ -245,7 +252,7 @@ function drainReports(spools) {
  */
 function armedKeepAlive(spools) {
   const now = Date.now()
-  for (const { pid, dir } of spools) {
+  for (const { pid, dir, sessionId } of spools) {
     let state
     try {
       state = JSON.parse(readFileSync(join(dir, "session.json"), "utf8"))
@@ -254,7 +261,7 @@ function armedKeepAlive(spools) {
     }
     if (state?.version !== 1 || !state.keepAlive) continue
     if (!(now < state.expiresAtMs) || !(now < state.keepAliveUntilMs)) continue
-    return { pid, monitors: Array.isArray(state.monitors) ? state.monitors : [] }
+    return { pid, dir, sessionId, monitors: Array.isArray(state.monitors) ? state.monitors : [] }
   }
   return undefined
 }
@@ -273,8 +280,7 @@ function armedKeepAlive(spools) {
  * round trips instead of never letting go. Both markers live in the spool dir
  * and die with it.
  */
-function keepAliveBlockAllowed(pid) {
-  const dir = join(SPOOL_ROOT, String(pid))
+function keepAliveBlockAllowed(dir) {
   const readStamp = (path) => {
     try {
       const value = Number(readFileSync(path, "utf8"))
@@ -308,14 +314,26 @@ function keepAliveBlockAllowed(pid) {
 function main() {
   const input = readStdinJson()
   const event = input.hook_event_name
-  if (event !== "UserPromptSubmit" && event !== "PostToolUse" && event !== "Stop") return
+  if (event !== "SessionStart" && event !== "UserPromptSubmit" && event !== "PostToolUse" && event !== "Stop") return
   // PostToolUse also fires for tool calls made inside Task subagents, where
   // injected context reaches only the subagent and the report would be lost to
   // the main conversation. Subagent-context hook inputs carry agent_id
   // (verified empirically on 2.1.216); leave the spool for a main-context event.
   if (input.agent_id) return
 
-  const spools = ownedSpools()
+  if (isCodex) {
+    if (typeof input.session_id !== "string" || !/^[a-zA-Z0-9_-]+$/.test(input.session_id)) return
+    if (typeof input.cwd === "string" && isAbsolute(input.cwd)) {
+      const contexts = join(SPOOL_ROOT, "codex-contexts")
+      mkdirSync(contexts, { recursive: true })
+      const path = join(contexts, `${input.session_id}.json`)
+      const tmp = `${path}.${process.pid}.tmp`
+      writeFileSync(tmp, JSON.stringify({ cwd: input.cwd }), "utf8")
+      renameSync(tmp, path)
+    }
+  }
+  if (event === "SessionStart") return
+  const spools = ownedSpools(input.session_id)
   const reports = drainReports(spools)
   const text = reports.join("\n\n")
 
@@ -345,7 +363,8 @@ function main() {
           decision: "block",
           reason:
             "New [PR Monitor] report(s) arrived while you were working. If they need action (failing CI, new review " +
-            "comments, conflicts), address them now; otherwise surface them briefly to the user before finishing:\n\n" +
+            "comments, conflicts), address them now. If the latest feedback is non-actionable and nothing else blocks " +
+            "handoff, call `mark_ready` and confirm success before finishing:\n\n" +
             text,
         }),
       )
@@ -354,7 +373,7 @@ function main() {
     // Nothing to deliver, but the PR is still this session's job: refuse
     // turn-end so the session waits for the next report instead of going idle.
     const armed = armedKeepAlive(spools)
-    if (armed !== undefined && keepAliveBlockAllowed(armed.pid)) {
+    if (armed !== undefined && keepAliveBlockAllowed(armed.dir)) {
       process.stdout.write(JSON.stringify({ decision: "block", reason: keepAliveReason(armed) }))
     }
     return
@@ -377,7 +396,7 @@ function main() {
  * finishes, and it may be read in a context where the monitor-pr skill is not
  * loaded.
  */
-function keepAliveReason({ pid, monitors }) {
+function keepAliveReason({ pid, sessionId, monitors }) {
   const watching = monitors.length > 0 ? monitors.join(", ") : "this session's PR(s)"
   return [
     `[PR Monitor keep-alive] Still monitoring ${watching}, and it has not been handed off for human review yet — the work is not finished, so do not end the turn.`,
@@ -392,7 +411,7 @@ function keepAliveReason({ pid, monitors }) {
       "Wait for the next report by running this with your shell tool and a 600000 ms timeout " +
       "(Claude Code Bash: `timeout: 600000`; Codex shell: `timeout_ms: 600000`):",
     "",
-    `   node ${shellQuote(WAITER)} --session ${pid} --timeout ${WAIT_SECONDS}`,
+    `   node ${shellQuote(WAITER)} --session ${pid}${sessionId === undefined ? "" : ` --thread ${shellQuote(sessionId)}`} --timeout ${WAIT_SECONDS}`,
     "",
     "   It blocks until a [PR Monitor] report lands (the report is then injected automatically), until monitoring finishes, or until it times out — then reassess. Waiting is the expected state; a quiet PR is not a reason to finish.",
     "",

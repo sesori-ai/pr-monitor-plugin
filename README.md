@@ -144,14 +144,18 @@ bounds and `keepAlive` / `keepAliveMaxMinutes` / `desktopNotifications` settings
 
 Behavior notes for the Codex shell:
 
-- Monitors belong to the Codex TUI process and die with it. Codex starts plugin MCP servers in the plugin root and
-  exports no project path, so the server reads the project directory from the Codex process itself (`/proc` on
-  Linux, `lsof` on macOS).
+- Monitors belong to the calling Codex conversation, including when several conversations share one app-server.
+  The MCP thread ID selects its own watches and report queue. The delivery hook supplies the conversation’s
+  working directory; the app-server/plugin working directory is not used as the project directory.
+- If the hooks have not registered the conversation, starting a monitor returns an explicit error. Enable and
+  trust the plugin hooks, send another prompt, and retry. A missing hook must not look like working delivery.
 - Config first uses repository `.pr-monitor.json`, then falls back to `.codex/pr-monitor.json` and
   `.opencode/pr-monitor.json`.
 - The slash commands are Claude Code only; use the `pr_monitor` tool directly (`status`, `stop`, `mark_ready`, ...).
-- The report spool is shared with Claude Code at `~/.claude/pr-monitor/spool/`; routing is by owning process, so
-  concurrent Claude Code and Codex sessions never see each other's reports.
+- The report spool is shared with Claude Code at `~/.claude/pr-monitor/spool/`. Codex queues are nested under
+  `<host pid>/<thread id>`; hooks and waiters select only that conversation. Claude Code retains process routing.
+- Across all hosts, clean review summaries, review quota notices and other no-op feedback still require agent
+  judgment. After inspecting them and confirming no work remains, the agent calls `mark_ready` explicitly.
 
 ## opencode
 

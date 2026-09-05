@@ -4,7 +4,7 @@
 
 A coding-agent session can watch explicit GitHub pull requests, receive readiness-aware `[PR Monitor]` reports when
 head, review, comment, CI, mergeability, or terminal state changes, and automatically manage a handoff label.
-OpenCode, Claude Code, Pi, and OMP share the same per-PR state machine and session runtime while retaining host-native
+OpenCode, Claude Code, Codex, Pi, and OMP share the same per-PR state machine and session runtime while retaining host-native
 delivery and lifecycle ownership.
 
 The highest required regression level is **L5 Full** because the complete claim crosses published artifacts, real
@@ -71,12 +71,13 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 - The monitor owns GitHub polling and report timing. Every tool description and shipped skill forbids agent-created
   sleeps, delayed or scheduled commands, cron, background polling, repeated `gh pr checks`, and routine
   `status`/`flush` calls while waiting.
-- Every host ends the turn and relies on push delivery. Only a Claude Code session without the messaging socket
-  falls back to the keep-alive loop, and there Claude may run only the exact `await-activity.mjs` event waiter
+- Push-capable hosts end the turn and rely on native delivery. Codex and Claude Code without a messaging socket
+  use the keep-alive loop and may run only the exact `await-activity.mjs` event waiter
   supplied by its keep-alive hook; it must not invent another waiter, delay, or timeout.
 - A delivered report already advances the baseline. Agent GitHub replies begin with the configured prefix. A
   non-actionable bot acknowledgement gets no reply; the agent uses unconditional `mark_ready` instead, avoiding an
-  acknowledgement loop.
+  acknowledgement loop. This includes clean review summaries, quota notices, and other no-op feedback: inspect
+  the full text, confirm no actionable work remains and CI/mergeability are good, then mark ready explicitly.
 
 ## Required Host Rows
 
@@ -88,6 +89,22 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 - Session deletion stops silently. Reload takeover stops prior-instance timers with notices. Graceful disposal uses
   synchronous no-reply prompts so notices are persisted without starting a model turn.
 - The packaged push-host skill is injected exactly once through `config.skills.paths`.
+
+### Codex CLI/app-server with Node.js 18 or newer on macOS/Linux
+
+- Route MCP actions using `_meta.threadId` and hook delivery using `session_id`. Two conversations under one
+  app-server PID have separate monitor registries, queues, keep-alive state and handoff. An unrelated thread or
+  subagent never drains their reports. Do not deliver legacy PID-only queues to Codex conversations.
+- The trusted SessionStart/UserPromptSubmit hook records the conversation's `cwd`; load `.pr-monitor.json`, then
+  `.codex/pr-monitor.json`, then `.opencode/pr-monitor.json` there. Never infer a conversation from the host PID or
+  use the plugin/app-server cwd as its project directory.
+- Missing thread metadata or hook registration returns an explicit error without starting a monitor. Enable/trust
+  the hooks and send another prompt before retrying. A successful file write alone does not establish host delivery.
+- The Stop hook supplies a waiter with the exact thread ID. The waiter ignores reports in other conversations;
+  manual readiness disarms only the owning thread's keep-alive. The Stop report instructs the agent to inspect
+  no-op feedback and use `mark_ready` when no actionable work remains.
+- Exercise both synthetic MCP/hook isolation tests and an actual model-driven Codex session. Source/fixture tests
+  alone do not establish that a given Codex app build dispatches plugin hooks.
 
 ### Claude Code with Node.js 18 or newer on macOS/Linux
 

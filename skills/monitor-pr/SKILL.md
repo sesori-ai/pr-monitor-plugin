@@ -92,6 +92,12 @@ create an endless bot loop.
 pr_monitor(action: "mark_ready", pr: "owner/repo#123")
 ```
 
+This also applies to clean review summaries (such as "0 issues found"), review
+quota notices, and other no-op feedback. Fetch and inspect the full text first.
+They do not qualify for automatic readiness merely because a bot posted them.
+When CI is green, the PR is mergeable, and no actionable work remains, use
+`mark_ready` yourself; do not wait for another bot reply to clear the gate.
+
 `mark_ready` is an unconditional judgment override. It accepts all activity
 currently observed by the watch and adds the label. Only later invalidating
 activity withdraws it again. Claim handoff only after the tool confirms success.
