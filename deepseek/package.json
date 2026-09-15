@@ -1,6 +1,6 @@
 {
   "name": "@sesori/pr-monitor-deepseek",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "DeepSeek Harness bundle for GitHub PR monitoring, readiness, and conversation reports",
   "license": "MIT",
   "type": "module",

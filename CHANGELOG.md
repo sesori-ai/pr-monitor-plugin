@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1]
+
 ### Added
 
 - Native DeepSeek Harness 0.1.5-rc.2+ support through `@sesori/pr-monitor-deepseek`, an installable Cordis bundle
