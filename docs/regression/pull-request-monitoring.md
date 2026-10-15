@@ -81,7 +81,8 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   enables (including the startup ready-label reset) and `false` disables even when config or environment enables it.
   Omitting it leaves configuration in control. Every adapter forwards it, Hermes rejects non-boolean values, and tool
   wording plus every shipped skill restrict it to explicit user requests and require reusing it on restart. A second
-  start for a PR whose start is still in flight is refused before any label mutation.
+  start for a PR whose start is still in flight is refused before any label mutation. `stop` or session shutdown cancels a
+  pending start; a canceled start neither mutates labels nor registers a watch when it resumes.
 - Only successfully completed readiness transitions performed by the monitor and successful `mark_ready` actions
   trigger one merge attempt. Observing an externally added ready label does not; neither does observing readiness
   after a failed/ambiguous label mutation. Both watched and standalone `mark_ready` are covered.

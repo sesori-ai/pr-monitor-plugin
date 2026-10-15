@@ -658,6 +658,38 @@ test("start autoMerge argument overrides configuration for that watch only", asy
   await session.stopAll({})
 })
 
+test("stop cancels a stalled start so the target is not wedged", async () => {
+  const runner = runnerHarness({ mergeable: "UNKNOWN" })
+  const timers = timerHarness()
+  const channel = channelHarness()
+  const session = new MonitorSession({
+    runGh: runner.runGh,
+    loadConfig: async () => config(),
+    log: () => {},
+    schedule: timers.schedule,
+    cancel: timers.cancel,
+  })
+  let releaseStalled!: () => void
+  const stalled = session.execute({
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    loadConfig: () => new Promise((resolve) => (releaseStalled = () => resolve(config()))),
+    start: startOptions(channel),
+  })
+  await new Promise((resolve) => setImmediate(resolve))
+  const refused = await session.execute({ action: MonitorAction.start, pr: "sesori/example#42", start: startOptions(channel) })
+  assert.match(refused.text, /already starting/)
+  const canceled = await session.execute({ action: MonitorAction.stop, pr: "sesori/example#42" })
+  assert.match(canceled.text, /Canceled the pending start/)
+
+  const fresh = await session.execute({ action: MonitorAction.start, pr: "sesori/example#42", start: startOptions(channel) })
+  assert.notEqual(fresh.start, undefined)
+  releaseStalled()
+  assert.match((await stalled).text, /was canceled/)
+  assert.equal(session.list().length, 1)
+  await session.stopAll({})
+})
+
 test("ready handoff follows label success and the watched target identity", async () => {
   const runner = runnerHarness({ mergeable: "UNKNOWN" })
   const timers = timerHarness()

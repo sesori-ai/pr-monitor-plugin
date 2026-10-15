@@ -1632,9 +1632,10 @@ function buildMonitorToolDescription({
 var MonitorSession = class {
   deps;
   watches = /* @__PURE__ */ new Map();
-  // Targets with a start in flight. A concurrent start (possibly with a different autoMerge override) is refused
-  // so only the call that will own the watch can perform startup label mutations.
-  starting = /* @__PURE__ */ new Set();
+  // Targets with a start in flight, keyed to that start's token. A concurrent start (possibly with a different
+  // autoMerge override) is refused so only the owning call performs startup label mutations. stop/stopAll drop the
+  // token, so a stalled start cannot wedge the target and cannot mutate or register once it resumes.
+  starting = /* @__PURE__ */ new Map();
   // Destructive startup work happens before a watch can own the target. Keep
   // it in the session cleanup barrier so a reloaded successor cannot race it.
   startupMutations = /* @__PURE__ */ new Set();
@@ -1721,6 +1722,7 @@ var MonitorSession = class {
     channel = "normal" /* normal */
   }) {
     this.lifecycleGeneration += 1;
+    this.starting.clear();
     const entries = [...this.watches.values()];
     const startupMutations = [...this.startupMutations];
     const standaloneReadinessMutations = [...this.standaloneReadinessMutations];
@@ -1756,12 +1758,18 @@ var MonitorSession = class {
     const existing = this.watches.get(key);
     if (existing) return { text: `Already monitoring ${displayKey} in this session.
 ${existing.watch.statusLine()}` };
-    if (this.starting.has(key)) return { text: `A monitor for ${displayKey} is already starting in this session.` };
-    this.starting.add(key);
+    if (this.starting.has(key)) {
+      return {
+        text: `A monitor for ${displayKey} is already starting in this session. If that start is stuck, call stop for ${displayKey} to cancel it.`
+      };
+    }
+    const token = Symbol(key);
+    this.starting.set(key, token);
+    const owned = () => this.starting.get(key) === token;
     try {
-      return await this.startReserved({ target, key, displayKey, options, loadConfig, autoMerge });
+      return await this.startReserved({ target, key, displayKey, options, loadConfig, autoMerge, owned });
     } finally {
-      this.starting.delete(key);
+      if (owned()) this.starting.delete(key);
     }
   }
   async startReserved({
@@ -1770,7 +1778,8 @@ ${existing.watch.statusLine()}` };
     displayKey,
     options,
     loadConfig,
-    autoMerge
+    autoMerge,
+    owned
   }) {
     const lifecycleGeneration = this.lifecycleGeneration;
     const preparationError = await options.prepare?.();
@@ -1804,6 +1813,7 @@ ${existing.watch.statusLine()}` };
     if (this.lifecycleGeneration !== lifecycleGeneration) {
       return { text: `Monitor session ended while ${displayKey} was starting; no active monitor remains.` };
     }
+    if (!owned()) return { text: `Start of ${displayKey} was canceled; no active monitor remains.` };
     if (initial.state !== "OPEN") {
       return { text: `Cannot start monitor: ${displayKey} is already ${initial.state}.` };
     }
@@ -1827,6 +1837,9 @@ ${raced.watch.statusLine()}` };
         return {
           text: `Monitor session ended while ${displayKey} was starting. ${startupNotice} No active monitor remains.`
         };
+      }
+      if (!owned()) {
+        return { text: `Start of ${displayKey} was canceled. ${startupNotice} No active monitor remains.` };
       }
       const resetRace = this.watches.get(key);
       if (resetRace) {
@@ -1915,6 +1928,15 @@ ${resetRace.watch.statusLine()}` };
     return [entry];
   }
   async stop({ pr }) {
+    if (pr === "all") {
+      this.starting.clear();
+    } else {
+      const target = parseTarget(pr);
+      const key = "error" in target ? void 0 : targetRegistryKey(target);
+      if (key !== void 0 && !this.watches.has(key) && this.starting.delete(key)) {
+        return { text: `Canceled the pending start for ${targetKey(target)}.` };
+      }
+    }
     const selected = this.select({ pr });
     if ("error" in selected) return { text: selected.error };
     if (selected.length === 0) return { text: "No active monitors in this session." };

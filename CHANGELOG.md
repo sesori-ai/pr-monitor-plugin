@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Within one session, a second `start` for a PR whose start is still in flight is refused instead of racing it, so a
   losing start can no longer remove a ready label through its auto-merge startup reset. Starts from separate sessions
   are not coordinated.
+  `stop` (or session shutdown) cancels a pending start, so a stalled start cannot wedge its PR, and the canceled start
+  neither mutates labels nor registers a watch when it resumes.
 
 ## [0.5.1]
 
