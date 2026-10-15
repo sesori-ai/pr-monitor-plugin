@@ -32,6 +32,11 @@ pr_monitor(action: "start", pr: "owner/repo#123")
 ```
 
 - Always pass an explicit PR; never infer it from the working directory.
+- Auto-merge follows configuration by default. When the user explicitly asks to
+  enable or disable auto-merge for a PR, pass `autoMerge: true` or
+  `autoMerge: false` with `start`; that request overrides config and the
+  environment for this monitor. Never set it without such a request. To change
+  it on a running monitor, `stop` and `start` again with the requested value.
 - Start one monitor per PR. In a fresh session, use `status` once and restart a
   missing watch.
 - The start result states the configured agent-reply prefix. Every GitHub reply

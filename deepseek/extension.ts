@@ -27,6 +27,7 @@ import {
 import { createNodeGhRunner } from "../runtime/node-gh"
 import { packageSkillDirectory } from "../runtime/package-skill"
 import {
+  AUTO_MERGE_PARAM_DESCRIPTION,
   buildMonitorToolDescription,
   MONITOR_ACTION_VALUES,
   MonitorAction,
@@ -243,6 +244,10 @@ function registerAgentRuntime({
             "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready; " +
             "'all' allowed for stop/flush.",
         },
+        autoMerge: {
+          type: "boolean",
+          description: AUTO_MERGE_PARAM_DESCRIPTION,
+        },
       },
       output: {
         schema: { type: "string" },
@@ -255,6 +260,7 @@ function registerAgentRuntime({
         const result = await monitor.execute({
           action: args.action,
           pr: args.pr,
+          autoMerge: args.autoMerge,
           loadConfig,
           start:
             args.action === MonitorAction.start

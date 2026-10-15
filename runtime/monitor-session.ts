@@ -156,11 +156,14 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     pr,
     start,
     loadConfig,
+    autoMerge,
   }: {
     action: MonitorAction
     pr: string | undefined
     start?: StartOptions<TConfig>
     loadConfig?: () => Promise<TConfig>
+    // Per-start override requested by the user; wins over config and environment for that watch only.
+    autoMerge?: boolean
   }): Promise<MonitorActionResult<TConfig>> {
     const actionLoadConfig =
       loadConfig ??
@@ -172,7 +175,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
           return { text: "action 'start' requires a single explicit pr: 'owner/repo#123' or a PR URL." }
         }
         if (start === undefined) return { text: "Cannot start monitor: this host did not provide a report channel." }
-        return await this.start({ pr, options: start, loadConfig: actionLoadConfig })
+        return await this.start({ pr, options: start, loadConfig: actionLoadConfig, autoMerge })
       case MonitorAction.stop:
         if (!pr) return { text: "action 'stop' requires pr: 'owner/repo#123', a PR URL, or 'all'." }
         return await this.stop({ pr })
@@ -233,10 +236,12 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     pr,
     options,
     loadConfig,
+    autoMerge,
   }: {
     pr: string
     options: StartOptions<TConfig>
     loadConfig: () => Promise<TConfig>
+    autoMerge: boolean | undefined
   }): Promise<MonitorActionResult<TConfig>> {
     const target = parseTarget(pr)
     if ("error" in target) return { text: target.error }
@@ -252,6 +257,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     let config: TConfig
     try {
       config = await loadConfig()
+      if (autoMerge !== undefined) config = { ...config, autoMerge }
     } catch (error) {
       return {
         text: `Cannot start monitor for ${displayKey}: loading configuration failed (${(error as Error).message}).`,

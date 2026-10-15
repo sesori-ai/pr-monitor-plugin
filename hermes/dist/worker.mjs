@@ -1618,13 +1618,14 @@ var MONITOR_ACTION_VALUES = [
   "mark_ready" /* markReady */,
   "unmark_ready" /* unmarkReady */
 ];
+var AUTO_MERGE_PARAM_DESCRIPTION = "start only. Explicitly enable (true) or disable (false) auto-merge for this monitor, overriding autoMerge config and SESORI_PR_MONITOR_AUTO_MERGE. Set it only when the user asks to enable or disable auto-merge; omit it otherwise so configuration decides.";
 function buildMonitorToolDescription({
   delivery,
   configPath,
   lifecycle,
   waiting
 }) {
-  return `Monitor a GitHub PR in the background. Detects head changes, CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states whether the configured ready label is present and tells the agent to keep working or manually mark ready when judgment says no action remains. Startup reports normally observe the existing label; when autoMerge is enabled by trusted config or SESORI_PR_MONITOR_AUTO_MERGE=true, start removes a pre-existing ready label and requires fresh assessment. Assess current-head checks, automated reviews and feedback immediately, including after restarting a monitor. Mark an already-settled PR ready without waiting for a new event, but never infer readiness from empty results after creation or a fresh push. On later activity, the monitor automatically adds readiness when CI is passing (or absent), mergeability is definite, and every feedback channel ends in a correctly prefixed local-account reply. It withdraws readiness on later commits, relevant comments, CI regression, or conflict. A newly failing check (when flushOnCiFailure is enabled), readiness withdrawal, merge conflict, or terminal state skips debounce. The monitor owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a later clean assessment). With autoMerge enabled, automatic readiness and mark_ready also make one squash-merge attempt for the accepted head using only the PR title; rejected or unknown outcomes keep readiness and are not retried automatically, while a changed head cancels standalone readiness. Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Global tuning lives in ~/.config/pr-monitor/config.json; ${configPath} overrides it. An explicit SESORI_PR_MONITOR_AUTO_MERGE environment value overrides autoMerge config. ${lifecycle}`;
+  return `Monitor a GitHub PR in the background. Detects head changes, CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states whether the configured ready label is present and tells the agent to keep working or manually mark ready when judgment says no action remains. Startup reports normally observe the existing label; when autoMerge is enabled by trusted config or SESORI_PR_MONITOR_AUTO_MERGE=true, start removes a pre-existing ready label and requires fresh assessment. Assess current-head checks, automated reviews and feedback immediately, including after restarting a monitor. Mark an already-settled PR ready without waiting for a new event, but never infer readiness from empty results after creation or a fresh push. On later activity, the monitor automatically adds readiness when CI is passing (or absent), mergeability is definite, and every feedback channel ends in a correctly prefixed local-account reply. It withdraws readiness on later commits, relevant comments, CI regression, or conflict. A newly failing check (when flushOnCiFailure is enabled), readiness withdrawal, merge conflict, or terminal state skips debounce. The monitor owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a later clean assessment). With autoMerge enabled, automatic readiness and mark_ready also make one squash-merge attempt for the accepted head using only the PR title; rejected or unknown outcomes keep readiness and are not retried automatically, while a changed head cancels standalone readiness. Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Global tuning lives in ~/.config/pr-monitor/config.json; ${configPath} overrides it. An explicit SESORI_PR_MONITOR_AUTO_MERGE environment value overrides autoMerge config; the start autoMerge argument overrides both for that monitor and must be set only on explicit user request. ${lifecycle}`;
 }
 
 // runtime/monitor-session.ts
@@ -1681,7 +1682,8 @@ var MonitorSession = class {
     action,
     pr,
     start,
-    loadConfig
+    loadConfig,
+    autoMerge
   }) {
     const actionLoadConfig = loadConfig ?? this.deps.loadConfig ?? (() => Promise.reject(new Error("this host did not provide a configuration loader")));
     switch (action) {
@@ -1690,7 +1692,7 @@ var MonitorSession = class {
           return { text: "action 'start' requires a single explicit pr: 'owner/repo#123' or a PR URL." };
         }
         if (start === void 0) return { text: "Cannot start monitor: this host did not provide a report channel." };
-        return await this.start({ pr, options: start, loadConfig: actionLoadConfig });
+        return await this.start({ pr, options: start, loadConfig: actionLoadConfig, autoMerge });
       case "stop" /* stop */:
         if (!pr) return { text: "action 'stop' requires pr: 'owner/repo#123', a PR URL, or 'all'." };
         return await this.stop({ pr });
@@ -1741,7 +1743,8 @@ var MonitorSession = class {
   async start({
     pr,
     options,
-    loadConfig
+    loadConfig,
+    autoMerge
   }) {
     const target = parseTarget(pr);
     if ("error" in target) return { text: target.error };
@@ -1756,6 +1759,7 @@ ${existing.watch.statusLine()}` };
     let config;
     try {
       config = await loadConfig();
+      if (autoMerge !== void 0) config = { ...config, autoMerge };
     } catch (error) {
       return {
         text: `Cannot start monitor for ${displayKey}: loading configuration failed (${error.message}).`
@@ -2085,7 +2089,8 @@ var schema = {
   description,
   parameters: { type: "object", properties: {
     action: { type: "string", enum: MONITOR_ACTION_VALUES },
-    pr: { type: "string", description: "Explicit owner/repo#123 or GitHub PR URL; all only for stop/flush." }
+    pr: { type: "string", description: "Explicit owner/repo#123 or GitHub PR URL; all only for stop/flush." },
+    autoMerge: { type: "boolean", description: AUTO_MERGE_PARAM_DESCRIPTION }
   }, required: ["action"], additionalProperties: false }
 };
 if (process.argv.includes("--describe")) {
@@ -2138,13 +2143,14 @@ if (process.argv.includes("--describe")) {
     }
     if (message.type !== "command" || closed) return;
     const id = message.id;
-    if (!MONITOR_ACTION_VALUES.includes(message.action) || message.pr !== void 0 && typeof message.pr !== "string" || typeof message.cwd !== "string" || !isAbsolute2(message.cwd)) {
+    if (!MONITOR_ACTION_VALUES.includes(message.action) || message.pr !== void 0 && typeof message.pr !== "string" || message.autoMerge !== void 0 && typeof message.autoMerge !== "boolean" || typeof message.cwd !== "string" || !isAbsolute2(message.cwd)) {
       send({ type: "result", id, error: "Invalid monitor action or PR" });
       return;
     }
     void session.execute({
       action: message.action,
       pr: message.pr,
+      autoMerge: message.autoMerge,
       loadConfig: () => loadConfig(message.cwd),
       start: { announcementMode: "background" /* background */, createChannel: () => ({ deliver }) }
     }).then(

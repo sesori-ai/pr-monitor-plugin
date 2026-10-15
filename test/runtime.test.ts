@@ -624,6 +624,40 @@ test("persistent shutdown notices use the persistent channel and clear every tim
   }
 })
 
+test("start autoMerge argument overrides configuration for that watch only", async () => {
+  const runner = runnerHarness({ mergeable: "UNKNOWN" })
+  const timers = timerHarness()
+  const channel = channelHarness()
+  const session = new MonitorSession({
+    runGh: runner.runGh,
+    loadConfig: async () => config({ autoMerge: true }),
+    log: () => {},
+    schedule: timers.schedule,
+    cancel: timers.cancel,
+  })
+  const disabled = await session.execute({
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    autoMerge: false,
+    start: startOptions(channel),
+  })
+  assert.equal(disabled.start?.config.autoMerge, false)
+  assert.doesNotMatch(disabled.text, /Auto-merge enabled/)
+  assert.doesNotMatch((await session.execute({ action: MonitorAction.status, pr: undefined })).text, /auto-merge/)
+  await session.execute({ action: MonitorAction.stop, pr: "all" })
+
+  const enabled = await session.execute({
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    autoMerge: true,
+    loadConfig: async () => config(),
+    start: startOptions(channel),
+  })
+  assert.equal(enabled.start?.config.autoMerge, true)
+  assert.match(enabled.text, /Auto-merge enabled/)
+  await session.stopAll({})
+})
+
 test("ready handoff follows label success and the watched target identity", async () => {
   const runner = runnerHarness({ mergeable: "UNKNOWN" })
   const timers = timerHarness()

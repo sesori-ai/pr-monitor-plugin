@@ -30,6 +30,12 @@ Always pass an explicit PR. Watches belong to this agent process (Claude Code
 or Codex) and do not survive a restart. In a fresh session, use `status` once
 and restart anything missing.
 
+Auto-merge follows configuration by default. When the user explicitly asks to
+enable or disable auto-merge for a PR, pass `autoMerge: true` or
+`autoMerge: false` with `start`; that request overrides config and the
+environment for this monitor. Never set it without such a request. To change it
+on a running monitor, `stop` and `start` again with the requested value.
+
 If Codex reports that its delivery hook has not registered the conversation,
 monitoring has not started. Installing the plugin does not grant hook trust.
 Direct the user to review and enable all four PR Monitor hooks (`SessionStart`,

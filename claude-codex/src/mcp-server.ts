@@ -27,6 +27,7 @@ import {
 } from "../../runtime/monitor-session"
 import { createNodeGhRunner } from "../../runtime/node-gh"
 import {
+  AUTO_MERGE_PARAM_DESCRIPTION,
   buildMonitorToolDescription,
   MONITOR_ACTION_VALUES,
   MonitorAction,
@@ -193,13 +194,16 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
   const handle = async ({
     action,
     pr,
+    autoMerge,
   }: {
     action: MonitorAction
     pr: string | undefined
+    autoMerge: boolean | undefined
   }): Promise<string> => {
     const result = await monitorSession.execute({
       action,
       pr,
+      autoMerge,
       start:
         action === MonitorAction.start
           ? {
@@ -317,11 +321,12 @@ server.registerTool(
           "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready; " +
             "'all' allowed for stop/flush.",
         ),
+      autoMerge: z.boolean().optional().describe(AUTO_MERGE_PARAM_DESCRIPTION),
     },
   },
-  async ({ action, pr }, extra) => {
+  async ({ action, pr, autoMerge }, extra) => {
     try {
-      const text = await adapterFor(extra._meta).handle({ action, pr })
+      const text = await adapterFor(extra._meta).handle({ action, pr, autoMerge })
       return { content: [{ type: "text" as const, text }] }
     } catch (error) {
       log(String(error))

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `pr_monitor` `start` accepts an optional `autoMerge` boolean that enables or disables auto-merge for that monitor,
+  overriding config and `SESORI_PR_MONITOR_AUTO_MERGE`. Tool descriptions, skills, the Claude `/pr-monitor:watch`
+  command, and docs tell agents to set it only when the user explicitly asks.
+
 ## [0.5.1]
 
 ### Added

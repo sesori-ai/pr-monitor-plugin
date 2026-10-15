@@ -39,7 +39,8 @@ Later layers override earlier ones:
 1. built-in defaults;
 2. the global file;
 3. the first project file that parses; and
-4. the `SESORI_PR_MONITOR_AUTO_MERGE` environment variable, which affects `autoMerge` only.
+4. the `SESORI_PR_MONITOR_AUTO_MERGE` environment variable, which affects `autoMerge` only; and
+5. the `autoMerge` argument of a `start` call, which affects only that monitor.
 
 DeepSeek Harness skips the project layer. It resolves its global config root and auto-merge override from the
 immutable launch-provenance snapshot, accepting only inherited-process or Harness-home user values.
@@ -139,6 +140,10 @@ export SESORI_PR_MONITOR_AUTO_MERGE=true
 # macOS GUI apps, for this login session; restart the app afterwards
 launchctl setenv SESORI_PR_MONITOR_AUTO_MERGE true
 ```
+
+You can also ask the agent to turn auto-merge on or off for one PR, for example "watch this PR with auto-merge
+off". The agent passes `autoMerge: true` or `autoMerge: false` when it starts the monitor, and that choice wins over
+the files and the environment variable for that monitor only. Agents are told to set it only when you ask.
 
 ### When it merges
 
