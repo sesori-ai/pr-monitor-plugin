@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0]
+
 ### Added
 
 - `pr_monitor` `start` accepts an optional `autoMerge` boolean that enables or disables auto-merge for that monitor,
