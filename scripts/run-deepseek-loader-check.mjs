@@ -5,7 +5,7 @@ import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { delimiter, join, resolve } from "node:path"
 
-const deepSeekVersion = process.env["DEEPSEEK_VERSION"] ?? "0.1.5-rc.2"
+const deepSeekVersion = process.env["DEEPSEEK_VERSION"] ?? "0.2.0-rc.2"
 const pnpmVersion = process.env["PNPM_VERSION"] ?? "10.18.3"
 const temporaryDirectory = await mkdtemp(join(tmpdir(), "pr-monitor-deepseek-host-"))
 const hostDirectory = join(temporaryDirectory, "host")
@@ -84,7 +84,7 @@ if (args[0] === "api" && args[1] === "user") {
         const body = JSON.parse(Buffer.concat(chunks).toString("utf8"))
         requests.push({ path: request.url, body })
         const messages = JSON.stringify(body.messages)
-        const hasMonitorTool = body.tools?.some((tool) => tool.function?.name === "pr_monitor") === true
+        const hasMonitorTool = body.tools?.some((tool) => tool.name === "pr_monitor") === true
         const toolCall = hasMonitorTool && !messages.includes("Started monitoring sesori/example#42")
           ? {
               id: "call_pr_monitor_start",
@@ -96,42 +96,23 @@ if (args[0] === "api" && args[1] === "user") {
               ? { id: "call_pr_monitor_stop", arguments: '{"action":"stop","pr":"all"}' }
               : undefined
         const finalContent = hasMonitorTool ? "DEEPSEEK_PR_MONITOR_OK" : "PR Monitor probe"
-        const events = toolCall === undefined
-          ? [
-              JSON.stringify({
-                choices: [{ delta: { role: "assistant", content: null, reasoning_content: "" } }],
-              }),
-              JSON.stringify({ choices: [{ delta: { content: finalContent } }] }),
-              JSON.stringify({
-                choices: [{ delta: { content: "" }, finish_reason: "stop" }],
-                usage: { prompt_tokens: 10, completion_tokens: 3 },
-              }),
-              "[DONE]",
-            ]
-          : [
-              JSON.stringify({
-                choices: [{ delta: { role: "assistant", content: null, reasoning_content: "" } }],
-              }),
-              JSON.stringify({
-                choices: [{
-                  delta: {
-                    tool_calls: [{
-                      index: 0,
-                      id: toolCall.id,
-                      type: "function",
-                      function: { name: "pr_monitor", arguments: toolCall.arguments },
-                    }],
-                  },
-                }],
-              }),
-              JSON.stringify({
-                choices: [{ delta: { content: "" }, finish_reason: "tool_calls" }],
-                usage: { prompt_tokens: 10, completion_tokens: 5 },
-              }),
-              "[DONE]",
-            ]
+        // DeepSeek Harness 0.2 streams the Anthropic-style Messages API.
+        const block = toolCall === undefined
+          ? { type: "text", text: finalContent }
+          : { type: "tool_use", id: toolCall.id, name: "pr_monitor", input: JSON.parse(toolCall.arguments) }
+        const events = [
+          { type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 0 } } },
+          { type: "content_block_start", index: 0, content_block: block },
+          { type: "content_block_stop", index: 0 },
+          {
+            type: "message_delta",
+            delta: { stop_reason: toolCall === undefined ? "end_turn" : "tool_use" },
+            usage: { output_tokens: 3 },
+          },
+          { type: "message_stop" },
+        ]
         response.writeHead(200, { "content-type": "text/event-stream" })
-        response.end(events.map((event) => `data: ${event}\n\n`).join(""))
+        response.end(events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""))
       } catch (error) {
         fixtureFailure = error
         response.writeHead(500, { "content-type": "text/plain" })
@@ -189,9 +170,9 @@ if (args[0] === "api" && args[1] === "user") {
   }
   if (fixtureFailure !== undefined) throw fixtureFailure
   assert.ok(requests.length >= 4 && requests.length <= 8)
-  assert.ok(requests.every((request) => request.path === "/chat/completions"))
+  assert.ok(requests.every((request) => request.path === "/v1/messages"))
   const toolRequestIndex = requests.findIndex((request) =>
-    request.body?.tools?.some((tool) => tool.function?.name === "pr_monitor"),
+    request.body?.tools?.some((tool) => tool.name === "pr_monitor"),
   )
   assert.notEqual(toolRequestIndex, -1, "real root Agent did not expose pr_monitor")
   const laterMessages = requests.slice(toolRequestIndex + 1).map((request) => request.body?.messages)

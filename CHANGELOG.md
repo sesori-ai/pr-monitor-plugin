@@ -15,12 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overriding config and `SESORI_PR_MONITOR_AUTO_MERGE`. Tool descriptions, skills, the Claude `/pr-monitor:watch`
   command, and docs tell agents to set it only when the user explicitly asks.
 
+### Changed
+
+- DeepSeek Harness support now targets 0.2.0-rc.2 (Cordis 4.0.4); older Harness versions are no longer supported.
+  Reports are steered with a `pr-monitor` message source kind because Harness 0.2 removed the shared `plugin` kind,
+  and the host loader check speaks the Messages streaming API that Harness 0.2 uses.
+
 ### Fixed
 
-- `pack:check` installs the lockfile's exact `@deepseek-ai/*` versions, so newer upstream release-candidate peers no
-  longer break the DeepSeek consumer install.
-- A second `start` for a PR whose start is still in flight is refused instead of racing it, so a losing start can no
-  longer remove a ready label through its auto-merge startup reset.
+- Within one session, a second `start` for a PR whose start is still in flight is refused instead of racing it, so a
+  losing start can no longer remove a ready label through its auto-merge startup reset. Starts from separate sessions
+  are not coordinated.
 
 ## [0.5.1]
 

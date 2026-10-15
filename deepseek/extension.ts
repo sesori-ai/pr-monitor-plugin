@@ -35,6 +35,13 @@ import {
 
 const PLUGIN_NAME = "pr-monitor"
 
+// Harness 0.2 has no shared plugin source kind; each producer declares its own.
+declare module "@deepseek-ai/dsh-llm" {
+  interface MessageSourceMap {
+    "pr-monitor": { readonly kind: "pr-monitor" }
+  }
+}
+
 const SKILL_NAME = "monitor-pr"
 const SKILL_PROVIDER = "pr-monitor-bundled"
 
@@ -276,7 +283,7 @@ function registerAgentRuntime({
                       agent.steer(
                         createUserMessage({
                           content: [{ type: "text", text: report }],
-                          source: { kind: "plugin", plugin: PLUGIN_NAME },
+                          source: { kind: PLUGIN_NAME },
                         }),
                       )
                       return Promise.resolve()
@@ -349,8 +356,8 @@ export function registerDeepSeekMonitor({
         isStopping: () => stopping,
       })
     }
-    const register = ({ agent }: { agent: Agent }): void => {
-      if (stopping) return
+    const register = ({ agent }: { agent: Agent }): undefined => {
+      if (stopping) return undefined
       // A reused ID may still own an irreversible readiness operation. Do not
       // expose the successor tool until every prior mutation barrier drains.
       const replacements = [...runtimes.entries()].filter(
@@ -358,7 +365,7 @@ export function registerDeepSeekMonitor({
       )
       if (replacements.length === 0) {
         registerRuntime({ agent })
-        return
+        return undefined
       }
 
       const cleanupResults = Promise.allSettled(

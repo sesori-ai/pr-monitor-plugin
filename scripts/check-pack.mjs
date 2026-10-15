@@ -6,12 +6,6 @@ import { join, resolve } from "node:path"
 const npmCli = process.env["npm_execpath"]
 if (npmCli === undefined) throw new Error("npm_execpath is missing; run this check through npm run pack:check")
 const temporaryDirectory = await mkdtemp(join(tmpdir(), "pr-monitor-pack-"))
-// DeepSeek peers use caret prerelease ranges, so newer upstream rcs drift into a fresh install and conflict.
-// Install the whole locked @deepseek-ai tree to test against the supported host versions.
-const lockfile = JSON.parse(await readFile(new URL("../package-lock.json", import.meta.url), "utf8"))
-const lockedDeepSeekPackages = Object.entries(lockfile.packages)
-  .filter(([path]) => /^node_modules\/@deepseek-ai\/[^/]+$/.test(path))
-  .map(([path, entry]) => `${path.slice("node_modules/".length)}@${entry.version}`)
 
 function runNpm({ args, cwd = process.cwd(), encoding, stdio }) {
   return execFileSync(process.execPath, [npmCli, ...args], {
@@ -218,7 +212,14 @@ try {
   const deepSeekConsumer = await installConsumer({
     name: "deepseek",
     metadata: deepSeek,
-    dependencies: lockedDeepSeekPackages,
+    dependencies: [
+      "@deepseek-ai/cordis@4.0.4",
+      "@deepseek-ai/dsh-agent@0.2.0-rc.2",
+      "@deepseek-ai/dsh-launch-environment@0.2.0-rc.2",
+      "@deepseek-ai/dsh-llm@0.2.0-rc.2",
+      "@deepseek-ai/dsh-skill@0.2.0-rc.2",
+      "@deepseek-ai/dsh-tools@0.2.0-rc.2",
+    ],
     smoke:
       'const plugin = await import("@sesori/pr-monitor-deepseek");' +
       'const {createRequire} = await import("node:module");' +
