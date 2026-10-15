@@ -479,6 +479,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
   private async stop({ pr }: { pr: string }): Promise<MonitorActionResult<TConfig>> {
     if (pr === "all") {
       this.starting.clear()
+      await Promise.all(this.startupResets.values())
     } else {
       const target = parseTarget(pr)
       const key = "error" in target ? undefined : targetRegistryKey(target)

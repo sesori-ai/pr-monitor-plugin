@@ -690,7 +690,7 @@ test("stop cancels a stalled start so the target is not wedged", async () => {
   await session.stopAll({})
 })
 
-test("canceling a start waits for its in-flight ready-label reset before a successor fetches", async () => {
+for (const stopTarget of ["sesori/example#42", "all"]) test(`stop ${stopTarget} waits for an in-flight startup ready-label reset`, async () => {
   const runner = runnerHarness()
   const timers = timerHarness()
   const channel = channelHarness()
@@ -721,14 +721,14 @@ test("canceling a start waits for its in-flight ready-label reset before a succe
   while (!runner.state.calls.some((args) => args.some((arg) => arg.includes("/pulls/")))) {
     await new Promise((resolve) => setImmediate(resolve))
   }
-  const canceling = session.execute({ action: MonitorAction.stop, pr: "sesori/example#42" })
+  const canceling = session.execute({ action: MonitorAction.stop, pr: stopTarget })
   let canceled = false
   void canceling.then(() => (canceled = true))
   await new Promise((resolve) => setImmediate(resolve))
   assert.equal(canceled, false)
 
   releaseDelete()
-  assert.match((await canceling).text, /Canceled the pending start/)
+  await canceling
   assert.match((await resetting).text, /was canceled/)
   const successor = await session.execute({
     action: MonitorAction.start,

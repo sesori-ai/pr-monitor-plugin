@@ -33227,6 +33227,7 @@ ${resetRace.watch.statusLine()}` };
   async stop({ pr }) {
     if (pr === "all") {
       this.starting.clear();
+      await Promise.all(this.startupResets.values());
     } else {
       const target = parseTarget(pr);
       const key = "error" in target ? void 0 : targetRegistryKey(target);
