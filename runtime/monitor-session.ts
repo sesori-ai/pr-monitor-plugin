@@ -98,6 +98,9 @@ export class MonitorSession<TConfig extends MonitorConfig> {
   private readonly deps: Required<Pick<MonitorSessionDeps<TConfig>, "now" | "schedule" | "cancel">> &
     Omit<MonitorSessionDeps<TConfig>, "now" | "schedule" | "cancel">
   private readonly watches = new Map<string, WatchEntry<TConfig>>()
+  // Targets with a start in flight. A concurrent start (possibly with a different autoMerge override) is refused
+  // so only the call that will own the watch can perform startup label mutations.
+  private readonly starting = new Set<string>()
   // Destructive startup work happens before a watch can own the target. Keep
   // it in the session cleanup barrier so a reloaded successor cannot race it.
   private readonly startupMutations = new Set<Promise<void>>()
@@ -249,6 +252,30 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     const displayKey = targetKey(target)
     const existing = this.watches.get(key)
     if (existing) return { text: `Already monitoring ${displayKey} in this session.\n${existing.watch.statusLine()}` }
+    if (this.starting.has(key)) return { text: `A monitor for ${displayKey} is already starting in this session.` }
+    this.starting.add(key)
+    try {
+      return await this.startReserved({ target, key, displayKey, options, loadConfig, autoMerge })
+    } finally {
+      this.starting.delete(key)
+    }
+  }
+
+  private async startReserved({
+    target,
+    key,
+    displayKey,
+    options,
+    loadConfig,
+    autoMerge,
+  }: {
+    target: Target
+    key: string
+    displayKey: string
+    options: StartOptions<TConfig>
+    loadConfig: () => Promise<TConfig>
+    autoMerge: boolean | undefined
+  }): Promise<MonitorActionResult<TConfig>> {
     const lifecycleGeneration = this.lifecycleGeneration
 
     const preparationError = await options.prepare?.()

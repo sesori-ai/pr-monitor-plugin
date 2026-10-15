@@ -1632,6 +1632,9 @@ function buildMonitorToolDescription({
 var MonitorSession = class {
   deps;
   watches = /* @__PURE__ */ new Map();
+  // Targets with a start in flight. A concurrent start (possibly with a different autoMerge override) is refused
+  // so only the call that will own the watch can perform startup label mutations.
+  starting = /* @__PURE__ */ new Set();
   // Destructive startup work happens before a watch can own the target. Keep
   // it in the session cleanup barrier so a reloaded successor cannot race it.
   startupMutations = /* @__PURE__ */ new Set();
@@ -1753,6 +1756,22 @@ var MonitorSession = class {
     const existing = this.watches.get(key);
     if (existing) return { text: `Already monitoring ${displayKey} in this session.
 ${existing.watch.statusLine()}` };
+    if (this.starting.has(key)) return { text: `A monitor for ${displayKey} is already starting in this session.` };
+    this.starting.add(key);
+    try {
+      return await this.startReserved({ target, key, displayKey, options, loadConfig, autoMerge });
+    } finally {
+      this.starting.delete(key);
+    }
+  }
+  async startReserved({
+    target,
+    key,
+    displayKey,
+    options,
+    loadConfig,
+    autoMerge
+  }) {
     const lifecycleGeneration = this.lifecycleGeneration;
     const preparationError = await options.prepare?.();
     if (preparationError !== void 0) return { text: preparationError };

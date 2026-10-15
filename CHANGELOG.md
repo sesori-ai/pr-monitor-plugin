@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `pack:check` installs the lockfile's exact `@deepseek-ai/*` versions, so newer upstream release-candidate peers no
   longer break the DeepSeek consumer install.
+- A second `start` for a PR whose start is still in flight is refused instead of racing it, so a losing start can no
+  longer remove a ready label through its auto-merge startup reset.
 
 ## [0.5.1]
 

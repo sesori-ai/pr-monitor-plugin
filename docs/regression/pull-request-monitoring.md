@@ -80,7 +80,8 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 - An optional boolean `autoMerge` argument on `start` overrides config and environment for that watch only: `true`
   enables (including the startup ready-label reset) and `false` disables even when config or environment enables it.
   Omitting it leaves configuration in control. Every adapter forwards it, Hermes rejects non-boolean values, and tool
-  wording plus every shipped skill restrict it to explicit user requests and require reusing it on restart.
+  wording plus every shipped skill restrict it to explicit user requests and require reusing it on restart. A second
+  start for a PR whose start is still in flight is refused before any label mutation.
 - Only successfully completed readiness transitions performed by the monitor and successful `mark_ready` actions
   trigger one merge attempt. Observing an externally added ready label does not; neither does observing readiness
   after a failed/ambiguous label mutation. Both watched and standalone `mark_ready` are covered.
@@ -261,7 +262,8 @@ unprefixed local-user follow-ups, bot acknowledgements, review summaries, head c
 transient `UNKNOWN`, delivery failure, and casing. Cross lifecycle boundaries while a start, poll, label mutation, or
 report is in flight. Vary automatic/manual add, automatic withdrawal, mutation retry, existing/missing label, plain
 issue, and terminal PR. Exercise global/project inheritance, project override, enabled/disabled/invalid auto-merge
-environment values, start `autoMerge` true/false/omitted against each config state, stale-head withdrawal, startup reset drainage, definitive rejection, indeterminate-response
+environment values, start `autoMerge` true/false/omitted against each config state and enabled/disabled/invalid
+environment values, concurrent starts of one PR with conflicting overrides, stale-head withdrawal, startup reset drainage, definitive rejection, indeterminate-response
 reconciliation, cleanup failure, and marker-label failure.
 
 ## Failure Signals

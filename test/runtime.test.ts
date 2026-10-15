@@ -353,7 +353,7 @@ test("concurrent starts deduplicate after fetch and share authenticated identity
   ])
 
   assert.equal([first, second].filter((result) => result.start !== undefined).length, 1)
-  assert.equal([first.text, second.text].filter((text) => text.startsWith("Already monitoring")).length, 1)
+  assert.equal([first.text, second.text].filter((text) => /is already starting/.test(text)).length, 1)
   assert.equal(runner.state.userCalls, 1)
   assert.equal(timers.timers.length, 1)
   assert.equal(session.list().length, 1)
