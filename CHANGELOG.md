@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overriding config and `SESORI_PR_MONITOR_AUTO_MERGE`. Tool descriptions, skills, the Claude `/pr-monitor:watch`
   command, and docs tell agents to set it only when the user explicitly asks.
 
+### Fixed
+
+- `pack:check` installs the lockfile's exact `@deepseek-ai/*` versions, so newer upstream release-candidate peers no
+  longer break the DeepSeek consumer install.
+
 ## [0.5.1]
 
 ### Added

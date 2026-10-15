@@ -68,7 +68,7 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   work or use `mark_ready` when judgment says no action remains. Terminal reports preserve the label and omit that
   work instruction.
 
-### Config- and environment-gated auto-merge
+### Config-, environment-, and start-gated auto-merge
 
 - `autoMerge: true` may enable auto-merge in user-global or trusted project config. Global config is
   `~/.config/pr-monitor/config.json`, or `$XDG_CONFIG_HOME/pr-monitor/config.json` when that environment variable is
@@ -77,6 +77,10 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 - An explicitly defined `SESORI_PR_MONITOR_AUTO_MERGE` overrides both config layers: `true`/`1` enables and
   `false`/`0`/empty disables. Any other value fails closed, disables auto-merge, and logs a warning. DeepSeek resolves
   the value only from inherited-process or Harness-home user provenance, never the invoking project's `.env`.
+- An optional boolean `autoMerge` argument on `start` overrides config and environment for that watch only: `true`
+  enables (including the startup ready-label reset) and `false` disables even when config or environment enables it.
+  Omitting it leaves configuration in control. Every adapter forwards it, Hermes rejects non-boolean values, and tool
+  wording plus every shipped skill restrict it to explicit user requests and require reusing it on restart.
 - Only successfully completed readiness transitions performed by the monitor and successful `mark_ready` actions
   trigger one merge attempt. Observing an externally added ready label does not; neither does observing readiness
   after a failed/ambiguous label mutation. Both watched and standalone `mark_ready` are covered.
@@ -257,7 +261,7 @@ unprefixed local-user follow-ups, bot acknowledgements, review summaries, head c
 transient `UNKNOWN`, delivery failure, and casing. Cross lifecycle boundaries while a start, poll, label mutation, or
 report is in flight. Vary automatic/manual add, automatic withdrawal, mutation retry, existing/missing label, plain
 issue, and terminal PR. Exercise global/project inheritance, project override, enabled/disabled/invalid auto-merge
-environment values, stale-head withdrawal, startup reset drainage, definitive rejection, indeterminate-response
+environment values, start `autoMerge` true/false/omitted against each config state, stale-head withdrawal, startup reset drainage, definitive rejection, indeterminate-response
 reconciliation, cleanup failure, and marker-label failure.
 
 ## Failure Signals
