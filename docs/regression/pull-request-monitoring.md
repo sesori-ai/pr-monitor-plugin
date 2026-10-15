@@ -200,7 +200,7 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   watches. Canceled before-events retain the active watch.
 - `resources_discover` returns exactly one packaged skill path. It must not duplicate Pi manifest discovery.
 
-### DeepSeek Harness 0.2.0-rc.2 or newer
+### DeepSeek Harness 0.2.0-rc.2
 
 - A native Cordis bundle, not MCP, registers one `pr_monitor` tool inside every root Agent context. Child Agents do
   not receive an independent monitor runtime or timer.

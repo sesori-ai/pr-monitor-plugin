@@ -49,7 +49,7 @@ check, or configuration dump satisfies an actual-host/model-driven row.
   and standalone readiness mutations, timer fencing, plugin cleanup, package metadata, peer ranges, global config,
   and project-`.env` provenance rejection.
 - TypeScript checks compile against exact 0.2.0-rc.2 Agent/launch-environment/LLM/skill/tool declarations and
-  Cordis 4.0.2. The package declaration build emits only the reachable `core/`, `runtime/`, and `deepseek/` graph.
+  Cordis 4.0.4. The package declaration build emits only the reachable `core/`, `runtime/`, and `deepseek/` graph.
 - `npm run pack:check` packed, installed, imported, and type-checked the DeepSeek artifact in a disposable consumer.
   `npm run host:check:deepseek` installed Harness 0.2.0-rc.2 and pnpm into an isolated directory, added the packed
   artifact to an isolated Web profile, verified exactly one composed layer plus bundle/skill contents, booted the

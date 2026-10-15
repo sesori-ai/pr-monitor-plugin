@@ -3,7 +3,7 @@
 DeepSeek Harness bundle for [PR Monitor](https://github.com/sesori-ai/pr-monitor-plugin). It registers one
 conversation-scoped `pr_monitor` tool and one bundled `monitor-pr` skill.
 
-DeepSeek Harness remains a developer preview. This adapter targets **0.2.0-rc.2+**, Node.js 22.19+, and the long-lived
+DeepSeek Harness remains a developer preview. This adapter targets **0.2.0-rc.2**, Node.js 22.19+, and the long-lived
 Web profile.
 
 ## Install

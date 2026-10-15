@@ -81,7 +81,7 @@ omp plugin install @sesori/pr-monitor-pi
 
 ### DeepSeek Harness
 
-DeepSeek Harness support is a developer preview. It needs Harness 0.2.0-rc.2 or newer, Node.js 22.19 or newer, and
+DeepSeek Harness support is a developer preview. It needs Harness 0.2.0-rc.2, Node.js 22.19 or newer, and
 pnpm 10 or newer. Install the bundle into the long-lived Web profile, inspect the composed config, then start it:
 
 ```sh
