@@ -33,8 +33,10 @@ and restart anything missing.
 Auto-merge follows configuration by default. When the user explicitly asks to
 enable or disable auto-merge for a PR, pass `autoMerge: true` or
 `autoMerge: false` with `start`; that request overrides config and the
-environment for this monitor. Never set it without such a request. To change it
-on a running monitor, `stop` and `start` again with the requested value.
+environment for this monitor. When restarting a missing watch, pass the same
+explicit value again; if you no longer know it, ask the user before starting.
+Never set it without such a request. To change it on a running monitor, `stop`
+and `start` again with the requested value.
 
 If Codex reports that its delivery hook has not registered the conversation,
 monitoring has not started. Installing the plugin does not grant hook trust.

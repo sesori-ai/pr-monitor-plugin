@@ -38,7 +38,7 @@ Later layers override earlier ones:
 
 1. built-in defaults;
 2. the global file;
-3. the first project file that parses; and
+3. the first project file that parses;
 4. the `SESORI_PR_MONITOR_AUTO_MERGE` environment variable, which affects `autoMerge` only; and
 5. the `autoMerge` argument of a `start` call, which affects only that monitor.
 

@@ -38,7 +38,7 @@ export function buildMonitorToolDescription({
     `aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states ` +
     "whether the configured ready label is present and tells the agent to keep working or manually mark ready when " +
     "judgment says no action remains. Startup reports normally observe the existing label; when autoMerge is " +
-    "enabled by trusted config or SESORI_PR_MONITOR_AUTO_MERGE=true, start removes a pre-existing ready label and " +
+    "enabled by trusted config, SESORI_PR_MONITOR_AUTO_MERGE=true, or the start autoMerge argument, start removes a pre-existing ready label and " +
     "requires fresh assessment. " +
     "Assess current-head checks, automated reviews and feedback immediately, including after restarting a monitor. " +
     "Mark an already-settled PR " +
