@@ -1636,6 +1636,9 @@ var MonitorSession = class {
   // autoMerge override) is refused so only the owning call performs startup label mutations. stop/stopAll drop the
   // token, so a stalled start cannot wedge the target and cannot mutate or register once it resumes.
   starting = /* @__PURE__ */ new Map();
+  // In-flight startup ready-label resets by target. Cancellation and later starts await these so a canceled start's
+  // DELETE cannot land after a successor has fetched its baseline.
+  startupResets = /* @__PURE__ */ new Map();
   // Destructive startup work happens before a watch can own the target. Keep
   // it in the session cleanup barrier so a reloaded successor cannot race it.
   startupMutations = /* @__PURE__ */ new Set();
@@ -1767,6 +1770,7 @@ ${existing.watch.statusLine()}` };
     this.starting.set(key, token);
     const owned = () => this.starting.get(key) === token;
     try {
+      await this.startupResets.get(key);
       return await this.startReserved({ target, key, displayKey, options, loadConfig, autoMerge, owned });
     } finally {
       if (owned()) this.starting.delete(key);
@@ -1823,9 +1827,18 @@ ${raced.watch.statusLine()}` };
     let startupNotice;
     if (config.autoMerge && hasReadyLabel(initial, config.readyLabel)) {
       try {
-        await this.trackStartupMutation({
+        const reset = this.trackStartupMutation({
           mutation: () => removeReadyForHumanReview(this.deps.runGh, target, config.readyLabel)
         });
+        const drained = reset.then(
+          () => void 0,
+          () => void 0
+        );
+        this.startupResets.set(key, drained);
+        void drained.then(() => {
+          if (this.startupResets.get(key) === drained) this.startupResets.delete(key);
+        });
+        await reset;
       } catch (error) {
         return {
           text: `Cannot start monitor for ${displayKey}: auto-merge is enabled but the pre-existing ready label "${config.readyLabel}" could not be removed (${error.message}).`
@@ -1934,6 +1947,7 @@ ${resetRace.watch.statusLine()}` };
       const target = parseTarget(pr);
       const key = "error" in target ? void 0 : targetRegistryKey(target);
       if (key !== void 0 && !this.watches.has(key) && this.starting.delete(key)) {
+        await this.startupResets.get(key);
         return { text: `Canceled the pending start for ${targetKey(target)}.` };
       }
     }

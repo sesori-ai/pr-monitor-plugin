@@ -690,6 +690,58 @@ test("stop cancels a stalled start so the target is not wedged", async () => {
   await session.stopAll({})
 })
 
+test("canceling a start waits for its in-flight ready-label reset before a successor fetches", async () => {
+  const runner = runnerHarness()
+  const timers = timerHarness()
+  const channel = channelHarness()
+  let labelPresent = true
+  let releaseDelete!: () => void
+  const deleteHeld = new Promise<void>((resolve) => (releaseDelete = resolve))
+  const fetchedWithLabel: boolean[] = []
+  const runGh: GhRunner = async (args) => {
+    if (args[0] === "api" && args[1] === "graphql") {
+      fetchedWithLabel.push(labelPresent)
+      return payload({ labels: labelPresent ? ["ready-for-human-review"] : [] })
+    }
+    if (args.includes("DELETE")) {
+      await deleteHeld
+      labelPresent = false
+      return ""
+    }
+    return runner.runGh(args)
+  }
+  const session = new MonitorSession({ runGh, log: () => {}, schedule: timers.schedule, cancel: timers.cancel })
+  const resetting = session.execute({
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    autoMerge: true,
+    loadConfig: async () => config(),
+    start: startOptions(channel),
+  })
+  while (!runner.state.calls.some((args) => args.some((arg) => arg.includes("/pulls/")))) {
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  const canceling = session.execute({ action: MonitorAction.stop, pr: "sesori/example#42" })
+  let canceled = false
+  void canceling.then(() => (canceled = true))
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(canceled, false)
+
+  releaseDelete()
+  assert.match((await canceling).text, /Canceled the pending start/)
+  assert.match((await resetting).text, /was canceled/)
+  const successor = await session.execute({
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    autoMerge: false,
+    loadConfig: async () => config(),
+    start: startOptions(channel),
+  })
+  assert.notEqual(successor.start, undefined)
+  assert.deepEqual(fetchedWithLabel, [true, false])
+  await session.stopAll({})
+})
+
 test("ready handoff follows label success and the watched target identity", async () => {
   const runner = runnerHarness({ mergeable: "UNKNOWN" })
   const timers = timerHarness()

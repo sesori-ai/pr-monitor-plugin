@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   losing start can no longer remove a ready label through its auto-merge startup reset. Starts from separate sessions
   are not coordinated.
   `stop` (or session shutdown) cancels a pending start, so a stalled start cannot wedge its PR, and the canceled start
-  neither mutates labels nor registers a watch when it resumes.
+  neither registers a watch nor starts a label mutation when it resumes. Cancellation and later starts for the same PR
+  wait for an already-started startup ready-label reset to finish.
 
 ## [0.5.1]
 

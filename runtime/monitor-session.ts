@@ -102,6 +102,9 @@ export class MonitorSession<TConfig extends MonitorConfig> {
   // autoMerge override) is refused so only the owning call performs startup label mutations. stop/stopAll drop the
   // token, so a stalled start cannot wedge the target and cannot mutate or register once it resumes.
   private readonly starting = new Map<string, symbol>()
+  // In-flight startup ready-label resets by target. Cancellation and later starts await these so a canceled start's
+  // DELETE cannot land after a successor has fetched its baseline.
+  private readonly startupResets = new Map<string, Promise<void>>()
   // Destructive startup work happens before a watch can own the target. Keep
   // it in the session cleanup barrier so a reloaded successor cannot race it.
   private readonly startupMutations = new Set<Promise<void>>()
@@ -265,6 +268,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     this.starting.set(key, token)
     const owned = () => this.starting.get(key) === token
     try {
+      await this.startupResets.get(key)
       return await this.startReserved({ target, key, displayKey, options, loadConfig, autoMerge, owned })
     } finally {
       if (owned()) this.starting.delete(key)
@@ -336,9 +340,18 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     let startupNotice: string | undefined
     if (config.autoMerge && hasReadyLabel(initial, config.readyLabel)) {
       try {
-        await this.trackStartupMutation({
+        const reset = this.trackStartupMutation({
           mutation: () => removeReadyForHumanReview(this.deps.runGh, target, config.readyLabel),
         })
+        const drained = reset.then(
+          () => undefined,
+          () => undefined,
+        )
+        this.startupResets.set(key, drained)
+        void drained.then(() => {
+          if (this.startupResets.get(key) === drained) this.startupResets.delete(key)
+        })
+        await reset
       } catch (error) {
         return {
           text:
@@ -470,6 +483,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
       const target = parseTarget(pr)
       const key = "error" in target ? undefined : targetRegistryKey(target)
       if (key !== undefined && !this.watches.has(key) && this.starting.delete(key)) {
+        await this.startupResets.get(key)
         return { text: `Canceled the pending start for ${targetKey(target as Target)}.` }
       }
     }
