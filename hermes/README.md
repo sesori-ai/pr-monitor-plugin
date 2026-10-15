@@ -52,7 +52,8 @@ Global settings come from `~/.config/pr-monitor/config.json`. Project settings a
 working directory: `.pr-monitor.json`, then `.hermes/pr-monitor.json`, then `.opencode/pr-monitor.json`.
 
 To merge ready PRs automatically, set `autoMerge: true` in the global file or a trusted project file. Project config
-overrides global config, and an explicit `SESORI_PR_MONITOR_AUTO_MERGE` environment value overrides both. With
+overrides global config, an explicit `SESORI_PR_MONITOR_AUTO_MERGE` environment value overrides both, and a user-requested
+`autoMerge` argument on `start` overrides all of them for that monitor. With
 auto-merge on, starting a monitor removes any ready label that is already there and asks the agent to reassess.
 Merged PRs get an `automatically-merged` label. Read
 [configuration and auto-merge safety](../docs/configuration.md#auto-merge) before turning it on.

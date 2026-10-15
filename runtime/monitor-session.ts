@@ -98,6 +98,13 @@ export class MonitorSession<TConfig extends MonitorConfig> {
   private readonly deps: Required<Pick<MonitorSessionDeps<TConfig>, "now" | "schedule" | "cancel">> &
     Omit<MonitorSessionDeps<TConfig>, "now" | "schedule" | "cancel">
   private readonly watches = new Map<string, WatchEntry<TConfig>>()
+  // Targets with a start in flight, keyed to that start's token. A concurrent start (possibly with a different
+  // autoMerge override) is refused so only the owning call performs startup label mutations. stop/stopAll drop the
+  // token, so a stalled start cannot wedge the target and cannot mutate or register once it resumes.
+  private readonly starting = new Map<string, symbol>()
+  // In-flight startup ready-label resets by target. Cancellation and later starts await these so a canceled start's
+  // DELETE cannot land after a successor has fetched its baseline.
+  private readonly startupResets = new Map<string, Promise<void>>()
   // Destructive startup work happens before a watch can own the target. Keep
   // it in the session cleanup barrier so a reloaded successor cannot race it.
   private readonly startupMutations = new Set<Promise<void>>()
@@ -156,11 +163,14 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     pr,
     start,
     loadConfig,
+    autoMerge,
   }: {
     action: MonitorAction
     pr: string | undefined
     start?: StartOptions<TConfig>
     loadConfig?: () => Promise<TConfig>
+    // Per-start override requested by the user; wins over config and environment for that watch only.
+    autoMerge?: boolean
   }): Promise<MonitorActionResult<TConfig>> {
     const actionLoadConfig =
       loadConfig ??
@@ -172,7 +182,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
           return { text: "action 'start' requires a single explicit pr: 'owner/repo#123' or a PR URL." }
         }
         if (start === undefined) return { text: "Cannot start monitor: this host did not provide a report channel." }
-        return await this.start({ pr, options: start, loadConfig: actionLoadConfig })
+        return await this.start({ pr, options: start, loadConfig: actionLoadConfig, autoMerge })
       case MonitorAction.stop:
         if (!pr) return { text: "action 'stop' requires pr: 'owner/repo#123', a PR URL, or 'all'." }
         return await this.stop({ pr })
@@ -202,6 +212,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     channel?: StopNoticeChannel
   }): Promise<void> {
     this.lifecycleGeneration += 1
+    this.starting.clear()
     const entries = [...this.watches.values()]
     const startupMutations = [...this.startupMutations]
     const standaloneReadinessMutations = [...this.standaloneReadinessMutations]
@@ -233,10 +244,12 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     pr,
     options,
     loadConfig,
+    autoMerge,
   }: {
     pr: string
     options: StartOptions<TConfig>
     loadConfig: () => Promise<TConfig>
+    autoMerge: boolean | undefined
   }): Promise<MonitorActionResult<TConfig>> {
     const target = parseTarget(pr)
     if ("error" in target) return { text: target.error }
@@ -244,6 +257,41 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     const displayKey = targetKey(target)
     const existing = this.watches.get(key)
     if (existing) return { text: `Already monitoring ${displayKey} in this session.\n${existing.watch.statusLine()}` }
+    if (this.starting.has(key)) {
+      return {
+        text:
+          `A monitor for ${displayKey} is already starting in this session. ` +
+          `If that start is stuck, call stop for ${displayKey} to cancel it.`,
+      }
+    }
+    const token = Symbol(key)
+    this.starting.set(key, token)
+    const owned = () => this.starting.get(key) === token
+    try {
+      await this.startupResets.get(key)
+      return await this.startReserved({ target, key, displayKey, options, loadConfig, autoMerge, owned })
+    } finally {
+      if (owned()) this.starting.delete(key)
+    }
+  }
+
+  private async startReserved({
+    target,
+    key,
+    displayKey,
+    options,
+    loadConfig,
+    autoMerge,
+    owned,
+  }: {
+    target: Target
+    key: string
+    displayKey: string
+    options: StartOptions<TConfig>
+    loadConfig: () => Promise<TConfig>
+    autoMerge: boolean | undefined
+    owned: () => boolean
+  }): Promise<MonitorActionResult<TConfig>> {
     const lifecycleGeneration = this.lifecycleGeneration
 
     const preparationError = await options.prepare?.()
@@ -252,6 +300,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     let config: TConfig
     try {
       config = await loadConfig()
+      if (autoMerge !== undefined) config = { ...config, autoMerge }
     } catch (error) {
       return {
         text: `Cannot start monitor for ${displayKey}: loading configuration failed (${(error as Error).message}).`,
@@ -280,6 +329,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     if (this.lifecycleGeneration !== lifecycleGeneration) {
       return { text: `Monitor session ended while ${displayKey} was starting; no active monitor remains.` }
     }
+    if (!owned()) return { text: `Start of ${displayKey} was canceled; no active monitor remains.` }
     if (initial.state !== "OPEN") {
       return { text: `Cannot start monitor: ${displayKey} is already ${initial.state}.` }
     }
@@ -290,9 +340,18 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     let startupNotice: string | undefined
     if (config.autoMerge && hasReadyLabel(initial, config.readyLabel)) {
       try {
-        await this.trackStartupMutation({
+        const reset = this.trackStartupMutation({
           mutation: () => removeReadyForHumanReview(this.deps.runGh, target, config.readyLabel),
         })
+        const drained = reset.then(
+          () => undefined,
+          () => undefined,
+        )
+        this.startupResets.set(key, drained)
+        void drained.then(() => {
+          if (this.startupResets.get(key) === drained) this.startupResets.delete(key)
+        })
+        await reset
       } catch (error) {
         return {
           text:
@@ -310,6 +369,9 @@ export class MonitorSession<TConfig extends MonitorConfig> {
             `Monitor session ended while ${displayKey} was starting. ${startupNotice} ` +
             "No active monitor remains.",
         }
+      }
+      if (!owned()) {
+        return { text: `Start of ${displayKey} was canceled. ${startupNotice} No active monitor remains.` }
       }
       const resetRace = this.watches.get(key)
       if (resetRace) {
@@ -415,6 +477,17 @@ export class MonitorSession<TConfig extends MonitorConfig> {
   }
 
   private async stop({ pr }: { pr: string }): Promise<MonitorActionResult<TConfig>> {
+    if (pr === "all") {
+      this.starting.clear()
+      await Promise.all(this.startupResets.values())
+    } else {
+      const target = parseTarget(pr)
+      const key = "error" in target ? undefined : targetRegistryKey(target)
+      if (key !== undefined && !this.watches.has(key) && this.starting.delete(key)) {
+        await this.startupResets.get(key)
+        return { text: `Canceled the pending start for ${targetKey(target as Target)}.` }
+      }
+    }
     const selected = this.select({ pr })
     if ("error" in selected) return { text: selected.error }
     if (selected.length === 0) return { text: "No active monitors in this session." }

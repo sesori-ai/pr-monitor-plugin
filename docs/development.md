@@ -50,7 +50,7 @@ Current-host checks can also run independently:
 ```sh
 OPENCODE_CLI="$(command -v opencode)" npm run host:check:opencode
 OMP_VERSION=18.0.4 npm run host:check:omp
-DEEPSEEK_VERSION=0.1.5-rc.2 npm run host:check:deepseek
+DEEPSEEK_VERSION=0.2.0-rc.2 npm run host:check:deepseek
 ```
 
 Use the current supported OMP and DeepSeek Harness versions when they change.

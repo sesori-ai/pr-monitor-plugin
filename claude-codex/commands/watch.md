@@ -7,6 +7,9 @@ Start a background PR monitor with the pr_monitor tool (action "start").
 
 PR to monitor: $ARGUMENTS
 
+If the user asked to enable or disable auto-merge, pass `autoMerge: true` or `autoMerge: false`; otherwise omit it
+so configuration decides.
+
 If no PR was given above, resolve the current branch's open PR with `gh pr view --json url -q .url` and monitor that one. The pr argument passed to the tool must be explicit — `owner/repo#123` or a full PR URL.
 
 After starting, briefly confirm what is being watched and keep working on whatever you were doing. `[PR Monitor]`

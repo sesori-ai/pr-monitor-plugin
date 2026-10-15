@@ -167,7 +167,7 @@ Hermes plugin version is part of the lockstep release check. Rebuild and commit 
 - **DeepSeek Harness lifecycle** — the native Cordis bundle listens for `agent/created`, ignores child Agents,
   registers each tool/runtime with `agent.ctx.effect`, and stops watches on root-Agent disposal or plugin unload.
   Process restart does not restore watches. DeepSeek Harness is a developer preview; source and package contracts
-  target 0.1.5-rc.2. Harness exposes no project-trust signal, so the adapter loads only user-global config and
+  target 0.2.0-rc.2. Harness exposes no project-trust signal, so the adapter loads only user-global config and
   inherited-process or Harness-home user-provenance environment values. Invoking-project `.env` and config files are
   excluded; never add project-controlled inputs without trustworthy host evidence. The bundled skill provider is
   host-global, so its canonical instructions tell delegated children without `pr_monitor` to hand ownership back to
@@ -200,7 +200,8 @@ Hermes plugin version is part of the lockstep release check. Rebuild and commit 
   it. `unmark_ready` treats a missing label as success. Standalone actions need no active monitor.
 - **Configurable auto-merge** (`core/merge.ts`) — `autoMerge: true` in user-global or trusted project config enables
   the feature; an explicitly defined `SESORI_PR_MONITOR_AUTO_MERGE=true|false|1|0` overrides both layers and invalid
-  values fail closed. Automatic readiness and watched/standalone `mark_ready` first retain the ready label, then make
+  values fail closed. A user-requested `autoMerge` boolean on `start` overrides all of them for that watch only;
+  tool wording and skills restrict it to explicit user requests. Automatic readiness and watched/standalone `mark_ready` first retain the ready label, then make
   one squash-merge attempt fenced to the accepted head SHA. Standalone `mark_ready` revalidates the captured head
   after labeling and best-effort withdraws readiness if it changed or cannot be proven safe; failed cleanup reports
   that readiness remains. Squash commit title is the PR title

@@ -16,6 +16,11 @@ export const MONITOR_ACTION_VALUES = [
   MonitorAction.unmarkReady,
 ] as const
 
+export const AUTO_MERGE_PARAM_DESCRIPTION =
+  "start only. Explicitly enable (true) or disable (false) auto-merge for this monitor, overriding autoMerge " +
+  "config and SESORI_PR_MONITOR_AUTO_MERGE. Set it only when the user asks to enable or disable auto-merge; " +
+  "omit it otherwise so configuration decides."
+
 export function buildMonitorToolDescription({
   delivery,
   configPath,
@@ -33,7 +38,7 @@ export function buildMonitorToolDescription({
     `aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states ` +
     "whether the configured ready label is present and tells the agent to keep working or manually mark ready when " +
     "judgment says no action remains. Startup reports normally observe the existing label; when autoMerge is " +
-    "enabled by trusted config or SESORI_PR_MONITOR_AUTO_MERGE=true, start removes a pre-existing ready label and " +
+    "enabled by trusted config, SESORI_PR_MONITOR_AUTO_MERGE=true, or the start autoMerge argument, start removes a pre-existing ready label and " +
     "requires fresh assessment. " +
     "Assess current-head checks, automated reviews and feedback immediately, including after restarting a monitor. " +
     "Mark an already-settled PR " +
@@ -53,6 +58,7 @@ export function buildMonitorToolDescription({
     "Ready actions do not require an active monitor. The PR must be `owner/repo#123` or a " +
     `full URL; \`all\` is allowed only for stop/flush. Global tuning lives in ` +
     `~/.config/pr-monitor/config.json; ${configPath} overrides it. An explicit SESORI_PR_MONITOR_AUTO_MERGE ` +
-    `environment value overrides autoMerge config. ${lifecycle}`
+    `environment value overrides autoMerge config; the start autoMerge argument overrides both for that monitor and ` +
+    `must be set only on explicit user request. ${lifecycle}`
   )
 }

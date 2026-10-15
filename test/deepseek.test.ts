@@ -318,7 +318,7 @@ test("DeepSeek registers one root-scoped monitor tool and bundled skill", async 
   await waitFor({ condition: () => root.messages.length === 1 })
   const initial = root.messages[0]?.message
   assert.equal(initial?.role, "user")
-  assert.deepEqual(initial?.source, { kind: "plugin", plugin: "pr-monitor" })
+  assert.deepEqual(initial?.source, { kind: "pr-monitor" })
   assert.match(initial?.content[0]?.type === "text" ? initial.content[0].text : "", /^\[PR Monitor\]/)
 
   assert.match(await executeTool({ tool, agent: root.agent, action: MonitorAction.status }), /sesori\/example#42/)

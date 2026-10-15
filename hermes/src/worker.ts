@@ -5,7 +5,7 @@ import { isAbsolute, resolve } from "node:path"
 import { loadMonitorConfig } from "../../core/config"
 import { MonitorSession, InitialAnnouncementMode } from "../../runtime/monitor-session"
 import { createNodeGhRunner } from "../../runtime/node-gh"
-import { buildMonitorToolDescription, MONITOR_ACTION_VALUES, type MonitorAction } from "../../runtime/tool"
+import { AUTO_MERGE_PARAM_DESCRIPTION, buildMonitorToolDescription, MONITOR_ACTION_VALUES, type MonitorAction } from "../../runtime/tool"
 
 const description = buildMonitorToolDescription({
   delivery: "Background monitoring requires Hermes Desktop/TUI: reports start a turn in the owning conversation when idle and inject into its active turn when busy. Standalone mark_ready/unmark_ready actions need no background-delivery route and work on other Hermes hosts.",
@@ -18,6 +18,7 @@ const schema = {
   parameters: { type: "object", properties: {
     action: { type: "string", enum: MONITOR_ACTION_VALUES },
     pr: { type: "string", description: "Explicit owner/repo#123 or GitHub PR URL; all only for stop/flush." },
+    autoMerge: { type: "boolean", description: AUTO_MERGE_PARAM_DESCRIPTION },
   }, required: ["action"], additionalProperties: false },
 }
 
@@ -67,11 +68,13 @@ if (process.argv.includes("--describe")) {
     const id = message.id
     if (!MONITOR_ACTION_VALUES.includes(message.action as MonitorAction) ||
         (message.pr !== undefined && typeof message.pr !== "string") ||
+        (message.autoMerge !== undefined && typeof message.autoMerge !== "boolean") ||
         typeof message.cwd !== "string" || !isAbsolute(message.cwd)) {
       send({ type: "result", id, error: "Invalid monitor action or PR" }); return
     }
     void session.execute({
       action: message.action as MonitorAction, pr: message.pr as string | undefined,
+      autoMerge: message.autoMerge as boolean | undefined,
       loadConfig: () => loadConfig(message.cwd as string),
       start: { announcementMode: InitialAnnouncementMode.background, createChannel: () => ({ deliver }) },
     }).then(result => send({ type: "result", id, text: result.text + (result.start

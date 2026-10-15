@@ -92,10 +92,10 @@ skills/monitor-pr/SKILL.md
 Install into DeepSeek Harness's long-lived Web profile:
 
 ```sh
-npx @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add @sesori/pr-monitor-deepseek
+npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add @sesori/pr-monitor-deepseek
 ```
 
-Required floor: DeepSeek Harness 0.1.5-rc.2 on Node.js 22.19+, plus authenticated `gh`. Harness is a developer
+Required version: DeepSeek Harness 0.2.0-rc.2 on Node.js 22.19+, plus authenticated `gh`. Harness is a developer
 preview, so breaking host changes require renewed loader and model-driven evidence.
 
 The tarball contains exactly:
@@ -257,7 +257,7 @@ persistent watch registry, credential file, copied repository skill, or host-spe
   MCP/hook checks on the CI host.
 - **Pi:** minimum/current loaders on Linux and macOS plus Windows loader/package smoke.
 - **OMP:** minimum/current compatibility loaders on Linux and macOS plus Windows loader/package smoke.
-- **DeepSeek Harness:** 0.1.5-rc.2/current Web-profile composition and model-driven Agent tool/skill delivery on
+- **DeepSeek Harness:** 0.2.0-rc.2 Web-profile composition and model-driven Agent tool/skill delivery on
   Linux and macOS plus Windows package/profile smoke.
 - **Release contents:** all three tarballs, the Claude plugin root, lockstep metadata, generated-skill equality,
   license equality, dependency closure, Cordis patch composition, and reproducible bundles from one clean commit.

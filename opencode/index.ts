@@ -12,6 +12,7 @@ import {
   type MonitorActionResult,
 } from "../runtime/monitor-session"
 import {
+  AUTO_MERGE_PARAM_DESCRIPTION,
   buildMonitorToolDescription,
   MONITOR_ACTION_VALUES,
   MonitorAction,
@@ -138,12 +139,14 @@ export const PrMonitorPlugin: Plugin = async ({ client, directory, worktree, $ }
               "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready; " +
                 "'all' allowed for stop/flush.",
             ),
+          autoMerge: tool.schema.boolean().optional().describe(AUTO_MERGE_PARAM_DESCRIPTION),
         },
         async execute(args, context) {
           const session = getSession({ sessionID: context.sessionID })
           const result = await session.execute({
             action: args.action,
             pr: args.pr,
+            autoMerge: args.autoMerge,
             start:
               args.action === MonitorAction.start
                 ? {

@@ -27,12 +27,20 @@ import {
 import { createNodeGhRunner } from "../runtime/node-gh"
 import { packageSkillDirectory } from "../runtime/package-skill"
 import {
+  AUTO_MERGE_PARAM_DESCRIPTION,
   buildMonitorToolDescription,
   MONITOR_ACTION_VALUES,
   MonitorAction,
 } from "../runtime/tool"
 
 const PLUGIN_NAME = "pr-monitor"
+
+// Harness 0.2 has no shared plugin source kind; each producer declares its own.
+declare module "@deepseek-ai/dsh-llm" {
+  interface MessageSourceMap {
+    "pr-monitor": { readonly kind: "pr-monitor" }
+  }
+}
 
 const SKILL_NAME = "monitor-pr"
 const SKILL_PROVIDER = "pr-monitor-bundled"
@@ -243,6 +251,10 @@ function registerAgentRuntime({
             "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready; " +
             "'all' allowed for stop/flush.",
         },
+        autoMerge: {
+          type: "boolean",
+          description: AUTO_MERGE_PARAM_DESCRIPTION,
+        },
       },
       output: {
         schema: { type: "string" },
@@ -255,6 +267,7 @@ function registerAgentRuntime({
         const result = await monitor.execute({
           action: args.action,
           pr: args.pr,
+          autoMerge: args.autoMerge,
           loadConfig,
           start:
             args.action === MonitorAction.start
@@ -270,7 +283,7 @@ function registerAgentRuntime({
                       agent.steer(
                         createUserMessage({
                           content: [{ type: "text", text: report }],
-                          source: { kind: "plugin", plugin: PLUGIN_NAME },
+                          source: { kind: PLUGIN_NAME },
                         }),
                       )
                       return Promise.resolve()
@@ -343,8 +356,8 @@ export function registerDeepSeekMonitor({
         isStopping: () => stopping,
       })
     }
-    const register = ({ agent }: { agent: Agent }): void => {
-      if (stopping) return
+    const register = ({ agent }: { agent: Agent }): undefined => {
+      if (stopping) return undefined
       // A reused ID may still own an irreversible readiness operation. Do not
       // expose the successor tool until every prior mutation barrier drains.
       const replacements = [...runtimes.entries()].filter(
@@ -352,7 +365,7 @@ export function registerDeepSeekMonitor({
       )
       if (replacements.length === 0) {
         registerRuntime({ agent })
-        return
+        return undefined
       }
 
       const cleanupResults = Promise.allSettled(

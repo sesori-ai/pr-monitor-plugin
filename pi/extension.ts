@@ -16,6 +16,7 @@ import {
 } from "../runtime/monitor-session"
 import { createNodeGhRunner } from "../runtime/node-gh"
 import {
+  AUTO_MERGE_PARAM_DESCRIPTION,
   buildMonitorToolDescription,
   MONITOR_ACTION_VALUES,
   MonitorAction,
@@ -136,11 +137,13 @@ export function registerPiMonitor({
             "'all' allowed for stop/flush.",
         }),
       ),
+      autoMerge: Type.Optional(Type.Boolean({ description: AUTO_MERGE_PARAM_DESCRIPTION })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, context) {
       const result = await getSession().execute({
         action: params.action,
         pr: params.pr,
+        autoMerge: params.autoMerge,
         loadConfig: () => loadConfigForContext({ context }),
         start:
           params.action === MonitorAction.start

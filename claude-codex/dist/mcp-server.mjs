@@ -32902,19 +32902,27 @@ var MONITOR_ACTION_VALUES = [
   "mark_ready" /* markReady */,
   "unmark_ready" /* unmarkReady */
 ];
+var AUTO_MERGE_PARAM_DESCRIPTION = "start only. Explicitly enable (true) or disable (false) auto-merge for this monitor, overriding autoMerge config and SESORI_PR_MONITOR_AUTO_MERGE. Set it only when the user asks to enable or disable auto-merge; omit it otherwise so configuration decides.";
 function buildMonitorToolDescription({
   delivery,
   configPath,
   lifecycle,
   waiting
 }) {
-  return `Monitor a GitHub PR in the background. Detects head changes, CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states whether the configured ready label is present and tells the agent to keep working or manually mark ready when judgment says no action remains. Startup reports normally observe the existing label; when autoMerge is enabled by trusted config or SESORI_PR_MONITOR_AUTO_MERGE=true, start removes a pre-existing ready label and requires fresh assessment. Assess current-head checks, automated reviews and feedback immediately, including after restarting a monitor. Mark an already-settled PR ready without waiting for a new event, but never infer readiness from empty results after creation or a fresh push. On later activity, the monitor automatically adds readiness when CI is passing (or absent), mergeability is definite, and every feedback channel ends in a correctly prefixed local-account reply. It withdraws readiness on later commits, relevant comments, CI regression, or conflict. A newly failing check (when flushOnCiFailure is enabled), readiness withdrawal, merge conflict, or terminal state skips debounce. The monitor owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a later clean assessment). With autoMerge enabled, automatic readiness and mark_ready also make one squash-merge attempt for the accepted head using only the PR title; rejected or unknown outcomes keep readiness and are not retried automatically, while a changed head cancels standalone readiness. Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Global tuning lives in ~/.config/pr-monitor/config.json; ${configPath} overrides it. An explicit SESORI_PR_MONITOR_AUTO_MERGE environment value overrides autoMerge config. ${lifecycle}`;
+  return `Monitor a GitHub PR in the background. Detects head changes, CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states whether the configured ready label is present and tells the agent to keep working or manually mark ready when judgment says no action remains. Startup reports normally observe the existing label; when autoMerge is enabled by trusted config, SESORI_PR_MONITOR_AUTO_MERGE=true, or the start autoMerge argument, start removes a pre-existing ready label and requires fresh assessment. Assess current-head checks, automated reviews and feedback immediately, including after restarting a monitor. Mark an already-settled PR ready without waiting for a new event, but never infer readiness from empty results after creation or a fresh push. On later activity, the monitor automatically adds readiness when CI is passing (or absent), mergeability is definite, and every feedback channel ends in a correctly prefixed local-account reply. It withdraws readiness on later commits, relevant comments, CI regression, or conflict. A newly failing check (when flushOnCiFailure is enabled), readiness withdrawal, merge conflict, or terminal state skips debounce. The monitor owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a later clean assessment). With autoMerge enabled, automatic readiness and mark_ready also make one squash-merge attempt for the accepted head using only the PR title; rejected or unknown outcomes keep readiness and are not retried automatically, while a changed head cancels standalone readiness. Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Global tuning lives in ~/.config/pr-monitor/config.json; ${configPath} overrides it. An explicit SESORI_PR_MONITOR_AUTO_MERGE environment value overrides autoMerge config; the start autoMerge argument overrides both for that monitor and must be set only on explicit user request. ${lifecycle}`;
 }
 
 // runtime/monitor-session.ts
 var MonitorSession = class {
   deps;
   watches = /* @__PURE__ */ new Map();
+  // Targets with a start in flight, keyed to that start's token. A concurrent start (possibly with a different
+  // autoMerge override) is refused so only the owning call performs startup label mutations. stop/stopAll drop the
+  // token, so a stalled start cannot wedge the target and cannot mutate or register once it resumes.
+  starting = /* @__PURE__ */ new Map();
+  // In-flight startup ready-label resets by target. Cancellation and later starts await these so a canceled start's
+  // DELETE cannot land after a successor has fetched its baseline.
+  startupResets = /* @__PURE__ */ new Map();
   // Destructive startup work happens before a watch can own the target. Keep
   // it in the session cleanup barrier so a reloaded successor cannot race it.
   startupMutations = /* @__PURE__ */ new Set();
@@ -32965,7 +32973,8 @@ var MonitorSession = class {
     action,
     pr,
     start,
-    loadConfig
+    loadConfig,
+    autoMerge
   }) {
     const actionLoadConfig = loadConfig ?? this.deps.loadConfig ?? (() => Promise.reject(new Error("this host did not provide a configuration loader")));
     switch (action) {
@@ -32974,7 +32983,7 @@ var MonitorSession = class {
           return { text: "action 'start' requires a single explicit pr: 'owner/repo#123' or a PR URL." };
         }
         if (start === void 0) return { text: "Cannot start monitor: this host did not provide a report channel." };
-        return await this.start({ pr, options: start, loadConfig: actionLoadConfig });
+        return await this.start({ pr, options: start, loadConfig: actionLoadConfig, autoMerge });
       case "stop" /* stop */:
         if (!pr) return { text: "action 'stop' requires pr: 'owner/repo#123', a PR URL, or 'all'." };
         return await this.stop({ pr });
@@ -33000,6 +33009,7 @@ var MonitorSession = class {
     channel = "normal" /* normal */
   }) {
     this.lifecycleGeneration += 1;
+    this.starting.clear();
     const entries = [...this.watches.values()];
     const startupMutations = [...this.startupMutations];
     const standaloneReadinessMutations = [...this.standaloneReadinessMutations];
@@ -33025,7 +33035,8 @@ var MonitorSession = class {
   async start({
     pr,
     options,
-    loadConfig
+    loadConfig,
+    autoMerge
   }) {
     const target = parseTarget(pr);
     if ("error" in target) return { text: target.error };
@@ -33034,12 +33045,37 @@ var MonitorSession = class {
     const existing = this.watches.get(key);
     if (existing) return { text: `Already monitoring ${displayKey} in this session.
 ${existing.watch.statusLine()}` };
+    if (this.starting.has(key)) {
+      return {
+        text: `A monitor for ${displayKey} is already starting in this session. If that start is stuck, call stop for ${displayKey} to cancel it.`
+      };
+    }
+    const token = Symbol(key);
+    this.starting.set(key, token);
+    const owned = () => this.starting.get(key) === token;
+    try {
+      await this.startupResets.get(key);
+      return await this.startReserved({ target, key, displayKey, options, loadConfig, autoMerge, owned });
+    } finally {
+      if (owned()) this.starting.delete(key);
+    }
+  }
+  async startReserved({
+    target,
+    key,
+    displayKey,
+    options,
+    loadConfig,
+    autoMerge,
+    owned
+  }) {
     const lifecycleGeneration = this.lifecycleGeneration;
     const preparationError = await options.prepare?.();
     if (preparationError !== void 0) return { text: preparationError };
     let config2;
     try {
       config2 = await loadConfig();
+      if (autoMerge !== void 0) config2 = { ...config2, autoMerge };
     } catch (error51) {
       return {
         text: `Cannot start monitor for ${displayKey}: loading configuration failed (${error51.message}).`
@@ -33065,6 +33101,7 @@ ${existing.watch.statusLine()}` };
     if (this.lifecycleGeneration !== lifecycleGeneration) {
       return { text: `Monitor session ended while ${displayKey} was starting; no active monitor remains.` };
     }
+    if (!owned()) return { text: `Start of ${displayKey} was canceled; no active monitor remains.` };
     if (initial.state !== "OPEN") {
       return { text: `Cannot start monitor: ${displayKey} is already ${initial.state}.` };
     }
@@ -33074,9 +33111,18 @@ ${raced.watch.statusLine()}` };
     let startupNotice;
     if (config2.autoMerge && hasReadyLabel(initial, config2.readyLabel)) {
       try {
-        await this.trackStartupMutation({
+        const reset = this.trackStartupMutation({
           mutation: () => removeReadyForHumanReview(this.deps.runGh, target, config2.readyLabel)
         });
+        const drained = reset.then(
+          () => void 0,
+          () => void 0
+        );
+        this.startupResets.set(key, drained);
+        void drained.then(() => {
+          if (this.startupResets.get(key) === drained) this.startupResets.delete(key);
+        });
+        await reset;
       } catch (error51) {
         return {
           text: `Cannot start monitor for ${displayKey}: auto-merge is enabled but the pre-existing ready label "${config2.readyLabel}" could not be removed (${error51.message}).`
@@ -33088,6 +33134,9 @@ ${raced.watch.statusLine()}` };
         return {
           text: `Monitor session ended while ${displayKey} was starting. ${startupNotice} No active monitor remains.`
         };
+      }
+      if (!owned()) {
+        return { text: `Start of ${displayKey} was canceled. ${startupNotice} No active monitor remains.` };
       }
       const resetRace = this.watches.get(key);
       if (resetRace) {
@@ -33176,6 +33225,17 @@ ${resetRace.watch.statusLine()}` };
     return [entry];
   }
   async stop({ pr }) {
+    if (pr === "all") {
+      this.starting.clear();
+      await Promise.all(this.startupResets.values());
+    } else {
+      const target = parseTarget(pr);
+      const key = "error" in target ? void 0 : targetRegistryKey(target);
+      if (key !== void 0 && !this.watches.has(key) && this.starting.delete(key)) {
+        await this.startupResets.get(key);
+        return { text: `Canceled the pending start for ${targetKey(target)}.` };
+      }
+    }
     const selected = this.select({ pr });
     if ("error" in selected) return { text: selected.error };
     if (selected.length === 0) return { text: "No active monitors in this session." };
@@ -33651,11 +33711,13 @@ Still monitoring it, but it no longer holds this session open; new activity re-o
   };
   const handle = async ({
     action,
-    pr
+    pr,
+    autoMerge
   }) => {
     const result = await monitorSession.execute({
       action,
       pr,
+      autoMerge,
       start: action === "start" /* start */ ? {
         prepare: prepareStart,
         announcementMode: "await_delivery" /* awaitDelivery */,
@@ -33729,7 +33791,7 @@ process5.on("SIGTERM", shutdown);
 process5.on("SIGINT", shutdown);
 claimSpool(claudePid);
 collectDeadSpools(claudePid);
-var server = new McpServer({ name: "pr-monitor", version: "0.5.1" });
+var server = new McpServer({ name: "pr-monitor", version: "0.6.0" });
 server.registerTool(
   "pr_monitor",
   {
@@ -33743,12 +33805,13 @@ server.registerTool(
       action: external_exports.enum(MONITOR_ACTION_VALUES).describe("What to do"),
       pr: external_exports.string().optional().describe(
         "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready; 'all' allowed for stop/flush."
-      )
+      ),
+      autoMerge: external_exports.boolean().optional().describe(AUTO_MERGE_PARAM_DESCRIPTION)
     }
   },
-  async ({ action, pr }, extra) => {
+  async ({ action, pr, autoMerge }, extra) => {
     try {
-      const text = await adapterFor(extra._meta).handle({ action, pr });
+      const text = await adapterFor(extra._meta).handle({ action, pr, autoMerge });
       return { content: [{ type: "text", text }] };
     } catch (error51) {
       log(String(error51));

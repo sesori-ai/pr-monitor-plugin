@@ -213,12 +213,12 @@ try {
     name: "deepseek",
     metadata: deepSeek,
     dependencies: [
-      "@deepseek-ai/cordis@4.0.2",
-      "@deepseek-ai/dsh-agent@0.1.5-rc.2",
-      "@deepseek-ai/dsh-launch-environment@0.1.5-rc.2",
-      "@deepseek-ai/dsh-llm@0.1.5-rc.2",
-      "@deepseek-ai/dsh-skill@0.1.5-rc.2",
-      "@deepseek-ai/dsh-tools@0.1.5-rc.2",
+      "@deepseek-ai/cordis@4.0.4",
+      "@deepseek-ai/dsh-agent@0.2.0-rc.2",
+      "@deepseek-ai/dsh-launch-environment@0.2.0-rc.2",
+      "@deepseek-ai/dsh-llm@0.2.0-rc.2",
+      "@deepseek-ai/dsh-skill@0.2.0-rc.2",
+      "@deepseek-ai/dsh-tools@0.2.0-rc.2",
     ],
     smoke:
       'const plugin = await import("@sesori/pr-monitor-deepseek");' +

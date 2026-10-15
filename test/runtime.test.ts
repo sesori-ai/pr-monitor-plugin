@@ -353,7 +353,7 @@ test("concurrent starts deduplicate after fetch and share authenticated identity
   ])
 
   assert.equal([first, second].filter((result) => result.start !== undefined).length, 1)
-  assert.equal([first.text, second.text].filter((text) => text.startsWith("Already monitoring")).length, 1)
+  assert.equal([first.text, second.text].filter((text) => /is already starting/.test(text)).length, 1)
   assert.equal(runner.state.userCalls, 1)
   assert.equal(timers.timers.length, 1)
   assert.equal(session.list().length, 1)
@@ -622,6 +622,124 @@ test("persistent shutdown notices use the persistent channel and clear every tim
     assert.match(harness.persisted[0]!, /Monitor stopped for test/)
     assert.match(harness.persisted[0]!, /Ready for human review: YES|Ready for human review: NO/)
   }
+})
+
+test("start autoMerge argument overrides configuration for that watch only", async () => {
+  const runner = runnerHarness({ mergeable: "UNKNOWN" })
+  const timers = timerHarness()
+  const channel = channelHarness()
+  const session = new MonitorSession({
+    runGh: runner.runGh,
+    loadConfig: async () => config({ autoMerge: true }),
+    log: () => {},
+    schedule: timers.schedule,
+    cancel: timers.cancel,
+  })
+  const disabled = await session.execute({
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    autoMerge: false,
+    start: startOptions(channel),
+  })
+  assert.equal(disabled.start?.config.autoMerge, false)
+  assert.doesNotMatch(disabled.text, /Auto-merge enabled/)
+  assert.doesNotMatch((await session.execute({ action: MonitorAction.status, pr: undefined })).text, /auto-merge/)
+  await session.execute({ action: MonitorAction.stop, pr: "all" })
+
+  const enabled = await session.execute({
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    autoMerge: true,
+    loadConfig: async () => config(),
+    start: startOptions(channel),
+  })
+  assert.equal(enabled.start?.config.autoMerge, true)
+  assert.match(enabled.text, /Auto-merge enabled/)
+  await session.stopAll({})
+})
+
+test("stop cancels a stalled start so the target is not wedged", async () => {
+  const runner = runnerHarness({ mergeable: "UNKNOWN" })
+  const timers = timerHarness()
+  const channel = channelHarness()
+  const session = new MonitorSession({
+    runGh: runner.runGh,
+    loadConfig: async () => config(),
+    log: () => {},
+    schedule: timers.schedule,
+    cancel: timers.cancel,
+  })
+  let releaseStalled!: () => void
+  const stalled = session.execute({
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    loadConfig: () => new Promise((resolve) => (releaseStalled = () => resolve(config()))),
+    start: startOptions(channel),
+  })
+  await new Promise((resolve) => setImmediate(resolve))
+  const refused = await session.execute({ action: MonitorAction.start, pr: "sesori/example#42", start: startOptions(channel) })
+  assert.match(refused.text, /already starting/)
+  const canceled = await session.execute({ action: MonitorAction.stop, pr: "sesori/example#42" })
+  assert.match(canceled.text, /Canceled the pending start/)
+
+  const fresh = await session.execute({ action: MonitorAction.start, pr: "sesori/example#42", start: startOptions(channel) })
+  assert.notEqual(fresh.start, undefined)
+  releaseStalled()
+  assert.match((await stalled).text, /was canceled/)
+  assert.equal(session.list().length, 1)
+  await session.stopAll({})
+})
+
+for (const stopTarget of ["sesori/example#42", "all"]) test(`stop ${stopTarget} waits for an in-flight startup ready-label reset`, async () => {
+  const runner = runnerHarness()
+  const timers = timerHarness()
+  const channel = channelHarness()
+  let labelPresent = true
+  let releaseDelete!: () => void
+  const deleteHeld = new Promise<void>((resolve) => (releaseDelete = resolve))
+  const fetchedWithLabel: boolean[] = []
+  const runGh: GhRunner = async (args) => {
+    if (args[0] === "api" && args[1] === "graphql") {
+      fetchedWithLabel.push(labelPresent)
+      return payload({ labels: labelPresent ? ["ready-for-human-review"] : [] })
+    }
+    if (args.includes("DELETE")) {
+      await deleteHeld
+      labelPresent = false
+      return ""
+    }
+    return runner.runGh(args)
+  }
+  const session = new MonitorSession({ runGh, log: () => {}, schedule: timers.schedule, cancel: timers.cancel })
+  const resetting = session.execute({
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    autoMerge: true,
+    loadConfig: async () => config(),
+    start: startOptions(channel),
+  })
+  while (!runner.state.calls.some((args) => args.some((arg) => arg.includes("/pulls/")))) {
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  const canceling = session.execute({ action: MonitorAction.stop, pr: stopTarget })
+  let canceled = false
+  void canceling.then(() => (canceled = true))
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(canceled, false)
+
+  releaseDelete()
+  await canceling
+  assert.match((await resetting).text, /was canceled/)
+  const successor = await session.execute({
+    action: MonitorAction.start,
+    pr: "sesori/example#42",
+    autoMerge: false,
+    loadConfig: async () => config(),
+    start: startOptions(channel),
+  })
+  assert.notEqual(successor.start, undefined)
+  assert.deepEqual(fetchedWithLabel, [true, false])
+  await session.stopAll({})
 })
 
 test("ready handoff follows label success and the watched target identity", async () => {
