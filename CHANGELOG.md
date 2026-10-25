@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the Pi/OMP package now requires Pi 1.4.0 or newer and OMP 18.12.6 or newer; development, pack and
+  host-loader checks run against those versions (TypeBox 1.3.27) and CI uses Bun 1.4.4.
+- The Hermes Desktop delivery contract was re-inspected at Hermes commit `f219708926c5`.
+
 ## [0.8.0]
 
 ### Changed

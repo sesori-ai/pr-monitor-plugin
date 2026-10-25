@@ -155,9 +155,9 @@ try {
     name: "pi",
     metadata: pi,
     dependencies: [
-      "@earendil-works/pi-ai@0.84.2",
-      "@earendil-works/pi-coding-agent@0.84.2",
-      "typebox@1.3.7",
+      "@earendil-works/pi-ai@1.4.0",
+      "@earendil-works/pi-coding-agent@1.4.0",
+      "typebox@1.3.27",
     ],
     smoke:
       'const pi = await import("@sesori/pr-monitor-pi");' +

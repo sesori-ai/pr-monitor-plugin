@@ -17,7 +17,7 @@ VERSION ?= $(VERSION_GOAL)
 TAG := v$(VERSION)
 MANIFEST_VERSION := $(shell node -p "require('./opencode/package.json').version")
 OPENCODE_CLI ?= $(shell command -v opencode || true)
-OMP_VERSION ?= 18.0.4
+OMP_VERSION ?= 18.12.6
 REPO := sesori-ai/pr-monitor-plugin
 
 # Output helpers: bold step banners, dim detail lines, green ticks, red failures.

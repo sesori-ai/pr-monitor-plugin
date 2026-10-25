@@ -26,7 +26,7 @@ jobs:
           cache: npm
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -53,4 +53,4 @@ jobs:
         if: runner.os != 'Windows'
         run: npm run host:check:omp
         env:
-          OMP_VERSION: 18.0.4
+          OMP_VERSION: 18.12.6

@@ -69,7 +69,7 @@ Desktop gateway with simulated GitHub data. Real GitHub and further host and pla
 [regression matrix](https://github.com/sesori-ai/pr-monitor-plugin/blob/main/docs/regression/hermes.md).
 
 The contract was inspected at Hermes commit
-[`9a84bee265da`](https://github.com/NousResearch/hermes-agent/commit/9a84bee265daad14340a80d7585928cd8ea1f9eb).
+[`f219708926c5`](https://github.com/NousResearch/hermes-agent/commit/f219708926c55975bcd2202f180655fe179797a9).
 
 ## Development
 

@@ -7,13 +7,13 @@ the session that started the monitor. It also manages the `agent-ready` label.
 
 Needs a logged-in GitHub CLI (`gh auth status`).
 
-Pi 0.84.2 or newer, with Node.js 22.19 or newer:
+Pi 1.4.0 or newer, with Node.js 22.19 or newer:
 
 ```sh
 pi install npm:@sesori/pr-monitor-pi
 ```
 
-OMP 18.0.3 or newer, using the Bun runtime bundled with OMP:
+OMP 18.12.6 or newer, using the Bun runtime bundled with OMP:
 
 ```sh
 omp plugin install @sesori/pr-monitor-pi
