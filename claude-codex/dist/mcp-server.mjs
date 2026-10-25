@@ -32336,10 +32336,12 @@ var PrWatch = class {
   autoMergeNotice;
   // Mutable so set_auto_merge can toggle a running watch.
   autoMerge;
-  // Snapshot at a set_auto_merge label reset. Like the startup reset, activity
-  // buffered before it must not restore readiness (and merge) on its own; only
-  // later activity or a manual ready action lifts the fence.
-  readinessResetBaseline;
+  // Set when set_auto_merge removes the label from an eligible PR. Like the
+  // startup reset, activity buffered before it must not restore readiness (and
+  // merge) on its own; activity observed by a later poll or a manual ready
+  // action lifts the fence. An ineligible PR needs no fence: becoming eligible
+  // (for example through a prefixed reply) is itself post-toggle work.
+  readinessResetPending = false;
   // A poll may observe new feedback and a prefixed response together. The
   // ready label is still withdrawn and reported first; only a later quiet
   // report can restore it, so the feedback never disappears behind one poll.
@@ -32418,7 +32420,7 @@ var PrWatch = class {
         throw new Error("this watch does not have a readiness channel");
       }
       this.autoMergeNotice = void 0;
-      this.readinessResetBaseline = void 0;
+      this.readinessResetPending = false;
       return await this.trackReadinessMutation(async () => {
         let text = await readiness.change(ready);
         this.snapshot = withReadyLabel(snapshot, readiness.label, ready);
@@ -32462,7 +32464,7 @@ ${autoMerge}`;
       return await this.trackReadinessMutation(async () => {
         const removed = await readiness.change(false);
         this.snapshot = withReadyLabel(snapshot, readiness.label, false);
-        this.readinessResetBaseline = this.snapshot;
+        this.readinessResetPending = assessAutomaticReadiness(this.snapshot).eligible;
         this.autoMerge = autoMerge;
         if (!this.stopped) {
           this.clearReadinessFailure();
@@ -32508,6 +32510,7 @@ ${autoMerge}`;
     const becameConflicting = hasNewMergeConflict(this.lastDefiniteMergeable, next);
     const now = this.deps.now();
     if (detectActivity(previous, next, this.lastDefiniteMergeable)) {
+      this.readinessResetPending = false;
       this.dirty = true;
       this.lastActivityAt = now;
       this.holdStartedAt = void 0;
@@ -32790,15 +32793,8 @@ ${autoMerge}`;
     const readiness = this.deps.readiness;
     if (snapshot === void 0 || readiness === void 0 || // Failed delivery alone is not new activity. Keep unchanged startup
     // retries for agent assessment, but allow activity since that snapshot.
-    this.initialAnnouncementPending && assessAutomaticReadiness(this.lastFlushedSnapshot).eligible && !detectActivity(this.lastFlushedSnapshot, snapshot, this.lastFlushedSnapshot.mergeable) || snapshot.state !== "OPEN" || hasReadyLabel(snapshot, readiness.label) || !assessAutomaticReadiness(snapshot).eligible) {
+    this.initialAnnouncementPending && assessAutomaticReadiness(this.lastFlushedSnapshot).eligible && !detectActivity(this.lastFlushedSnapshot, snapshot, this.lastFlushedSnapshot.mergeable) || snapshot.state !== "OPEN" || this.readinessResetPending || hasReadyLabel(snapshot, readiness.label) || !assessAutomaticReadiness(snapshot).eligible) {
       return;
-    }
-    const resetBaseline = this.readinessResetBaseline;
-    if (resetBaseline !== void 0) {
-      if (assessAutomaticReadiness(resetBaseline).eligible && !detectActivity(resetBaseline, snapshot, resetBaseline.mergeable)) {
-        return;
-      }
-      this.readinessResetBaseline = void 0;
     }
     this.snapshot = await this.changeSnapshotReadiness(snapshot, true);
   }

@@ -96,10 +96,12 @@ export class PrWatch {
   private autoMergeNotice: string | undefined
   // Mutable so set_auto_merge can toggle a running watch.
   private autoMerge: AutoMergeDeps | undefined
-  // Snapshot at a set_auto_merge label reset. Like the startup reset, activity
-  // buffered before it must not restore readiness (and merge) on its own; only
-  // later activity or a manual ready action lifts the fence.
-  private readinessResetBaseline: PrSnapshot | undefined
+  // Set when set_auto_merge removes the label from an eligible PR. Like the
+  // startup reset, activity buffered before it must not restore readiness (and
+  // merge) on its own; activity observed by a later poll or a manual ready
+  // action lifts the fence. An ineligible PR needs no fence: becoming eligible
+  // (for example through a prefixed reply) is itself post-toggle work.
+  private readinessResetPending = false
   // A poll may observe new feedback and a prefixed response together. The
   // ready label is still withdrawn and reported first; only a later quiet
   // report can restore it, so the feedback never disappears behind one poll.
@@ -194,7 +196,7 @@ export class PrWatch {
       // A manual action returns its own merge result directly. Do not let an
       // undelivered automatic-attempt notice leak into a later report.
       this.autoMergeNotice = undefined
-      this.readinessResetBaseline = undefined
+      this.readinessResetPending = false
       return await this.trackReadinessMutation(async () => {
         let text = await readiness.change(ready)
         this.snapshot = withReadyLabel(snapshot, readiness.label, ready)
@@ -238,7 +240,7 @@ export class PrWatch {
       return await this.trackReadinessMutation(async () => {
         const removed = await readiness.change(false)
         this.snapshot = withReadyLabel(snapshot, readiness.label, false)
-        this.readinessResetBaseline = this.snapshot
+        this.readinessResetPending = assessAutomaticReadiness(this.snapshot).eligible
         this.autoMerge = autoMerge
         if (!this.stopped) {
           this.clearReadinessFailure()
@@ -290,6 +292,7 @@ export class PrWatch {
     const becameConflicting = hasNewMergeConflict(this.lastDefiniteMergeable, next)
     const now = this.deps.now()
     if (detectActivity(previous, next, this.lastDefiniteMergeable)) {
+      this.readinessResetPending = false
       this.dirty = true
       this.lastActivityAt = now
       this.holdStartedAt = undefined
@@ -613,22 +616,11 @@ export class PrWatch {
         assessAutomaticReadiness(this.lastFlushedSnapshot).eligible &&
         !detectActivity(this.lastFlushedSnapshot, snapshot, this.lastFlushedSnapshot.mergeable)) ||
       snapshot.state !== "OPEN" ||
+      this.readinessResetPending ||
       hasReadyLabel(snapshot, readiness.label) ||
       !assessAutomaticReadiness(snapshot).eligible
     ) {
       return
-    }
-    const resetBaseline = this.readinessResetBaseline
-    if (resetBaseline !== undefined) {
-      // Like the startup fence: only an already-eligible reset snapshot needs new activity. Eligibility gained
-      // after the reset (such as a prefixed reply, which detectActivity ignores) is post-toggle reassessment.
-      if (
-        assessAutomaticReadiness(resetBaseline).eligible &&
-        !detectActivity(resetBaseline, snapshot, resetBaseline.mergeable)
-      ) {
-        return
-      }
-      this.readinessResetBaseline = undefined
     }
     this.snapshot = await this.changeSnapshotReadiness(snapshot, true)
   }
