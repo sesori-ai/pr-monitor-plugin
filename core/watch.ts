@@ -620,7 +620,14 @@ export class PrWatch {
     }
     const resetBaseline = this.readinessResetBaseline
     if (resetBaseline !== undefined) {
-      if (!detectActivity(resetBaseline, snapshot, resetBaseline.mergeable)) return
+      // Like the startup fence: only an already-eligible reset snapshot needs new activity. Eligibility gained
+      // after the reset (such as a prefixed reply, which detectActivity ignores) is post-toggle reassessment.
+      if (
+        assessAutomaticReadiness(resetBaseline).eligible &&
+        !detectActivity(resetBaseline, snapshot, resetBaseline.mergeable)
+      ) {
+        return
+      }
       this.readinessResetBaseline = undefined
     }
     this.snapshot = await this.changeSnapshotReadiness(snapshot, true)

@@ -1511,7 +1511,9 @@ ${autoMerge}`;
     }
     const resetBaseline = this.readinessResetBaseline;
     if (resetBaseline !== void 0) {
-      if (!detectActivity(resetBaseline, snapshot, resetBaseline.mergeable)) return;
+      if (assessAutomaticReadiness(resetBaseline).eligible && !detectActivity(resetBaseline, snapshot, resetBaseline.mergeable)) {
+        return;
+      }
       this.readinessResetBaseline = void 0;
     }
     this.snapshot = await this.changeSnapshotReadiness(snapshot, true);

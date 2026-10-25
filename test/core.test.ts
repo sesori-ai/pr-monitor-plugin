@@ -1842,3 +1842,29 @@ test("set_auto_merge label reset fences activity buffered before the toggle", as
   assert.deepEqual(harness.readyChanges, [false, true])
   assert.deepEqual(merges, ["head-1"])
 })
+
+test("set_auto_merge label reset lets a later prefixed reply restore readiness", async () => {
+  const feedback = { author: "reviewer", createdAt: "2026-01-01T00:00:00Z" }
+  const reply = { author: "me", createdAt: "2026-01-01T00:01:00Z", isLocal: true, isAgentReply: true }
+  const initial = snapshot({ labels: ["agent-ready"], reviewThreads: [thread("t1", false, [feedback])] })
+  const reset = snapshot({ reviewThreads: [thread("t1", false, [feedback])] })
+  const replied = snapshot({ reviewThreads: [thread("t1", false, [feedback, reply])] })
+  const harness = watchHarness(initial, [reset, replied, replied, replied], config({ announceOnStart: false }), {
+    readiness: true,
+  })
+  const merges: string[] = []
+  await harness.watch.setAutoMerge({
+    squashMerge: async ({ pullRequest }) => {
+      merges.push(pullRequest.headSha)
+      return "Auto-merge succeeded."
+    },
+  })
+  assert.deepEqual(harness.readyChanges, [false])
+
+  for (let i = 0; i < 4; i++) {
+    harness.advance(5 * 60_000)
+    await harness.watch.tick()
+  }
+  assert.deepEqual(harness.readyChanges, [false, true])
+  assert.deepEqual(merges, ["head-1"])
+})

@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pr_monitor` action `set_auto_merge` (with `autoMerge: true|false`) turns auto-merge on or off for an active
   monitor. Turning it on for a PR that already carries the ready label removes the label so the agent reassesses
   before a merge, matching the startup reset; activity observed before the toggle cannot re-add readiness until
-  something new happens or `mark_ready` is called. Claude Code gets a matching `/pr-monitor:auto-merge on|off` command.
+  something new happens (a later prefixed reply that makes the PR eligible counts) or `mark_ready` is called. Claude Code gets a matching `/pr-monitor:auto-merge on|off` command.
 
 ### Changed
 
