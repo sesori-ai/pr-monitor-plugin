@@ -142,14 +142,17 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 
 ## Required Host Rows
 
-### OpenCode 1.17 or newer
+### OpenCode V2 2.1.4 or newer
 
-- `PrMonitorPlugin` is the only package export and registers one `pr_monitor` tool.
-- Normal delivery uses `promptAsync` in the owning session with the start-time agent and latest captured model.
-  Server errors surfaced in `result.error` count as delivery failures.
-- Session deletion stops silently. Reload takeover stops prior-instance timers with notices. Graceful disposal uses
-  synchronous no-reply prompts so notices are persisted without starting a model turn.
-- The packaged push-host skill is injected exactly once through `config.skills.paths`.
+- The package's only export is a `default` V2 plugin definition (`sesori.pr-monitor`) that registers one direct
+  (`codemode: false`) `pr_monitor` tool.
+- Normal delivery uses `ctx.session.prompt` in the owning session; the session owns agent and model, steering a busy
+  turn and starting one when idle. A rejected admission counts as a delivery failure.
+- Session deletion (`session.deleted` event) stops silently. Plugin cleanup (service shutdown, reload, config change)
+  stops every watch and persists one notice per watch with `ctx.session.synthetic({ resume: false })`, because prompt
+  admission waits on the plugin activation that cleanup holds. The notice wakes no model turn; it is promoted into the
+  transcript with the session's next turn. A replacement instance starts empty; no globalThis takeover is needed.
+- The packaged push-host skill is registered exactly once through `ctx.skill.transform`.
 
 ### Codex CLI/app-server with Node.js 18 or newer on macOS/Linux
 
@@ -292,6 +295,6 @@ reconciliation, cleanup failure, and marker-label failure.
 
 `core/watch.ts`, `core/activity.ts`, `core/readiness.ts`, `core/report.ts`, `core/github.ts`, `core/label.ts`,
 `core/merge.ts`,
-`runtime/monitor-session.ts`, `runtime/tool.ts`, `opencode/index.ts`, `claude-codex/src/`, `claude-codex/hooks/`,
+`runtime/monitor-session.ts`, `runtime/tool.ts`, `opencode/index.ts`, `opencode/plugin.ts`, `claude-codex/src/`, `claude-codex/hooks/`,
 `pi/extension.ts`, `pi/index.ts`, `pi/omp.ts`, `skills/monitor-pr/SKILL.md`,
 `claude-codex/skills/monitor-pr/SKILL.md`, and `test/*.test.ts`.

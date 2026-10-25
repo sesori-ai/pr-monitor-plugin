@@ -65,8 +65,9 @@ Use the current supported OMP version when it changes.
   routing and state formats aligned with `claude-codex/src/spool.ts` and `session-state.ts`.
 - Never commit generated OpenCode/Pi distribution or copied package skill output.
 
-The OpenCode entry must keep one export because its loader invokes every export. Pi host imports remain external;
-the package manifest owns skill discovery. Claude Code and Codex share one plugin root but use separate manifests.
+The OpenCode V2 entry keeps a single `default` export because the V2 loader decodes only `default`. Pi host imports
+remain external; the package manifest owns skill discovery. Claude Code and Codex share one plugin root but use
+separate manifests.
 Hermes Python owns conversation binding while its bundled Node worker owns monitor behavior.
 
 ## Local plugin checks

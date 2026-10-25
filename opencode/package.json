@@ -43,7 +43,7 @@
     "monitor"
   ],
   "engines": {
-    "opencode": ">=1.17.0"
+    "opencode": ">=2.1.4"
   },
   "scripts": {
     "build": "node ../scripts/build-opencode.mjs",
@@ -54,7 +54,7 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
-  "dependencies": {
-    "@opencode-ai/plugin": "^1.4.9"
+  "peerDependencies": {
+    "@opencode/plugin": "^2.1.4"
   }
 }

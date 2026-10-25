@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the OpenCode package now targets OpenCode V2 only and requires 2.1.4 or newer; OpenCode V1 is no
+  longer supported. It is a V2 Promise-API plugin (`@opencode/plugin` peer) with a single `default` export, installed
+  with `opencode plugin add @sesori/pr-monitor-opencode` or the `plugins` config key. A local checkout is configured
+  as the `opencode/dist` directory.
+- OpenCode reports are admitted with `session.prompt`, which uses the session's own agent and model, and the
+  `pr_monitor` tool is registered as a direct tool. The `monitor-pr` skill is registered through the skill transform.
+- On OpenCode plugin unload (service shutdown, reload, or config change) each monitor leaves one combined
+  `Monitor stopped` notice stored without starting a model turn; it reaches the agent with the session's next turn.
+- The OpenCode adapter runs `gh` through the shared Node runner and logs to stderr (visible with `--print-logs`).
+- CI and `npm run host:check:opencode` verify the real OpenCode 2.1.4 CLI loads one plugin, one direct `pr_monitor`
+  tool, and one `monitor-pr` skill.
+
+### Removed
+
+- OpenCode's separate reload and shutdown notices and the cross-instance reload takeover; V2 awaits plugin cleanup
+  before loading a replacement.
+
 ## [0.7.0]
 
 ### Added

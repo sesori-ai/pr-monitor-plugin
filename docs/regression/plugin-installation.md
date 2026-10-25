@@ -23,15 +23,16 @@ real host loaders, package registries/Git installation, and synchronized metadat
 
 ### `@sesori/pr-monitor-opencode`
 
-Install through OpenCode configuration:
+Install with `opencode plugin add @sesori/pr-monitor-opencode` or through OpenCode configuration:
 
 ```jsonc
 {
-  "plugin": ["@sesori/pr-monitor-opencode"]
+  "plugins": ["@sesori/pr-monitor-opencode"]
 }
 ```
 
-Required floor: OpenCode 1.17 or newer, plus authenticated `gh`.
+Required floor: OpenCode V2 2.1.4 or newer, plus authenticated `gh`. OpenCode V1 is unsupported. A local checkout is
+configured as the `opencode/dist` directory; V2 rejects a configured local file path.
 
 The tarball contains exactly:
 
@@ -44,11 +45,13 @@ package.json
 skills/monitor-pr/SKILL.md
 ```
 
-- `.` and `./server` both expose the sole runtime export `PrMonitorPlugin` with the compiler-emitted declaration.
-  `./package.json` is exported for metadata consumers.
-- `@opencode-ai/plugin` remains a declared runtime dependency. Private core/runtime files are embedded in the ESM
-  bundle and never appear as install-time package dependencies.
-- Build output copies the canonical push-host skill, and the adapter injects that packaged directory exactly once.
+- `.` and `./server` both expose only a `default` export: the V2 `Plugin.Plugin` definition with id
+  `sesori.pr-monitor` and the compiler-emitted declaration. `./package.json` is exported for metadata consumers.
+- `@opencode/plugin` is a peer dependency, external to the bundle; OpenCode redirects it to the host instance at
+  runtime. Private core/runtime files are embedded in the ESM bundle and never appear as install-time dependencies.
+- Build output copies the canonical push-host skill, and the adapter registers that packaged file exactly once
+  through the skill transform. `npm run host:check:opencode` proves, against the real CLI, one active plugin, one
+  direct `pr_monitor` tool, and one `monitor-pr` skill whose path is the packaged file.
 
 ### `@sesori/pr-monitor-pi`
 
@@ -175,9 +178,9 @@ The private root stays `0.0.0`. `npm run version:check` rejects any product drif
 
 From a clean release commit:
 
-1. Complete every required matrix row below from the clean release commit, including minimum/current OpenCode,
-   Pi, and OMP loaders and the live Claude release-host session. Run test/type/build/version/pack/host checks and
-   confirm rebuilding leaves the committed Claude bundle clean.
+1. Complete every required matrix row below from the clean release commit, including the OpenCode V2 loader,
+   minimum/current Pi and OMP loaders and the live Claude release-host session. Run
+   test/type/build/version/pack/host checks and confirm rebuilding leaves the committed Claude bundle clean.
 2. Publish both npm workspaces only after the complete matrix is `Pass`. A failure stops the release before any Git
    tag is created.
 3. Create and push one annotated `vX.Y.Z` tag for the Claude Git plugin only after both npm publishes succeed.
@@ -207,14 +210,16 @@ persistent watch registry, credential file, copied repository skill, or host-spe
   committed-bundle checks pass.
 - **L3 Release:** Both npm tarballs install in disposable consumers; every export/manifest imports; Claude MCP starts
   over stdio and hooks parse.
-- **L4 Extended:** Actual minimum/current OpenCode, Pi, and OMP loaders discover one tool/skill on required OS rows;
+- **L4 Extended:** Actual OpenCode V2 and minimum/current Pi and OMP loaders discover one tool/skill on required OS
+  rows;
   Claude installs from a checkout.
 - **L5 Full:** Registry-equivalent tarballs and the Claude Git root run cross-host monitoring; publish
   ordering/version evidence and cleanup are recorded.
 
 ## Required Matrix
 
-- **OpenCode:** actual minimum/current loaders on Linux and macOS; typed package install/import on Windows.
+- **OpenCode:** actual V2 minimum (2.1.4, CI) and current (the release host's installed CLI, run by `make check`)
+  loaders on Linux and macOS; typed package install/import on Windows.
 - **Claude Code:** packaged plugin-root discovery and one live release-host session on macOS or Linux; deterministic
   MCP/hook checks on the CI host.
 - **Pi:** minimum/current loaders on Linux and macOS plus Windows loader/package smoke.
@@ -238,7 +243,8 @@ license, a stale Claude bundle, a missing peer, and an npm publish failure befor
 
 - The private root can publish, an npm archive contains source/private modules or omits a declared entry, or a packed
   consumer requires undeclared local files.
-- OpenCode exports anything besides `PrMonitorPlugin`; Pi/OMP entries are untyped or load separate monitor cores.
+- OpenCode exports anything besides a `default` V2 plugin definition; Pi/OMP entries are untyped or load separate
+  monitor cores.
 - A package omits or duplicates `monitor-pr`, OMP receives both manifest and resource-discovered copies, or Claude
   receives the push-host skill without waiter instructions.
 - Product versions diverge, unreleased behavior is attributed to an already published version, or a release tag is
@@ -259,7 +265,7 @@ license, a stale Claude bundle, a missing peer, and an npm publish failure befor
 `package.json`, `package-lock.json`, `opencode/package.json`, `pi/package.json`,
 `claude-codex/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `claude-codex/.mcp.json`,
 `scripts/build-*.mjs`, `scripts/check-pack.mjs`, `scripts/check-versions.mjs`, `scripts/check-*-loader.mjs`,
-`skills/monitor-pr/SKILL.md`, `opencode/index.ts`, `pi/index.ts`, `pi/omp.ts`, and `AGENTS.md`.
+`skills/monitor-pr/SKILL.md`, `opencode/index.ts`, `opencode/plugin.ts`, `pi/index.ts`, `pi/omp.ts`, and `AGENTS.md`.
 
 ## Hermes Git plugin
 
