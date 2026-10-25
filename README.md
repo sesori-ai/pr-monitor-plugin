@@ -19,18 +19,25 @@ Then add the plugin to your host.
 
 ### OpenCode
 
-Needs OpenCode 1.17 or newer. Add the plugin to your project `opencode.json`, or to
-`~/.config/opencode/opencode.json` for every project:
+Needs OpenCode V2 (2.1.4 or newer). OpenCode V1 is no longer supported. Install it for every project:
+
+```sh
+opencode plugin add @sesori/pr-monitor-opencode
+```
+
+Or add it to your project `opencode.json` (or to `~/.config/opencode/opencode.json` for every project):
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@sesori/pr-monitor-opencode"]
+  "plugins": ["@sesori/pr-monitor-opencode"]
 }
 ```
 
-Restart OpenCode. It installs the package on startup. Pin `@sesori/pr-monitor-opencode@X.Y.Z` if you prefer to
-upgrade on your own schedule.
+OpenCode reloads plugins when the config is saved; no restart is needed. Pin `@sesori/pr-monitor-opencode@X.Y.Z` if
+you prefer to upgrade on your own schedule. To run a local checkout, build it with `npm run build:opencode` and list
+the built directory instead: `"plugins": ["/absolute/path/to/opencode-pr-monitor/opencode/dist"]` (V2 loads local
+plugins from a directory, not from a single file).
 
 ### Claude Code
 

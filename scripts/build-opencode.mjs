@@ -20,7 +20,7 @@ try {
     platform: "node",
     format: "esm",
     target: "esnext",
-    external: ["@opencode-ai/plugin"],
+    external: ["@opencode/plugin"],
     logLevel: "warning",
   })
   execFileSync(

@@ -5,18 +5,24 @@ started the monitor. It also manages the `agent-ready` label.
 
 ## Install
 
-Needs OpenCode 1.17 or newer and a logged-in GitHub CLI (`gh auth status`).
+Needs OpenCode V2 (2.1.4 or newer) and a logged-in GitHub CLI (`gh auth status`). OpenCode V1 is not supported.
 
-Add the plugin to your project `opencode.json`, or to `~/.config/opencode/opencode.json` for every project:
+Install it for every project:
+
+```sh
+opencode plugin add @sesori/pr-monitor-opencode
+```
+
+Or add it to your project `opencode.json` (or to `~/.config/opencode/opencode.json` for every project):
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@sesori/pr-monitor-opencode"]
+  "plugins": ["@sesori/pr-monitor-opencode"]
 }
 ```
 
-Restart OpenCode and you are done.
+OpenCode reloads plugins when the config is saved; no restart is needed.
 
 ## What it does
 
@@ -32,8 +38,9 @@ mergeable, and all feedback has been answered, the monitor adds the ready label.
 The monitor owns the waiting. Agents should not sleep, schedule checks, poll in the background, run `gh pr checks`
 repeatedly, or call `status` and `flush` in a loop. Reports arrive on their own.
 
-Monitors live in memory and belong to the OpenCode session that started them. They stop when the PR merges or closes
-or the session is deleted, and they do not survive an OpenCode restart.
+Monitors live in memory in the OpenCode service and belong to the session that started them. They stop when the PR
+merges or closes or the session is deleted, and they do not survive a service restart or a plugin reload. On unload
+each active monitor leaves a `Monitor stopped` notice in its session; it reaches the agent with the session's next turn.
 
 ## Configuration
 

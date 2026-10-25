@@ -101,16 +101,16 @@ try {
       'const server = await import("@sesori/pr-monitor-opencode/server");' +
       'const {createRequire} = await import("node:module");' +
       'const manifest = createRequire(import.meta.url)("@sesori/pr-monitor-opencode/package.json");' +
-      'const expected = "PrMonitorPlugin";' +
-      'if (Object.keys(root).join() !== expected || Object.keys(server).join() !== expected) process.exit(1);' +
+      'if (Object.keys(root).join() !== "default" || Object.keys(server).join() !== "default") process.exit(1);' +
+      'if (root.default.id !== "sesori.pr-monitor" || typeof root.default.setup !== "function") process.exit(1);' +
       'if (manifest.name !== "@sesori/pr-monitor-opencode") process.exit(1);',
   })
   await writeFile(
     join(openCodeConsumer, "index.ts"),
-    'import type { Plugin } from "@opencode-ai/plugin"\n' +
-      'import { PrMonitorPlugin } from "@sesori/pr-monitor-opencode"\n' +
-      'import { PrMonitorPlugin as ServerPlugin } from "@sesori/pr-monitor-opencode/server"\n' +
-      "const root: Plugin = PrMonitorPlugin\nconst server: Plugin = ServerPlugin\nvoid root\nvoid server\n",
+    'import type { Plugin } from "@opencode/plugin"\n' +
+      'import rootPlugin from "@sesori/pr-monitor-opencode"\n' +
+      'import serverPlugin from "@sesori/pr-monitor-opencode/server"\n' +
+      "const root: Plugin.Plugin = rootPlugin\nconst server: Plugin.Plugin = serverPlugin\nvoid root\nvoid server\n",
   )
   execFileSync(
     process.execPath,

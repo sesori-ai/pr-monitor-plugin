@@ -5,8 +5,8 @@ Quick orientation for agents working on this repo. Read this before exploring; i
 ## What this is
 
 `pr-monitor` is a GitHub PR watcher that posts factual status updates back into the owning agent session. It targets
-**OpenCode** (`opencode/`), **Claude Code and Codex** (`claude-codex/`, one plugin root serving both hosts), the shared
-**Pi/OMP** package (`pi/`), and **Hermes** (`hermes/`), all built on the same core (`core/`) and session runtime
+**OpenCode V2** (`opencode/`), **Claude Code and Codex** (`claude-codex/`, one plugin root serving both hosts), the
+shared **Pi/OMP** package (`pi/`), and **Hermes** (`hermes/`), all built on the same core (`core/`) and session runtime
 (`runtime/`).
 
 ## Project layout
@@ -36,11 +36,13 @@ skills/              # Canonical monitor-pr skill copied into push-host npm arti
 
 docs/regression/     # Durable monitoring and installation acceptance matrices used for release/plan evidence.
 
-opencode/            # OpenCode source plus publishable npm workspace.
-  index.ts     # Sole source export PrMonitorPlugin (loader invokes EVERY export — keep it the only one).
-  gh.ts        # OpenCode's injected Bun-shell GhRunner.
-  package.json # @sesori/pr-monitor-opencode; exports the generated dist/index.js bundle.
-  dist/        # Ephemeral JS bundle + sole-export declaration, ignored; never commit.
+opencode/            # OpenCode V2 (>=2.1.4; V1 unsupported) source plus publishable npm workspace.
+  index.ts     # Sole export: `default` Plugin.Plugin (V2 loader decodes only `default`), wired to runtime/node-gh.
+  plugin.ts    # createPrMonitorPlugin: Promise-API setup — tool/skill transforms, session events, cleanup.
+  skill.ts     # Parses the packaged SKILL.md frontmatter for ctx.skill.transform registration.
+  package.json # @sesori/pr-monitor-opencode; exports the generated dist/index.js bundle; @opencode/plugin is a peer.
+  dist/        # Ephemeral JS bundle + sole-export declaration, ignored; never commit. A local checkout is
+               # configured as this directory ("plugins": ["/abs/opencode/dist"]); V2 rejects a file path.
 
 pi/                  # @sesori/pr-monitor-pi workspace shared by upstream Pi and OMP.
   index.ts      # Upstream Pi entry; package manifest owns skill discovery.
@@ -117,7 +119,10 @@ Hermes plugin version is part of the lockstep release check. Rebuild and commit 
 2. **tick** — `PrWatch.tick()` (`core/watch.ts`): fetch snapshot → detect activity/readiness invalidation → mutate
    the label when needed → mark dirty/reset debounce or urgency → `maybeAutoFlush()`.
 3. **deliver** — shell-specific, injected as `deps.deliver`:
-   - opencode (`opencode/index.ts`): `client.session.promptAsync(...)` pushes a `[PR Monitor]` message into the owning session. `promptAsync` never rejects on server error — check `result.error`. `agent` captured at start time (default agent may be a subagent, which fails); model captured per-message via the `chat.message` hook.
+   - opencode (`opencode/plugin.ts`): `ctx.session.prompt({ sessionID, text })` admits a durable `[PR Monitor]`
+     user message into the owning session's inbox and wakes it (steers a busy turn, starts one when idle). V2 prompt
+     has no agent/model parameters — the session owns them — and rejects on failure. The tool is registered with
+     `options: { codemode: false }` so it is a direct tool rather than a Code Mode catalog entry.
    - Claude Code (`claude-codex/src/mcp-server.ts` + `push.ts`): push-first. Claude Code binds a per-session
      uds-messaging socket and exports `CLAUDE_CODE_MESSAGING_SOCKET`/`CLAUDE_CODE_MESSAGING_TOKEN` to child
      processes (the MCP server is one). `pushMessage` writes an auth line then a `{"type":"user"}` line
@@ -151,7 +156,13 @@ Hermes plugin version is part of the lockstep release check. Rebuild and commit 
   `unmark_ready` mutations use the same barrier because no watch owns them. Cleanup does not await stalled fetches
   or deliveries; `stopped`/generation checks fence their continuations before a successor is mutated.
 - **Sessions, Claude Code shell**: one MCP server process per Claude Code process, so the watches map IS the session scope. Monitors survive `/clear` (same process) and die with the process. Spool routing: spool dirs are named by the owning Claude Code pid (= MCP server's ppid); the hook drains dirs named by its parent/grandparent pid (hook ← sh ← claude; deliberately NOT the full ancestry, which would let a nested claude session steal the outer session's reports) and GCs dead-pid dirs. Ancestry is read from `/proc` where it exists, else `ps`; with neither the hook drains **nothing** — the number of live spools is not evidence of ownership (a session with no monitor still fires hooks), so there is no cardinality trick that substitutes for real ancestry. A pid is not an identity either — the OS recycles them — so `claimSpool` records the Claude Code process's start time in `<spool dir>/owner` (tmp+rename; a torn read must not look like a foreign token) at server startup, and it is enforced in three places: the server discards anything it cannot prove it inherited before spooling (a foreign token *and* an untokened dir, since stamping the latter would launder a vanished session's reports); `spoolReport` re-checks the token before every write, so an orphaned server whose parent's pid got recycled cannot write into the newcomer's spool; the hook *skips* — never deletes — a dir whose token mismatches, because deleting would race the newcomer's `claimSpool`. On macOS the token is `ps -o lstart=` (1-second resolution), a deliberate residue: coarser than ideal, but calling macOS unverifiable would restore pid-only routing there, which is strictly worse. Report filenames carry the *server* pid too (`seq` restarts at 0 in each process while the dir outlives them, so an /mcp restart could otherwise collide within a millisecond and lose a report). Drains claim each report via unlink-before-emit so concurrent hook invocations never deliver one twice, and the script must not process.exit after writing (stdout past the 64KB pipe buffer would be truncated). PostToolUse also fires for tool calls inside Task subagents — those hook inputs carry `agent_id`, and drain-spool.mjs skips them so a report is never consumed by a subagent's context (verified empirically on Claude Code 2.1.216). Shutdown (stdin EOF/SIGTERM) spools a `Monitor stopped` notice per watch — delivered if the same process continues (server restart), silently GC'd if the session is gone.
-- **Reload takeover, opencode shell** — `globalThis.__sesoriPrMonitorTakeovers` kills zombie timers from prior plugin instances; old watches send one factual stop notice. (`session.deleted` stops matching watches silently.) Graceful `dispose` cannot use `promptAsync`: OpenCode acknowledges that endpoint before its fork persists the message, then disposal cancels the fork. Shutdown uses synchronous `session.prompt` with `noReply: true`, persisting each notice before disposal without starting a model turn.
+- **Unload, opencode shell** — V2 awaits the cleanup returned by `setup` and closes the old plugin scope before the
+  replacement loads (reload, config change, rebuilt local plugin, service shutdown), so no globalThis takeover is
+  needed. Cleanup stops every watch with one `UNLOAD_NOTICE` persisted via `ctx.session.synthetic({ resume: false })`.
+  It must not use `prompt`: prompt preparation awaits plugin activation, which the host holds during cleanup
+  (deadlock). The synthetic notice stays in the session inbox and reaches the model with the next turn.
+  `session.deleted` (from `ctx.event.subscribe`) stops matching watches silently. Monitors live in the background
+  service, so closing the TUI does not stop them. There is no Promise-API logger: logs go to stderr (`--print-logs`).
 - **Pi-family lifecycle** — upstream Pi tears down the old extension instance and emits post-success
   `session_shutdown` on new/resume/fork/reload, so common cleanup lives there. OMP retains its extension runner and
   uses the thin `pi/omp-adapter.ts` post-success `session_switch` handler. Neither adapter clears on cancelable
@@ -226,9 +237,10 @@ only at the start of a comment.
 
 ## GitHub layer
 
-- Injected `GhRunner`: OpenCode wraps Bun `$` in `opencode/gh.ts`; Node adapters use `runtime/node-gh.ts`. Both
-  preserve `notFound`, parsed GitHub HTTP status, and CLI exit code in `PollError`; `core/github.ts` imports neither
-  host. Auto-merge uses 4xx status metadata to preserve definitive rejection instead of reconciling it as unknown.
+- Injected `GhRunner`: every Node-based adapter, including OpenCode V2 (no Bun `$` in its plugin context), uses
+  `runtime/node-gh.ts`. It preserves `notFound`, parsed GitHub HTTP status, and CLI exit code in `PollError`;
+  `core/github.ts` imports neither host. Auto-merge uses 4xx status metadata to preserve definitive rejection instead
+  of reconciling it as unknown.
 - `PR_QUERY` (`core/github.ts`) fetches title, URL, state, mergeable, head SHA, checks, review requests/latest reviews
   plus summary metadata, review threads/comments, issue comments, and labels. Overflow pages are fetched for check
   contexts, latest reviews, review threads, and labels so readiness cannot be computed from a truncated connection.
@@ -252,7 +264,7 @@ only at the start of a comment.
   until release or a follow-up PR.
 - The root is a private npm workspace coordinator. `npm run build` produces ephemeral OpenCode and Pi/OMP bundles with private core/runtime embedded and rebuilds committed `claude-codex/dist/mcp-server.mjs`. Host SDKs remain external. Claude plugin installs run no build, so rebuild + commit its bundle whenever `claude-codex/src/`, `runtime/`, or `core/` changes; never commit OpenCode/Pi dist or generated package skill copies.
 - `claude-codex/hooks/drain-spool.mjs` and `claude-codex/hooks/await-activity.mjs` must stay dependency-free (node builtins only) and keep their path/format schemes in sync with `claude-codex/src/spool.ts` and `claude-codex/src/session-state.ts`. They are shipped as source, not bundled — only `claude-codex/src/` goes through esbuild.
-- `claude-codex/skills/monitor-pr/SKILL.md` is Claude's waiter-aware behavior layer. `skills/monitor-pr/SKILL.md` is the canonical push-host behavior layer copied into both npm artifacts. OpenCode injects its generated directory through `config.skills.paths`, Pi uses `package.json#pi.skills`, and OMP returns it from `resources_discover`; each host must discover exactly one `monitor-pr` skill.
+- `claude-codex/skills/monitor-pr/SKILL.md` is Claude's waiter-aware behavior layer. `skills/monitor-pr/SKILL.md` is the canonical push-host behavior layer copied into both npm artifacts. OpenCode registers its generated file once through `ctx.skill.transform`, Pi uses `package.json#pi.skills`, and OMP returns it from `resources_discover`; each host must discover exactly one `monitor-pr` skill.
 - Pi host imports stay external and use `"*"` peer ranges exactly as upstream package guidance requires. Supported
   host floors are enforced by documentation/loader checks; narrowing the peers would conflict with OMP rewriting.
 - One version spans both npm workspaces and the Claude manifest (`npm run version:check`). `npm run pack:check` creates both tarballs, enforces exact contents/skills, installs them, and imports every export. Publish both workspaces from a clean commit; only after npm succeeds create/push the annotated Claude release tag.

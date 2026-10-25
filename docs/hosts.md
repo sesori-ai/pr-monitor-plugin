@@ -9,7 +9,7 @@ plugin is running: how reports reach the agent, when monitors stop, and what to 
 
 | Host | How reports arrive | What stops a monitor |
 |---|---|---|
-| OpenCode | Pushed into the owning session | PR done, session deleted, OpenCode restart |
+| OpenCode V2 | Pushed into the owning session | PR done, session deleted, service restart, plugin reload |
 | Claude Code | Pushed over the session's messaging socket, hooks as fallback | PR done, quitting Claude Code, MCP reload |
 | Codex | Spooled and injected by trusted hooks, per conversation | PR done, Codex restart |
 | Pi | Native custom message that can start a turn | PR done, successful session new/resume/fork/reload |
@@ -21,8 +21,13 @@ restarts.
 
 ## OpenCode
 
-Reports are pushed straight into the session that started the monitor. Deleting that session stops its monitors.
-When OpenCode shuts down cleanly, each session with a monitor gets a short "Monitor stopped" notice.
+Requires OpenCode V2 (2.1.4 or newer). Reports are pushed into the session that started the monitor as user prompts:
+they steer a busy turn and start one when the session is idle, using the session's own agent and model. Monitors run in
+the OpenCode background service, so closing the TUI does not stop them; deleting the session does, silently.
+
+When the plugin unloads (service shutdown, `/reload`, a config change, or a rebuilt local plugin), each session with a
+monitor gets a short "Monitor stopped" notice. OpenCode cannot start a model turn while a plugin is unloading, so the
+notice is stored without waking the agent and reaches it with the session's next turn.
 
 The package includes one `monitor-pr` skill, so the agent knows when to start a monitor and what to do with each
 report. Package details: [`opencode/README.md`](../opencode/README.md).
