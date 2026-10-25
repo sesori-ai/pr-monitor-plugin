@@ -37,6 +37,7 @@ test("Claude plugin root contains the exact tracked release payload", () => {
     ".codex-mcp.json",
     ".codex-plugin/plugin.json",
     ".mcp.json",
+    "commands/auto-merge.md",
     "commands/ready.md",
     "commands/status.md",
     "commands/unready.md",
