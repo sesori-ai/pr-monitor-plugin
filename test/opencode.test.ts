@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import test from "node:test"
+import test, { afterEach } from "node:test"
 import { fileURLToPath } from "node:url"
 
 import type { GhRunner } from "../core/github"
@@ -78,16 +78,21 @@ function fakeHost() {
   let wake: () => void = () => {}
   let pulls = 0
   let onPull: () => void = () => {}
+  let onEnd: () => void = () => {}
 
   async function* subscribe({ signal }: { signal: AbortSignal }): AsyncGenerator<HostEvent> {
     signal.addEventListener("abort", () => wake())
-    for (;;) {
-      pulls += 1
-      onPull()
-      while (pending.length === 0 && !signal.aborted) await new Promise<void>((resolve) => (wake = resolve))
-      const event = pending.shift()
-      if (event === undefined) return
-      yield event
+    try {
+      for (;;) {
+        pulls += 1
+        onPull()
+        while (pending.length === 0 && !signal.aborted) await new Promise<void>((resolve) => (wake = resolve))
+        const event = pending.shift()
+        if (event === undefined) return
+        yield event
+      }
+    } finally {
+      onEnd()
     }
   }
 
@@ -113,11 +118,13 @@ function fakeHost() {
 
   // Resolves once the subscriber has finished handling every event emitted so far.
   const emit = async (event: HostEvent): Promise<void> => {
-    const handled = new Promise<void>((resolve) => {
+    const handled = new Promise<void>((resolve, reject) => {
       const target = pulls + 1
       onPull = () => {
         if (pulls >= target) resolve()
       }
+      // A subscriber that stops (e.g. after a handler error) fails the test instead of hanging it.
+      onEnd = () => reject(new Error("event subscription ended before handling the event"))
     })
     pending.push(event)
     wake()
@@ -126,6 +133,12 @@ function fakeHost() {
 
   return { context, prompts, synthetics, tools, skills, prompted, emit }
 }
+
+// Cleanup also runs after a failed assertion so monitors and subscriptions never leak into later tests.
+const pendingCleanups: Array<() => Promise<unknown>> = []
+afterEach(async () => {
+  for (const cleanup of pendingCleanups.splice(0)) await cleanup()
+})
 
 async function setUp() {
   const host = fakeHost()
@@ -137,7 +150,9 @@ async function setUp() {
   assert.ok(tool)
   const run = async ({ sessionID, input }: { sessionID: string; input: unknown }) =>
     String((await tool.execute(input, { sessionID })).content)
-  return { host, tool, run, cleanup: async () => (typeof cleanup === "function" ? cleanup() : undefined) }
+  const close = async () => (typeof cleanup === "function" ? cleanup() : undefined)
+  pendingCleanups.push(close)
+  return { host, tool, run, cleanup: close }
 }
 
 test("OpenCode registers one direct pr_monitor tool and the packaged monitor-pr skill", async () => {

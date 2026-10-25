@@ -218,7 +218,8 @@ persistent watch registry, credential file, copied repository skill, or host-spe
 
 ## Required Matrix
 
-- **OpenCode:** actual V2 (2.1.4) loader on Linux and macOS; typed package install/import on Windows.
+- **OpenCode:** actual V2 minimum (2.1.4, CI) and current (the release host's installed CLI, run by `make check`)
+  loaders on Linux and macOS; typed package install/import on Windows.
 - **Claude Code:** packaged plugin-root discovery and one live release-host session on macOS or Linux; deterministic
   MCP/hook checks on the CI host.
 - **Pi:** minimum/current loaders on Linux and macOS plus Windows loader/package smoke.

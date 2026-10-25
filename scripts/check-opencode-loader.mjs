@@ -121,7 +121,11 @@ async function startServer() {
   })
   let output = ""
   const baseUrl = await new Promise((resolveUrl, reject) => {
-    const timer = setTimeout(() => reject(new Error(`OpenCode did not start listening: ${output}`)), 30_000)
+    const timer = setTimeout(() => {
+      // The caller's cleanup never sees a server that failed to start, so stop it here.
+      server.kill("SIGTERM")
+      reject(new Error(`OpenCode did not start listening: ${output}`))
+    }, 30_000)
     const inspect = (chunk) => {
       output += chunk.toString()
       const match = output.match(/listening on (https?:\/\/127\.0\.0\.1:\d+)/)

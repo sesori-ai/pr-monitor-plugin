@@ -295,6 +295,6 @@ reconciliation, cleanup failure, and marker-label failure.
 
 `core/watch.ts`, `core/activity.ts`, `core/readiness.ts`, `core/report.ts`, `core/github.ts`, `core/label.ts`,
 `core/merge.ts`,
-`runtime/monitor-session.ts`, `runtime/tool.ts`, `opencode/plugin.ts`, `claude-codex/src/`, `claude-codex/hooks/`,
+`runtime/monitor-session.ts`, `runtime/tool.ts`, `opencode/index.ts`, `opencode/plugin.ts`, `claude-codex/src/`, `claude-codex/hooks/`,
 `pi/extension.ts`, `pi/index.ts`, `pi/omp.ts`, `skills/monitor-pr/SKILL.md`,
 `claude-codex/skills/monitor-pr/SKILL.md`, and `test/*.test.ts`.

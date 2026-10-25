@@ -55,6 +55,6 @@
     "registry": "https://registry.npmjs.org/"
   },
   "peerDependencies": {
-    "@opencode/plugin": "^2.1.0"
+    "@opencode/plugin": "^2.1.4"
   }
 }
