@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0]
+
 ### Added
 
 - `pr_monitor` action `set_auto_merge` (with `autoMerge: true|false`) turns auto-merge on or off for an active
