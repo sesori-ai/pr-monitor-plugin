@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0]
+
 ### Changed
 
 - **Breaking:** the OpenCode package now targets OpenCode V2 only and requires 2.1.4 or newer; OpenCode V1 is no
