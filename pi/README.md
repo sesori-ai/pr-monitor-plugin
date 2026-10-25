@@ -1,7 +1,7 @@
 # @sesori/pr-monitor-pi
 
 Pi and Oh My Pi (OMP) extension that watches your GitHub pull requests and posts `[PR Monitor]` status reports into
-the session that started the monitor. It also manages the ready-for-human-review label.
+the session that started the monitor. It also manages the `agent-ready` label.
 
 ## Install
 
@@ -23,13 +23,13 @@ The package gives Pi its upstream entry and OMP its compatibility entry automati
 
 ## What it does
 
-The extension adds a `pr_monitor` tool with `start`, `stop`, `flush`, `status`, `mark_ready`, and `unmark_ready`
-actions, plus one `monitor-pr` skill. The skill tells the agent to start a monitor right after opening a PR, act on
-every report, mark its GitHub replies with the reply prefix so the monitor can recognise them, and end its turn
-instead of building its own wait loop.
+The extension adds a `pr_monitor` tool with `start`, `stop`, `flush`, `status`, `mark_ready`, `unmark_ready`, and
+`set_auto_merge` actions, plus one `monitor-pr` skill. The skill tells the agent to start a monitor right after opening
+a PR, act on every report, mark its GitHub replies with the reply prefix so the monitor can recognise them, and end its
+turn instead of building its own wait loop.
 
 Reports cover new commits, CI, reviews and comments, merge conflicts, and the PR merging or closing. Each one says
-whether the PR is ready for human review and never quotes comment bodies. Reports are delivered through the host's
+whether the PR is ready and never quotes comment bodies. Reports are delivered through the host's
 native custom-message API and can start a turn when the agent is idle. When CI passes (or there is none), the PR is
 mergeable, and all feedback has been answered, the monitor adds the ready label. A new commit or new feedback removes it again.
 
@@ -50,10 +50,10 @@ Pi ignores project-local settings until you trust the project. Settings:
 
 To merge ready PRs automatically, set `autoMerge: true` in the global file or a trusted project file. Project config
 overrides global config, and an explicit `SESORI_PR_MONITOR_AUTO_MERGE` environment value overrides both. With
-auto-merge on, starting a monitor removes any ready label that is already there and asks the agent to reassess.
-Merged PRs get an `automatically-merged` label. Read the
-[auto-merge guide](https://github.com/sesori-ai/pr-monitor-plugin/blob/main/docs/configuration.md#auto-merge)
-before turning it on.
+auto-merge on, starting a monitor (or turning auto-merge on with `set_auto_merge`) removes any ready label that is
+already there and asks the agent to reassess. With auto-merge on, ready means merge: the agent calls `mark_ready`
+without waiting for a human review. Merged PRs get an `automatically-merged` label. Read the [auto-merge
+guide](https://github.com/sesori-ai/pr-monitor-plugin/blob/main/docs/configuration.md#auto-merge) before turning it on.
 
 More in the repository docs:
 [how the monitor decides](https://github.com/sesori-ai/pr-monitor-plugin/blob/main/docs/behavior.md),

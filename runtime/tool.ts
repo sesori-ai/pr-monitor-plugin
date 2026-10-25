@@ -5,6 +5,7 @@ export enum MonitorAction {
   status = "status",
   markReady = "mark_ready",
   unmarkReady = "unmark_ready",
+  setAutoMerge = "set_auto_merge",
 }
 
 export const MONITOR_ACTION_VALUES = [
@@ -14,12 +15,13 @@ export const MONITOR_ACTION_VALUES = [
   MonitorAction.status,
   MonitorAction.markReady,
   MonitorAction.unmarkReady,
+  MonitorAction.setAutoMerge,
 ] as const
 
 export const AUTO_MERGE_PARAM_DESCRIPTION =
-  "start only. Explicitly enable (true) or disable (false) auto-merge for this monitor, overriding autoMerge " +
-  "config and SESORI_PR_MONITOR_AUTO_MERGE. Set it only when the user asks to enable or disable auto-merge; " +
-  "omit it otherwise so configuration decides."
+  "start and set_auto_merge only. Explicitly enable (true) or disable (false) auto-merge for this monitor, " +
+  "overriding autoMerge config and SESORI_PR_MONITOR_AUTO_MERGE. Set it only when the user asks to enable or " +
+  "disable auto-merge; omit it on start otherwise so configuration decides. Required for set_auto_merge."
 
 export function buildMonitorToolDescription({
   delivery,
@@ -52,13 +54,17 @@ export function buildMonitorToolDescription({
     `${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine ` +
     "after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current " +
     "state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a " +
-    "later clean assessment). With autoMerge enabled, automatic readiness and mark_ready also " +
-    "make one squash-merge attempt for the accepted head using only the PR title; rejected or unknown outcomes " +
-    "keep readiness and are not retried automatically, while a changed head cancels standalone readiness. " +
+    "later clean assessment), and set_auto_merge (turn auto-merge on or off for an active monitor on explicit user " +
+    "request; enabling it on an already-ready PR removes the label so the current head is reassessed). The ready " +
+    "label means the agent's work is done; without auto-merge a human reviews next. With autoMerge enabled, the " +
+    "user has chosen to merge without waiting for human review: automatic readiness and mark_ready make one " +
+    "squash-merge attempt for the accepted head using only the PR title, so call mark_ready as soon as nothing is " +
+    "left to do and never hold it back to wait for a human. Rejected or unknown outcomes keep readiness and are " +
+    "not retried automatically, while a changed head cancels standalone readiness. " +
     "Ready actions do not require an active monitor. The PR must be `owner/repo#123` or a " +
     `full URL; \`all\` is allowed only for stop/flush. Global tuning lives in ` +
     `~/.config/pr-monitor/config.json; ${configPath} overrides it. An explicit SESORI_PR_MONITOR_AUTO_MERGE ` +
     `environment value overrides autoMerge config; the start autoMerge argument overrides both for that monitor and ` +
-    `must be set only on explicit user request. ${lifecycle}`
+    `must be set only on explicit user request, as must set_auto_merge. ${lifecycle}`
   )
 }

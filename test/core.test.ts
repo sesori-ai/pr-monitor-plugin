@@ -126,7 +126,7 @@ function watchHarness(
       onStopped: () => {},
       readiness: opts.readiness
         ? {
-            label: "ready-for-human-review",
+            label: "agent-ready",
             replyPrefix: "[Agent reply]",
             change: async (ready) => {
               readyChanges.push(ready)
@@ -183,7 +183,7 @@ test("the default debounce is two minutes", async () => {
 })
 
 test("ready-label matching follows GitHub's case-insensitive label identity", () => {
-  assert.equal(hasReadyLabel(snapshot({ labels: ["Ready-For-Human-Review"] }), "ready-for-human-review"), true)
+  assert.equal(hasReadyLabel(snapshot({ labels: ["Agent-Ready"] }), "agent-ready"), true)
 })
 
 test("automatic readiness accepts deliberately unresolved threads after a prefixed local reply", () => {
@@ -311,7 +311,7 @@ test("startup observes readiness without auto-labelling empty or completed snaps
       await harness.watch.manualFlush()
       assert.deepEqual(harness.readyChanges, [])
       if (announceOnStart) {
-        assert.match(harness.reports[0]!, /Ready for human review: NO/)
+        assert.match(harness.reports[0]!, /Ready: NO/)
         assert.match(harness.reports[0]!, /Startup\/restart assessment/)
       }
     }
@@ -329,12 +329,12 @@ test("a restarted monitor can hand off a settled PR immediately after agent asse
 })
 
 test("startup preserves an existing ready label and retries delivery without auto-labelling", async () => {
-  const accepted = snapshot({ labels: ["ready-for-human-review"] })
+  const accepted = snapshot({ labels: ["agent-ready"] })
   const existing = watchHarness(accepted, [accepted], config(), { readiness: true })
   await existing.watch.initializeReadiness()
   await existing.watch.announceInitial()
   assert.deepEqual(existing.readyChanges, [])
-  assert.match(existing.reports[0]!, /Ready for human review: YES/)
+  assert.match(existing.reports[0]!, /Ready: YES/)
 
   const initial = snapshot()
   const retry = watchHarness(initial, [initial], config(), { readiness: true, deliveryFailures: 1 })
@@ -373,7 +373,7 @@ test("startup delivery retries still auto-label when CI finishes or feedback is 
         report = harness.reports[0]!
       }
       assert.deepEqual(harness.readyChanges, [true])
-      assert.match(report, /Ready for human review: YES/)
+      assert.match(report, /Ready: YES/)
     }
   }
 })
@@ -387,7 +387,7 @@ test("checks completing after startup still trigger automatic readiness", async 
   harness.advance(2 * 60_000)
   await harness.watch.tick()
   assert.deepEqual(harness.readyChanges, [true])
-  assert.match(harness.reports.at(-1)!, /Ready for human review: YES/)
+  assert.match(harness.reports.at(-1)!, /Ready: YES/)
 })
 
 test("new bot feedback on an existing unresolved thread urgently withdraws readiness", async () => {
@@ -404,8 +404,8 @@ test("new bot feedback on an existing unresolved thread urgently withdraws readi
     ...acknowledged.comments.map(({ id: _id, ...comment }) => comment),
     { author: "review-bot", createdAt: "2026-08-03T12:01:00Z", isBot: true },
   ])
-  const initial = snapshot({ labels: ["ready-for-human-review"], reviewThreads: [acknowledged] })
-  const changed = snapshot({ labels: ["ready-for-human-review"], reviewThreads: [followUp] })
+  const initial = snapshot({ labels: ["agent-ready"], reviewThreads: [acknowledged] })
+  const changed = snapshot({ labels: ["agent-ready"], reviewThreads: [followUp] })
   const harness = watchHarness(initial, [changed], config({ announceOnStart: false }), { readiness: true })
 
   await harness.watch.tick()
@@ -414,7 +414,7 @@ test("new bot feedback on an existing unresolved thread urgently withdraws readi
   assert.equal(harness.reports.length, 1)
   assert.match(harness.reports[0]!, /ACTION REQUIRED: 1 thread received 1 new relevant comment/)
   assert.match(harness.reports[0]!, /unresolved-thread count is unchanged at 1/)
-  assert.match(harness.reports[0]!, /Ready for human review: NO/)
+  assert.match(harness.reports[0]!, /Ready: NO/)
 })
 
 test("deleting the latest prefixed reply urgently withdraws readiness", async () => {
@@ -429,15 +429,15 @@ test("deleting the latest prefixed reply urgently withdraws readiness", async ()
     isAgentReply: true,
   }
   const initial = snapshot({
-    labels: ["ready-for-human-review"],
+    labels: ["agent-ready"],
     reviewThreads: [thread("thread-1", false, [feedback, reply])],
   })
   const changed = snapshot({
-    labels: ["ready-for-human-review"],
+    labels: ["agent-ready"],
     reviewThreads: [thread("thread-1", false, [feedback])],
   })
   const edited = snapshot({
-    labels: ["ready-for-human-review"],
+    labels: ["agent-ready"],
     reviewThreads: [thread("thread-1", false, [feedback, { ...reply, isAgentReply: false }])],
   })
   const agentOnly = snapshot({
@@ -454,14 +454,14 @@ test("deleting the latest prefixed reply urgently withdraws readiness", async ()
   await harness.watch.tick()
 
   assert.deepEqual(harness.readyChanges, [false])
-  assert.match(harness.reports[0]!, /Ready for human review: NO/)
+  assert.match(harness.reports[0]!, /Ready: NO/)
   assert.match(harness.reports[0]!, /1 review thread awaits a prefixed reply/)
 })
 
 test("new review-summary feedback withdraws readiness even when its review is approving", async () => {
-  const initial = snapshot({ labels: ["ready-for-human-review"] })
+  const initial = snapshot({ labels: ["agent-ready"] })
   const changed = snapshot({
-    labels: ["ready-for-human-review"],
+    labels: ["agent-ready"],
     reviews: [{ login: "review-bot", state: "APPROVED", submittedAt: "2026-08-03T12:01:00Z" }],
     reviewSummaries: [
       {
@@ -506,14 +506,14 @@ test("manual flush reports withdrawal before restoring already-acknowledged feed
       isAgentReply: true,
     },
   ])
-  const initial = snapshot({ labels: ["ready-for-human-review"], reviewThreads: [initialThread] })
-  const changed = snapshot({ labels: ["ready-for-human-review"], reviewThreads: [changedThread] })
+  const initial = snapshot({ labels: ["agent-ready"], reviewThreads: [initialThread] })
+  const changed = snapshot({ labels: ["agent-ready"], reviewThreads: [changedThread] })
   const harness = watchHarness(initial, [changed], config({ announceOnStart: false }), { readiness: true })
 
   const report = await harness.watch.manualFlush()
 
   assert.deepEqual(harness.readyChanges, [false])
-  assert.match(report, /Ready for human review: NO/)
+  assert.match(report, /Ready: NO/)
 })
 
 test("manual readiness accepts current bot feedback but later feedback withdraws it", async () => {
@@ -527,12 +527,12 @@ test("manual readiness accepts current bot feedback but later feedback withdraws
   const initial = snapshot({ mergeable: "CONFLICTING", reviewThreads: [first] })
   const accepted = snapshot({
     mergeable: "CONFLICTING",
-    labels: ["ready-for-human-review"],
+    labels: ["agent-ready"],
     reviewThreads: [first],
   })
   const later = snapshot({
     mergeable: "CONFLICTING",
-    labels: ["ready-for-human-review"],
+    labels: ["agent-ready"],
     reviewThreads: [second],
   })
   const harness = watchHarness(initial, [accepted, later], config({ announceOnStart: false }), { readiness: true })
@@ -544,7 +544,7 @@ test("manual readiness accepts current bot feedback but later feedback withdraws
 
   await harness.watch.tick()
   assert.deepEqual(harness.readyChanges, [true, false])
-  assert.match(harness.reports[0]!, /Ready for human review: NO/)
+  assert.match(harness.reports[0]!, /Ready: NO/)
 })
 
 test("failed automatic withdrawal is reported and retried without losing feedback", async () => {
@@ -565,8 +565,8 @@ test("failed automatic withdrawal is reported and retried without losing feedbac
     },
     { author: "reviewer", createdAt: "2026-08-03T12:01:00Z" },
   ])
-  const initial = snapshot({ labels: ["ready-for-human-review"], reviewThreads: [initialThread] })
-  const changed = snapshot({ labels: ["ready-for-human-review"], reviewThreads: [changedThread] })
+  const initial = snapshot({ labels: ["agent-ready"], reviewThreads: [initialThread] })
+  const changed = snapshot({ labels: ["agent-ready"], reviewThreads: [changedThread] })
   const harness = watchHarness(
     initial,
     [changed, changed],
@@ -576,11 +576,11 @@ test("failed automatic withdrawal is reported and retried without losing feedbac
 
   await harness.watch.tick()
   assert.match(harness.reports[0]!, /Readiness automation failed: could not remove label/)
-  assert.match(harness.reports[0]!, /Ready for human review: YES/)
+  assert.match(harness.reports[0]!, /Ready: YES/)
 
   await harness.watch.tick()
   assert.deepEqual(harness.readyChanges, [false, false])
-  assert.match(harness.reports[1]!, /Ready for human review: NO/)
+  assert.match(harness.reports[1]!, /Ready: NO/)
   assert.doesNotMatch(harness.reports[1]!, /Readiness automation failed/)
 })
 
@@ -588,7 +588,7 @@ test("an ambiguously failed auto-add cannot accept newer feedback when its label
   const initial = snapshot({ checks: [{ name: "tests", outcome: "pending" }] })
   const passed = snapshot({ checks: [{ name: "tests", outcome: "success" }] })
   const changed = snapshot({
-    labels: ["ready-for-human-review"],
+    labels: ["agent-ready"],
     reviewThreads: [
       thread("thread-1", false, [
         { author: "reviewer", createdAt: "2026-08-03T12:01:00Z" },
@@ -608,7 +608,7 @@ test("an ambiguously failed auto-add cannot accept newer feedback when its label
   await harness.watch.tick()
 
   assert.deepEqual(harness.readyChanges, [true, false])
-  assert.match(harness.reports.at(-1)!, /Ready for human review: NO/)
+  assert.match(harness.reports.at(-1)!, /Ready: NO/)
   assert.match(harness.reports.at(-1)!, /ACTION REQUIRED/)
 })
 
@@ -617,7 +617,7 @@ test("a ready label observed after failed auto-add does not authorize auto-merge
   const passed = snapshot({ checks: [{ name: "tests", outcome: "success" }] })
   const observedReady = snapshot({
     checks: [{ name: "tests", outcome: "success" }],
-    labels: ["ready-for-human-review"],
+    labels: ["agent-ready"],
   })
   const harness = watchHarness(
     initial,
@@ -633,7 +633,7 @@ test("a ready label observed after failed auto-add does not authorize auto-merge
 
   assert.deepEqual(harness.readyChanges, [true])
   assert.deepEqual(harness.autoMerges, [])
-  assert.match(harness.reports.at(-1)!, /Ready for human review: YES/)
+  assert.match(harness.reports.at(-1)!, /Ready: YES/)
   assert.doesNotMatch(harness.reports.at(-1)!, /Auto-merge succeeded/)
 })
 
@@ -662,7 +662,7 @@ test("stopping a watch fences queued flush and ready mutations", async () => {
       log: () => {},
       onStopped: () => {},
       readiness: {
-        label: "ready-for-human-review",
+        label: "agent-ready",
         replyPrefix: "[Agent reply]",
         change: async (ready) => {
           readyChanges.push(ready)
@@ -744,7 +744,7 @@ test("stop notices reflect a label mutation that finished while the watch draine
       log: () => {},
       onStopped: () => {},
       readiness: {
-        label: "ready-for-human-review",
+        label: "agent-ready",
         replyPrefix: "[Agent reply]",
         change: async () => {
           announceMutation()
@@ -763,12 +763,12 @@ test("stop notices reflect a label mutation that finished while the watch draine
   await marking
   await watch.waitUntilStopped()
 
-  assert.match(watch.stopNotice("Monitor stopped for test."), /Ready for human review: YES/)
+  assert.match(watch.stopNotice("Monitor stopped for test."), /Ready: YES/)
 })
 
 test("a new CI-less head withdraws readiness and restores it after quiet", async () => {
-  const initial = snapshot({ labels: ["ready-for-human-review"], headSha: "head-1" })
-  const pushed = snapshot({ labels: ["ready-for-human-review"], headSha: "head-2" })
+  const initial = snapshot({ labels: ["agent-ready"], headSha: "head-1" })
+  const pushed = snapshot({ labels: ["agent-ready"], headSha: "head-2" })
   const observedUnready = snapshot({ labels: [], headSha: "head-2" })
   const harness = watchHarness(
     initial,
@@ -779,12 +779,12 @@ test("a new CI-less head withdraws readiness and restores it after quiet", async
 
   await harness.watch.tick()
   assert.deepEqual(harness.readyChanges, [false])
-  assert.match(harness.reports[0]!, /Ready for human review: NO/)
+  assert.match(harness.reports[0]!, /Ready: NO/)
 
   harness.advance(2 * 60_000)
   await harness.watch.tick()
   assert.deepEqual(harness.readyChanges, [false, true])
-  assert.match(harness.reports[1]!, /Ready for human review: YES/)
+  assert.match(harness.reports[1]!, /Ready: YES/)
 })
 
 test("automatic readiness triggers one title-only auto-merge attempt for the accepted head", async () => {
@@ -796,7 +796,7 @@ test("automatic readiness triggers one title-only auto-merge attempt for the acc
   })
   const observedReady = snapshot({
     ...passed,
-    labels: ["ready-for-human-review"],
+    labels: ["agent-ready"],
   })
   const harness = watchHarness(
     initial,
@@ -818,7 +818,7 @@ test("automatic readiness triggers one title-only auto-merge attempt for the acc
 
 test("an externally observed ready label does not trigger auto-merge", async () => {
   const initial = snapshot()
-  const externallyReady = snapshot({ labels: ["ready-for-human-review"] })
+  const externallyReady = snapshot({ labels: ["agent-ready"] })
   const harness = watchHarness(initial, [externallyReady], config({ announceOnStart: false }), {
     readiness: true,
     autoMerge: true,
@@ -835,7 +835,7 @@ test("failed automatic merge keeps readiness and is not retried on later polls",
   const passed = snapshot({ checks: [{ name: "tests", outcome: "success" }] })
   const observedReady = snapshot({
     checks: [{ name: "tests", outcome: "success" }],
-    labels: ["ready-for-human-review"],
+    labels: ["agent-ready"],
   })
   const harness = watchHarness(
     initial,
@@ -853,7 +853,7 @@ test("failed automatic merge keeps readiness and is not retried on later polls",
   assert.equal(harness.autoMerges.length, 1)
   assert.match(harness.reports[0]!, /Auto-merge failed after the ready label was added/)
   assert.match(harness.reports[0]!, /no automatic retry will occur/)
-  assert.match(harness.reports[0]!, /Ready for human review: YES/)
+  assert.match(harness.reports[0]!, /Ready: YES/)
 })
 
 test("manual readiness triggers auto-merge and returns its result", async () => {
@@ -918,19 +918,19 @@ test("external removal plus feedback reports unready before an acknowledged rest
       isAgentReply: true,
     },
   ])
-  const initial = snapshot({ labels: ["ready-for-human-review"], reviewThreads: [initialThread] })
+  const initial = snapshot({ labels: ["agent-ready"], reviewThreads: [initialThread] })
   const changed = snapshot({ labels: [], reviewThreads: [changedThread] })
   const harness = watchHarness(initial, [changed], config({ announceOnStart: false }), { readiness: true })
 
   await harness.watch.tick()
 
   assert.deepEqual(harness.readyChanges, [])
-  assert.match(harness.reports[0]!, /Ready for human review: NO/)
+  assert.match(harness.reports[0]!, /Ready: NO/)
   assert.match(harness.reports[0]!, /ACTION REQUIRED/)
 })
 
 test("external label removal creates no hold and automatic readiness restores it", async () => {
-  const initial = snapshot({ labels: ["ready-for-human-review"] })
+  const initial = snapshot({ labels: ["agent-ready"] })
   const removed = snapshot({ labels: [] })
   const harness = watchHarness(initial, [removed, removed], config({ announceOnStart: false }), { readiness: true })
 
@@ -940,7 +940,7 @@ test("external label removal creates no hold and automatic readiness restores it
   await harness.watch.tick()
 
   assert.deepEqual(harness.readyChanges, [true])
-  assert.match(harness.reports[0]!, /Ready for human review: YES/)
+  assert.match(harness.reports[0]!, /Ready: YES/)
 })
 
 test("thread resolution reports activity without withdrawing readiness", async () => {
@@ -954,11 +954,11 @@ test("thread resolution reports activity without withdrawing readiness", async (
     },
   ]
   const initial = snapshot({
-    labels: ["ready-for-human-review"],
+    labels: ["agent-ready"],
     reviewThreads: [thread("thread-1", false, comments)],
   })
   const resolved = snapshot({
-    labels: ["ready-for-human-review"],
+    labels: ["agent-ready"],
     reviewThreads: [thread("thread-1", true, comments)],
   })
   const harness = watchHarness(initial, [resolved, resolved], config({ announceOnStart: false }), { readiness: true })
@@ -969,7 +969,7 @@ test("thread resolution reports activity without withdrawing readiness", async (
   await harness.watch.tick()
 
   assert.deepEqual(harness.readyChanges, [])
-  assert.match(harness.reports[0]!, /Ready for human review: YES/)
+  assert.match(harness.reports[0]!, /Ready: YES/)
 })
 
 test("a prefixed local reply can restore automatic readiness after quiet", async () => {
@@ -995,7 +995,7 @@ test("a prefixed local reply can restore automatic readiness after quiet", async
   await harness.watch.tick()
 
   assert.deepEqual(harness.readyChanges, [true])
-  assert.match(harness.reports[0]!, /Ready for human review: YES/)
+  assert.match(harness.reports[0]!, /Ready: YES/)
 })
 
 test("a failed initial announcement retries all startup comments", async () => {
@@ -1377,7 +1377,7 @@ test("snapshot pagination includes late checks, review summaries, and labels", a
           pullRequest: {
             labels: {
               pageInfo: { hasNextPage: false, endCursor: null },
-              nodes: [{ name: "ready-for-human-review" }],
+              nodes: [{ name: "agent-ready" }],
             },
           },
         },
@@ -1404,7 +1404,7 @@ test("snapshot pagination includes late checks, review summaries, and labels", a
   assert.ok(calls[1]?.includes("head=head-1"))
   assert.equal(calls[1]?.some((arg) => arg.startsWith("number=")), false)
   assert.deepEqual(result.reviewSummaries.map((comment) => comment.id), ["review-1", "review-2"])
-  assert.deepEqual(result.labels, ["first-label", "ready-for-human-review"])
+  assert.deepEqual(result.labels, ["first-label", "agent-ready"])
   assert.equal(calls.length, 4)
 })
 
@@ -1719,14 +1719,14 @@ test("a new merge conflict bypasses debounce and a running-CI hold", async () =>
 })
 
 test("terminal states preserve an existing ready label", async () => {
-  const initial = snapshot({ labels: ["ready-for-human-review"] })
-  const merged = snapshot({ state: "MERGED", labels: ["ready-for-human-review"] })
+  const initial = snapshot({ labels: ["agent-ready"] })
+  const merged = snapshot({ state: "MERGED", labels: ["agent-ready"] })
   const harness = watchHarness(initial, [merged], config({ announceOnStart: false }), { readiness: true })
 
   await harness.watch.tick()
 
   assert.deepEqual(harness.readyChanges, [])
-  assert.match(harness.reports[0]!, /Ready for human review: YES/)
+  assert.match(harness.reports[0]!, /Ready: YES/)
   assert.match(harness.reports[0]!, /Monitor stopped: PR merged/)
   assert.doesNotMatch(harness.reports[0]!, /Required next step/)
 })
@@ -1807,4 +1807,89 @@ test("ordinary activity waits for the two-minute quiet window", async () => {
   harness.advance(1)
   await harness.watch.tick()
   assert.equal(harness.reports.length, 1)
+})
+
+test("set_auto_merge label reset fences activity buffered before the toggle", async () => {
+  const initial = snapshot({ labels: ["agent-ready"] })
+  const buffered = snapshot({ labels: ["agent-ready"], pendingReviewers: ["alex"] })
+  const reset = snapshot({ pendingReviewers: ["alex"] })
+  const later = snapshot({ pendingReviewers: ["alex", "sam"] })
+  const harness = watchHarness(initial, [buffered, reset, reset, later, later], config({ announceOnStart: false }), {
+    readiness: true,
+  })
+  const merges: string[] = []
+  await harness.watch.tick()
+  const text = await harness.watch.setAutoMerge({
+    squashMerge: async ({ pullRequest }) => {
+      merges.push(pullRequest.headSha)
+      return "Auto-merge succeeded."
+    },
+  })
+  assert.match(text, /Auto-merge enabled .* ready removed/)
+  assert.deepEqual(harness.readyChanges, [false])
+
+  for (let i = 0; i < 2; i++) {
+    harness.advance(5 * 60_000)
+    await harness.watch.tick()
+  }
+  assert.deepEqual(harness.readyChanges, [false])
+  assert.deepEqual(merges, [])
+
+  for (let i = 0; i < 2; i++) {
+    harness.advance(5 * 60_000)
+    await harness.watch.tick()
+  }
+  assert.deepEqual(harness.readyChanges, [false, true])
+  assert.deepEqual(merges, ["head-1"])
+})
+
+test("set_auto_merge label reset lifts after a same-head CI rerun is observed", async () => {
+  const green = [{ name: "tests", outcome: "success" as const }]
+  const initial = snapshot({ labels: ["agent-ready"], checks: green })
+  const running = snapshot({ checks: [{ name: "tests", outcome: "pending" }] })
+  const rerun = snapshot({ checks: green })
+  const harness = watchHarness(initial, [running, rerun, rerun], config({ announceOnStart: false }), {
+    readiness: true,
+  })
+  const merges: string[] = []
+  await harness.watch.setAutoMerge({
+    squashMerge: async ({ pullRequest }) => {
+      merges.push(pullRequest.headSha)
+      return "Auto-merge succeeded."
+    },
+  })
+  assert.deepEqual(harness.readyChanges, [false])
+
+  for (let i = 0; i < 3; i++) {
+    harness.advance(5 * 60_000)
+    await harness.watch.tick()
+  }
+  assert.deepEqual(harness.readyChanges, [false, true])
+  assert.deepEqual(merges, ["head-1"])
+})
+
+test("set_auto_merge label reset lets a later prefixed reply restore readiness", async () => {
+  const feedback = { author: "reviewer", createdAt: "2026-01-01T00:00:00Z" }
+  const reply = { author: "me", createdAt: "2026-01-01T00:01:00Z", isLocal: true, isAgentReply: true }
+  const initial = snapshot({ labels: ["agent-ready"], reviewThreads: [thread("t1", false, [feedback])] })
+  const reset = snapshot({ reviewThreads: [thread("t1", false, [feedback])] })
+  const replied = snapshot({ reviewThreads: [thread("t1", false, [feedback, reply])] })
+  const harness = watchHarness(initial, [reset, replied, replied], config({ announceOnStart: false }), {
+    readiness: true,
+  })
+  const merges: string[] = []
+  await harness.watch.setAutoMerge({
+    squashMerge: async ({ pullRequest }) => {
+      merges.push(pullRequest.headSha)
+      return "Auto-merge succeeded."
+    },
+  })
+  assert.deepEqual(harness.readyChanges, [false])
+
+  for (let i = 0; i < 3; i++) {
+    harness.advance(5 * 60_000)
+    await harness.watch.tick()
+  }
+  assert.deepEqual(harness.readyChanges, [false, true])
+  assert.deepEqual(merges, ["head-1"])
 })

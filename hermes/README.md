@@ -1,7 +1,7 @@
 # PR Monitor for Hermes
 
 Watches your GitHub pull requests and posts `[PR Monitor]` status reports into the Hermes conversation that started
-the monitor. It also manages the ready-for-human-review label.
+the monitor. It also manages the `agent-ready` label.
 
 ## Install
 
@@ -21,10 +21,10 @@ No npm install or build step is needed. The worker, tool schema, and skill ship 
 
 ## Use
 
-Ask Hermes to monitor `owner/repo#123`, or open a PR and let the bundled `monitor-pr` skill start the monitor for
-you. The tool offers `start`, `stop`, `status`, `flush`, `mark_ready`, and `unmark_ready`. To read the workflow the
-agent follows, run `skill_view(name="pr-monitor:monitor-pr")`. While a monitor runs, the agent ends its turn and
-lets PR Monitor do the polling.
+Ask Hermes to monitor `owner/repo#123`, or open a PR and let the bundled `monitor-pr` skill start the monitor for you.
+The tool offers `start`, `stop`, `status`, `flush`, `mark_ready`, `unmark_ready`, and `set_auto_merge`. To read the
+workflow the agent follows, run `skill_view(name="pr-monitor:monitor-pr")`. While a monitor runs, the agent ends its
+turn and lets PR Monitor do the polling.
 
 ## Where it works
 
@@ -52,11 +52,12 @@ Global settings come from `~/.config/pr-monitor/config.json`. Project settings a
 working directory: `.pr-monitor.json`, then `.hermes/pr-monitor.json`, then `.opencode/pr-monitor.json`.
 
 To merge ready PRs automatically, set `autoMerge: true` in the global file or a trusted project file. Project config
-overrides global config, an explicit `SESORI_PR_MONITOR_AUTO_MERGE` environment value overrides both, and a user-requested
-`autoMerge` argument on `start` overrides all of them for that monitor. With
-auto-merge on, starting a monitor removes any ready label that is already there and asks the agent to reassess.
-Merged PRs get an `automatically-merged` label. Read
-[configuration and auto-merge safety](../docs/configuration.md#auto-merge) before turning it on.
+overrides global config, an explicit `SESORI_PR_MONITOR_AUTO_MERGE` environment value overrides both, and a
+user-requested `autoMerge` argument on `start` overrides all of them for that monitor. With auto-merge on, starting a
+monitor (or turning auto-merge on with `set_auto_merge`) removes any ready label that is already there and asks the
+agent to reassess. With auto-merge on, ready means merge: the agent calls `mark_ready` without waiting for a human
+review. Merged PRs get an `automatically-merged` label. Read [configuration and auto-merge
+safety](../docs/configuration.md#auto-merge) before turning it on.
 
 ## Compatibility notes
 

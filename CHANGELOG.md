@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0]
+
+### Added
+
+- `pr_monitor` action `set_auto_merge` (with `autoMerge: true|false`) turns auto-merge on or off for an active
+  monitor. Turning it on for a PR that already carries the ready label removes the label so the agent reassesses
+  before a merge, matching the startup reset; activity observed before the toggle cannot re-add readiness until a
+  later poll observes new activity (or a prefixed reply makes the PR eligible) or `mark_ready` is called. Claude Code gets a matching `/pr-monitor:auto-merge on|off` command.
+
+### Changed
+
+- **Breaking:** the default `readyLabel` is now `agent-ready` instead of `ready-for-human-review`, since a ready PR
+  is either reviewed by a human or auto-merged. Set `readyLabel` to keep the old name; open PRs carrying only the old
+  label are no longer seen as ready.
+- Reports say `Ready: YES|NO` instead of `Ready for human review: YES|NO`, and label action results drop the
+  "human review" wording.
+- With auto-merge enabled, reports, start results, tool descriptions, skills, and the Claude `/pr-monitor:ready`
+  command now tell the agent that readiness is the user's merge approval, so it calls `mark_ready` once nothing is
+  left to do instead of holding it back to wait for a human review.
+
+### Removed
+
+- **Breaking:** DeepSeek Harness support and the `@sesori/pr-monitor-deepseek` package are removed.
+
 ## [0.6.0]
 
 ### Added

@@ -25,12 +25,9 @@ relative `XDG_CONFIG_HOME` is ignored.
 | Codex | `.pr-monitor.json`, then `.codex/pr-monitor.json`, then `.opencode/pr-monitor.json` |
 | Pi | `.pr-monitor.json`, then `.pi/pr-monitor.json`, then `.opencode/pr-monitor.json` |
 | OMP | `.pr-monitor.json`, then `.omp/pr-monitor.json`, then `.opencode/pr-monitor.json` |
-| DeepSeek Harness | Not loaded; user-global configuration only |
 | Hermes | `.pr-monitor.json`, then `.hermes/pr-monitor.json`, then `.opencode/pr-monitor.json` |
 
-Pi and OMP only read project files once you have trusted the project. Global config is always read. DeepSeek
-Harness exposes no project-trust signal to Cordis plugins, so it ignores every repository config path and
-invoking-project `.env` value.
+Pi and OMP only read project files once you have trusted the project. Global config is always read.
 
 ### How settings combine
 
@@ -40,19 +37,16 @@ Later layers override earlier ones:
 2. the global file;
 3. the first project file that parses;
 4. the `SESORI_PR_MONITOR_AUTO_MERGE` environment variable, which affects `autoMerge` only; and
-5. the `autoMerge` argument of a `start` call, which affects only that monitor.
-
-DeepSeek Harness skips the project layer. It resolves its global config root and auto-merge override from the
-immutable launch-provenance snapshot, accepting only inherited-process or Harness-home user values.
+5. the `autoMerge` argument of a `start` or `set_auto_merge` call, which affects only that monitor.
 
 A project file only replaces the keys it sets. Unknown keys are ignored. An invalid value keeps the value from the
 layer below. A file that is not valid JSON is logged and skipped, and the next candidate is tried.
 
 Settings are read each time a monitor starts or a standalone ready action runs. A monitor that is already running
-keeps the settings it started with.
+keeps the settings it started with; only `set_auto_merge` can change its auto-merge choice.
 
-> A project file can turn on auto-merge on hosts that load it. In a repository you do not trust, check its config
-> before starting a monitor with a GitHub account that is allowed to merge. DeepSeek Harness never loads it.
+> A project file can turn on auto-merge. In a repository you do not trust, check its config before starting a
+> monitor with a GitHub account that is allowed to merge.
 
 ## All settings
 
@@ -67,7 +61,7 @@ Every key with its default value:
   "announceOnStart": true,
   "flushOnCiFailure": true,
   "desktopNotifications": false,
-  "readyLabel": "ready-for-human-review",
+  "readyLabel": "agent-ready",
   "autoMerge": false,
   "keepAlive": true,
   "keepAliveMaxMinutes": 120
@@ -93,7 +87,7 @@ report instead of each sending their own.
 | Key | Default | What it does |
 |---|---:|---|
 | `ignoreCommentTag` | `<!-- pr-monitor:reply -->` | The prefix every agent-written GitHub reply must start with. |
-| `readyLabel` | `ready-for-human-review` | The label added when a PR is ready and removed when it is not. |
+| `readyLabel` | `agent-ready` | The label added when the agent's work on a PR is done and removed when it is not. |
 | `autoMerge` | `false` | Make one squash-merge attempt after PR Monitor marks the PR ready itself. See [auto-merge](#auto-merge). |
 
 The reply prefix has to be the very first text in a comment from the monitoring account. A comment without it
@@ -118,7 +112,7 @@ turns. Codex and socketless Claude Code sessions use them as described in the [h
 > **Merging cannot be undone.** Turn auto-merge on only in your personal config or in a repository you trust, using
 > a GitHub account that is meant to merge that repository's pull requests.
 
-Turn it on in the global file or, outside DeepSeek Harness, a project file:
+Turn it on in the global or a project file:
 
 ```json
 {
@@ -126,8 +120,7 @@ Turn it on in the global file or, outside DeepSeek Harness, a project file:
 }
 ```
 
-Or with an environment variable, which wins over both files. DeepSeek Harness accepts this value only from the
-inherited process or Harness-home user environment, never the invoking project's `.env`:
+Or with an environment variable, which wins over both files:
 
 - `true` or `1` turns it on;
 - `false`, `0`, or an empty value turns it off; and
@@ -143,7 +136,12 @@ launchctl setenv SESORI_PR_MONITOR_AUTO_MERGE true
 
 You can also ask the agent to turn auto-merge on or off for one PR, for example "watch this PR with auto-merge
 off". The agent passes `autoMerge: true` or `autoMerge: false` when it starts the monitor, and that choice wins over
-the files and the environment variable for that monitor only. Agents are told to set it only when you ask.
+the files and the environment variable for that monitor only. For a monitor that is already running, ask "turn on
+auto-merge for this PR": the agent calls `set_auto_merge` with `autoMerge: true` or `false`. Claude Code also has
+`/pr-monitor:auto-merge on|off`. Agents are told to change it only when you ask.
+
+With auto-merge on, ready means merge. The agent is told that marking the PR ready is your merge approval, so it
+calls `mark_ready` once nothing is left to do instead of waiting for a human review.
 
 ### When it merges
 
@@ -157,8 +155,9 @@ whose result is unclear.
 
 ### How it stays safe
 
-- **Fresh look at startup.** Starting a monitor with auto-merge on removes any ready label that is already there.
-  The agent has to assess the PR again before `mark_ready` can lead to a merge.
+- **Fresh look at startup.** Starting a monitor with auto-merge on, or turning it on with `set_auto_merge`, removes
+  any ready label that is already there. The agent has to assess the PR again before `mark_ready` can lead to a
+  merge.
 - **Same commit or no merge.** A standalone `mark_ready` notes the head commit before adding the label and checks
   it again afterwards. If the commit changed or cannot be verified, the merge is cancelled and PR Monitor tries to
   take the label off again. If that cleanup fails, the result says so and the label stays until you remove it.

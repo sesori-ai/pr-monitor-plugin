@@ -1,8 +1,8 @@
 ---
 name: monitor-pr
 description: >-
-  Drive a GitHub PR to ready-for-human-review or opt-in auto-merge
-  without supervision. Start pr_monitor immediately after opening a PR and act
+  Drive a GitHub PR to ready (handed to a human reviewer, or a merge attempt
+  when auto-merge is enabled) without supervision. Start pr_monitor immediately after opening a PR and act
   on every automatic report;
   the monitor owns polling, delivery, and readiness labels — reports arrive on
   their own, so never create sleeps, delays, timeouts, scheduled checks, or
@@ -14,7 +14,10 @@ description: >-
 # monitor-pr
 
 Own a PR from creation through handoff or opt-in auto-merge. The monitor polls GitHub, delivers
-reports, and automatically adds or withdraws the configured ready label. The
+reports, and automatically adds or withdraws the configured ready label
+(default `agent-ready`). The label means the agent's work is done. Without
+auto-merge a human reviews next; with auto-merge the monitor attempts a squash
+merge, and the PR counts as merged only after `Auto-merge succeeded`. The
 agent judges the substance of feedback and may manually accept non-actionable
 activity without creating bot acknowledgement loops.
 
@@ -35,8 +38,17 @@ enable or disable auto-merge for a PR, pass `autoMerge: true` or
 `autoMerge: false` with `start`; that request overrides config and the
 environment for this monitor. When restarting a missing watch, pass the same
 explicit value again; if you no longer know it, ask the user before starting.
-Never set it without such a request. To change it on a running monitor, `stop`
-and `start` again with the requested value.
+Never set it without such a request. To change it on a running monitor, call
+`pr_monitor(action: "set_auto_merge", pr: "owner/repo#123", autoMerge: true)`
+(or `false`). Turning it on for a PR that already carries the ready label
+removes the label; reassess and call `mark_ready` once it is ready.
+
+With auto-merge enabled, the user has chosen to merge without waiting for human
+review. `mark_ready` is the merge approval, so call it once checks and
+automated reviews have settled, CI is green, the PR is mergeable, and nothing
+actionable remains (after a rejected or unknown merge result, see section 2).
+Never hold it back to keep the PR from merging before a human looks
+at it; that defeats the setting.
 
 If Codex reports that its delivery hook has not registered the conversation,
 monitoring has not started. Installing the plugin does not grant hook trust.
@@ -82,7 +94,8 @@ full existing feedback. Use the PR creation and latest-push history as context:
 
 PR age alone proves nothing: an old PR can have a new head. Assess the current
 head and repository workflow, not a fixed age cutoff. Requested human review
-can remain pending; this label hands the PR to that reviewer. If evidence is
+can remain pending; this label hands the PR to that reviewer, or, with
+auto-merge enabled, triggers one merge attempt. If evidence is
 incomplete, keep the monitor active and use its delivered reports rather than
 creating sleeps or polling loops.
 
@@ -113,7 +126,7 @@ after handling one.
 
 ## 3. Follow readiness, do not reconstruct it
 
-Every report explicitly says `Ready for human review: YES` or `NO`.
+Every report explicitly says `Ready: YES` or `Ready: NO`.
 
 - `YES`: the label is present and keep-alive is handed off. A
   resolution-only or approval report must not cause `unmark_ready`.
@@ -146,8 +159,9 @@ When CI is green, the PR is mergeable, and no actionable work remains, use
 watch and adds the label. Only later invalidating activity withdraws it. Claim
 handoff only after the tool confirms success. When reports say auto-merge is
 enabled, `mark_ready` also makes one irreversible, head-fenced squash-merge
-attempt whose commit uses only the PR title. Never run a duplicate merge command
-after an `Auto-merge succeeded` result.
+attempt whose commit uses only the PR title. That merge is the intended
+outcome, not a risk to avoid. Never run a duplicate merge command after an
+`Auto-merge succeeded` result.
 
 If the comment asks for work, do that work and leave a prefixed reply instead.
 `unmark_ready` removes the label now but does not create a permanent hold;
@@ -176,6 +190,8 @@ call `pr_monitor(action: "stop", pr: "all")`.
 - `status`: list this session's watches and handoff state.
 - `flush`: deliberately fetch a full status; never routine after a report.
 - `stop`: stop one/all watches without waiting for merge.
+- `set_auto_merge`: turn auto-merge on or off for an active watch, only on
+  explicit user request.
 
 ## Avoid the bot-review spiral
 

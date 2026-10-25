@@ -1,14 +1,15 @@
 ---
-description: Mark a GitHub PR as ready for human review (adds a label)
+description: Mark a GitHub PR as ready (adds a label; merges it when auto-merge is enabled)
 argument-hint: "[owner/repo#123 | PR URL]"
 ---
 
 Manually accept a PR's current state with the pr_monitor tool (action "mark_ready"). This unconditionally adds the
-configured ready label (default `ready-for-human-review`, config key `readyLabel`) and records all activity already
+configured ready label (default `agent-ready`, config key `readyLabel`) and records all activity already
 observed by an active watch as accepted. Use it when new activity, such as a bot acknowledgement, is non-actionable
-and should not receive another reply. If `autoMerge` is enabled by monitor config or the
-`SESORI_PR_MONITOR_AUTO_MERGE` environment override, this action also makes one irreversible, head-fenced
-squash-merge attempt using the PR title and an empty commit body.
+and should not receive another reply. If auto-merge is enabled for the monitor, by config, the
+`SESORI_PR_MONITOR_AUTO_MERGE` environment override, or the user's per-monitor choice, this action also makes one
+irreversible, head-fenced squash-merge attempt using the PR title and an empty commit body. That merge is what the
+user asked for: do not hold the action back to wait for human review.
 
 PR to mark: $ARGUMENTS
 

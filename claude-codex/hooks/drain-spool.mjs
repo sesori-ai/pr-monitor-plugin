@@ -402,7 +402,7 @@ function main() {
 function keepAliveReason({ pid, sessionId, monitors }) {
   const watching = monitors.length > 0 ? monitors.join(", ") : "this session's PR(s)"
   return [
-    `[PR Monitor keep-alive] Still monitoring ${watching}, and it has not been handed off for human review yet — the work is not finished, so do not end the turn.`,
+    `[PR Monitor keep-alive] Still monitoring ${watching}, and it has not been marked ready yet — the work is not finished, so do not end the turn.`,
     "",
     "Pick the first that applies:",
     "",

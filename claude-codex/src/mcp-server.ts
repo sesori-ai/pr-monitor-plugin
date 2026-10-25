@@ -129,7 +129,7 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
       refreshSessionState()
     },
     statusSuffix: ({ target }) =>
-      handedOff.has(targetRegistryKey(target)) ? ", handed off for human review" : "",
+      handedOff.has(targetRegistryKey(target)) ? ", handed off (ready)" : "",
   })
 
   const prepareStart = async (): Promise<string | undefined> => {
@@ -293,7 +293,7 @@ process.on("SIGINT", shutdown)
 claimSpool(claudePid)
 collectDeadSpools(claudePid)
 
-const server = new McpServer({ name: "pr-monitor", version: "0.6.0" })
+const server = new McpServer({ name: "pr-monitor", version: "0.7.0" })
 
 server.registerTool(
   "pr_monitor",
@@ -318,7 +318,7 @@ server.registerTool(
         .string()
         .optional()
         .describe(
-          "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready; " +
+          "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready/set_auto_merge; " +
             "'all' allowed for stop/flush.",
         ),
       autoMerge: z.boolean().optional().describe(AUTO_MERGE_PARAM_DESCRIPTION),
