@@ -86,7 +86,7 @@ async function main({ session, thread, timeout }) {
     }
     const now = Date.now()
     if (!state.keepAlive) {
-      console.log("pr-monitor: monitoring no longer needs this session (all monitors stopped or handed off for human review).")
+      console.log("pr-monitor: monitoring no longer needs this session (all monitors stopped or marked ready).")
       return
     }
     if (now > state.expiresAtMs) {

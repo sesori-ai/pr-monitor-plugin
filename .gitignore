@@ -3,8 +3,6 @@ opencode/dist/
 opencode/skills/
 pi/dist/
 pi/skills/
-deepseek/dist/
-deepseek/skills/
 .worktrees/
 
 .DS_Store

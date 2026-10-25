@@ -4,7 +4,7 @@ Your coding agent opens a pull request and moves on. PR Monitor keeps watching t
 results, reviews, comments, merge conflicts, and the final merge or close. When something happens, a short
 `[PR Monitor]` message lands in the agent conversation that started the monitor so the agent can act on it.
 
-Works with **OpenCode, Claude Code, Codex, Pi, Oh My Pi (OMP), DeepSeek Harness, and Hermes**.
+Works with **OpenCode, Claude Code, Codex, Pi, Oh My Pi (OMP), and Hermes**.
 
 ## Install
 
@@ -79,20 +79,6 @@ Needs OMP 18.0.3 or newer.
 omp plugin install @sesori/pr-monitor-pi
 ```
 
-### DeepSeek Harness
-
-DeepSeek Harness support is a developer preview. It needs Harness 0.2.0-rc.2, Node.js 22.19 or newer, and
-pnpm 10 or newer. Install the bundle into the long-lived Web profile, inspect the composed config, then start it:
-
-```sh
-npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add @sesori/pr-monitor-deepseek
-npx @deepseek-ai/dsh@0.2.0-rc.2 --profile web --dump-config
-npx @deepseek-ai/dsh@0.2.0-rc.2 web
-```
-
-Restart Harness after installing or updating the bundle. Pin `@sesori/pr-monitor-deepseek@X.Y.Z` for deliberate
-upgrades. Package details: [`deepseek/README.md`](deepseek/README.md).
-
 ### Hermes
 
 Needs Node.js 18 or newer on the Hermes backend.
@@ -131,7 +117,7 @@ worth knowing, a report like this appears in the conversation:
 - CI: passing (5/5)
 - Mergeable: MERGEABLE
 - [comment:inline] ACTION REQUIRED: 1 thread received a new relevant comment
-- Ready for human review: NO — feedback awaits an agent reply
+- Ready: NO — feedback awaits an agent reply
 ```
 
 - **Fewer, better messages.** Routine activity is batched. If CI is still running, the report waits for it so you
@@ -140,12 +126,14 @@ worth knowing, a report like this appears in the conversation:
   next poll.
 - **Facts, not transcripts.** Reports name authors, counts, and statuses. They never quote comment bodies.
 - **Hands-off handoff.** When CI passes (or the repository has no CI), the PR is mergeable, and the agent has replied
-  to all feedback, PR Monitor adds the `ready-for-human-review` label. New commits or feedback take it off again.
+  to all feedback, PR Monitor adds the `agent-ready` label: the agent's work is done and a human can review. New
+  commits or feedback take it off again.
   Agent replies start with a hidden `<!-- pr-monitor:reply -->` marker so the monitor can tell them apart from human
   comments.
-- **Optional auto-merge.** Off by default. When on, PR Monitor makes one careful squash-merge attempt after it
-  marks the PR ready itself, either automatically or through `mark_ready`. A ready label added by anyone else never
-  triggers a merge. Read [auto-merge](docs/configuration.md#auto-merge) before turning it on.
+- **Optional auto-merge.** Off by default. When on, ready means merge: PR Monitor makes one careful squash-merge
+  attempt after it marks the PR ready itself, either automatically or through `mark_ready`, without waiting for a
+  human. A ready label added by anyone else never triggers a merge. Turn it on in config, when starting a monitor,
+  or later with `set_auto_merge`. Read [auto-merge](docs/configuration.md#auto-merge) before turning it on.
 - **Stops by itself** when the PR merges or closes.
 
 ## Tool actions
@@ -158,8 +146,9 @@ The `pr_monitor` tool is the same on every host:
 | `stop` | one PR or `all` | Stop watching. |
 | `flush` | one PR or `all` | Send a full report right now. |
 | `status` | none | List the monitors this conversation owns. |
-| `mark_ready` | one PR | Add the ready label, accepting the PR as it is. |
+| `mark_ready` | one PR | Add the ready label, accepting the PR as it is. With auto-merge on, also merge it. |
 | `unmark_ready` | one PR | Remove the ready label. |
+| `set_auto_merge` | one watched PR | Turn auto-merge on or off for a running monitor (`autoMerge: true` or `false`). |
 
 `mark_ready` is for feedback you have looked at and decided needs no reply, such as a bot comment. `unmark_ready`
 is not a permanent hold: if the PR later looks clean again, the label comes back.
@@ -167,13 +156,12 @@ is not a permanent hold: if the PR later looks clean again, the label comes back
 ## Configuration
 
 Defaults are sensible and no config file is needed. To change them, create `~/.config/pr-monitor/config.json` for
-yourself or `.pr-monitor.json` in a repository. DeepSeek Harness intentionally ignores project config because its
-plugin API has no project-trust signal. The settings people change most:
+yourself or `.pr-monitor.json` in a repository. The settings people change most:
 
 ```json
 {
   "debounceMinutes": 2,
-  "readyLabel": "ready-for-human-review",
+  "readyLabel": "agent-ready",
   "autoMerge": false
 }
 ```

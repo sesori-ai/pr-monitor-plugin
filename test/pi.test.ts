@@ -97,7 +97,7 @@ function monitorConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
     ignoreCommentTag: undefined,
     announceOnStart: true,
     flushOnCiFailure: true,
-    readyLabel: "ready-for-human-review",
+    readyLabel: "agent-ready",
     autoMerge: false,
     ...overrides,
   }
@@ -213,12 +213,12 @@ test("Pi registers every monitor action and uses native steering delivery", asyn
   )
   assert.match(
     await executeTool({ tool: pi.tool, action: MonitorAction.markReady, pr: "sesori/example#42" }),
-    /label "ready-for-human-review" added/,
+    /label "agent-ready" added/,
   )
   assert.equal(runner.labelAdded, true)
   assert.match(
     await executeTool({ tool: pi.tool, action: MonitorAction.unmarkReady, pr: "sesori/example#42" }),
-    /no longer flagged for human review/,
+    /no longer marked ready/,
   )
   assert.equal(runner.labelAdded, false)
   assert.match(await executeTool({ tool: pi.tool, action: MonitorAction.stop, pr: "all" }), /Stopped 1 monitor/)

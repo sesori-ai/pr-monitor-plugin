@@ -42,7 +42,7 @@ const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
   ignoreCommentTag: "<!-- pr-monitor:reply -->",
   announceOnStart: true,
   flushOnCiFailure: true,
-  readyLabel: "ready-for-human-review",
+  readyLabel: "agent-ready",
   autoMerge: false,
 }
 

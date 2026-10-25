@@ -1,8 +1,8 @@
 ---
 name: monitor-pr
 description: >-
-  Drive a GitHub PR to ready-for-human-review or opt-in auto-merge
-  without supervision. Start pr_monitor immediately after opening a PR and act
+  Drive a GitHub PR to ready (handed to a human reviewer, or merged when
+  auto-merge is enabled) without supervision. Start pr_monitor immediately after opening a PR and act
   on every automatic report;
   the monitor owns polling and readiness labels, so never create sleeps,
   scheduled checks, or polling loops. Address new feedback on every changed
@@ -13,10 +13,12 @@ description: >-
 # monitor-pr
 
 Own a PR from creation through handoff or opt-in auto-merge. The monitor polls GitHub, delivers
-reports, and automatically adds or withdraws the configured ready label. The
-agent owns the substantive judgment: inspect every new comment, fix what is
-valid, and use `mark_ready` when new activity is non-actionable and deliberately
-needs no GitHub reply.
+reports, and automatically adds or withdraws the configured ready label
+(default `agent-ready`). The label means the agent's work is done. Without
+auto-merge a human reviews next; with auto-merge the PR is merged. The agent
+owns the substantive judgment: inspect every new comment, fix what is valid,
+and use `mark_ready` when new activity is non-actionable and deliberately needs
+no GitHub reply.
 
 ## 1. Start monitoring immediately
 
@@ -38,7 +40,13 @@ pr_monitor(action: "start", pr: "owner/repo#123")
   environment for this monitor. When restarting a missing watch, pass the same
   explicit value again; if you no longer know it, ask the user before starting.
   Never set it without such a request. To change it on a running monitor,
-  `stop` and `start` again with the requested value.
+  call `pr_monitor(action: "set_auto_merge", pr: "owner/repo#123", autoMerge: true)`
+  (or `false`). Turning it on for a PR that already carries the ready label
+  removes the label; reassess and call `mark_ready` once it is ready.
+- With auto-merge enabled, the user has chosen to merge without waiting for
+  human review. `mark_ready` is the merge approval, so call it as soon as
+  nothing is left to do. Never hold it back to keep the PR from merging before
+  a human looks at it; that defeats the setting.
 - Start one monitor per PR. In a fresh session, use `status` once and restart a
   missing watch.
 - The start result states the configured agent-reply prefix. Every GitHub reply
@@ -72,7 +80,8 @@ full existing feedback. Use the PR creation and latest-push history as context:
 
 PR age alone proves nothing: an old PR can have a new head. Assess the current
 head and repository workflow, not a fixed age cutoff. Requested human review
-can remain pending; this label hands the PR to that reviewer. If evidence is
+can remain pending; this label hands the PR to that reviewer, or, with
+auto-merge enabled, merges it. If evidence is
 incomplete, keep the monitor active and use its delivered reports rather than
 creating sleeps or polling loops.
 
@@ -110,10 +119,10 @@ call `flush` routinely after handling it.
 
 Every report states one of:
 
-- `Ready for human review: YES` — the GitHub label is present. Do not remove it
+- `Ready: YES` — the GitHub label is present. Do not remove it
   merely because a thread was resolved, an approval arrived, or another
   readiness-preserving report was delivered.
-- `Ready for human review: NO` — keep working until the report's blockers are
+- `Ready: NO` — keep working until the report's blockers are
   handled, or manually accept the current state when judgment says no action is
   required.
 
@@ -149,8 +158,9 @@ When CI is green, the PR is mergeable, and no actionable work remains, use
 currently observed by the watch and adds the label. Only later invalidating
 activity withdraws it again. Claim handoff only after the tool confirms success.
 When reports say auto-merge is enabled, `mark_ready` also makes one irreversible,
-head-fenced squash-merge attempt whose commit uses only the PR title. Never run
-a duplicate merge command after an `Auto-merge succeeded` result.
+head-fenced squash-merge attempt whose commit uses only the PR title. That merge
+is the intended outcome, not a risk to avoid. Never run a duplicate merge
+command after an `Auto-merge succeeded` result.
 
 `unmark_ready` removes the label now, but it is not a permanent hold; automatic
 readiness may restore it after a later clean assessment.

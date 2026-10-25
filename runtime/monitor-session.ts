@@ -4,7 +4,7 @@
 
 import type { MonitorConfig } from "../core/config"
 import { fetchPrSnapshot, type GhRunner, type PrSnapshot } from "../core/github"
-import { markReadyForHumanReview, removeReadyForHumanReview } from "../core/label"
+import { addReadyLabel, removeReadyLabel } from "../core/label"
 import {
   AutoMergeHeadChangedError,
   autoMergeFailureText,
@@ -13,8 +13,9 @@ import {
   squashMergePullRequest,
 } from "../core/merge"
 import { hasReadyLabel, withReadyLabel } from "../core/readiness"
+import { AUTO_MERGE_GUIDANCE } from "../core/report"
 import { parseTarget, targetKey, targetRegistryKey, type Target } from "../core/target"
-import { PrWatch } from "../core/watch"
+import { type AutoMergeDeps, PrWatch } from "../core/watch"
 import { MonitorAction } from "./tool"
 
 export enum InitialAnnouncementMode {
@@ -169,7 +170,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     pr: string | undefined
     start?: StartOptions<TConfig>
     loadConfig?: () => Promise<TConfig>
-    // Per-start override requested by the user; wins over config and environment for that watch only.
+    // User-requested override for start or set_auto_merge; wins over config and environment for that watch only.
     autoMerge?: boolean
   }): Promise<MonitorActionResult<TConfig>> {
     const actionLoadConfig =
@@ -201,6 +202,12 @@ export class MonitorSession<TConfig extends MonitorConfig> {
           return { text: "action 'unmark_ready' requires a single explicit pr: 'owner/repo#123' or a PR URL." }
         }
         return await this.changeReady({ pr, ready: false, loadConfig: actionLoadConfig })
+      case MonitorAction.setAutoMerge:
+        if (!pr || pr === "all") {
+          return { text: "action 'set_auto_merge' requires a single explicit pr: 'owner/repo#123' or a PR URL." }
+        }
+        if (autoMerge === undefined) return { text: "action 'set_auto_merge' requires autoMerge: true or false." }
+        return await this.setAutoMerge({ pr, autoMerge })
     }
   }
 
@@ -341,7 +348,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     if (config.autoMerge && hasReadyLabel(initial, config.readyLabel)) {
       try {
         const reset = this.trackStartupMutation({
-          mutation: () => removeReadyForHumanReview(this.deps.runGh, target, config.readyLabel),
+          mutation: () => removeReadyLabel(this.deps.runGh, target, config.readyLabel),
         })
         const drained = reset.then(
           () => undefined,
@@ -362,7 +369,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
       initial = withReadyLabel(initial, config.readyLabel, false)
       startupNotice =
         `pre-existing ready label "${config.readyLabel}" was removed because auto-merge is enabled. ` +
-        "Reassess the current head and call mark_ready if it is ready; that action will try to squash-merge it."
+        "Reassess the current head and call mark_ready once it is ready; that action squash-merges it, as intended."
       if (this.lifecycleGeneration !== lifecycleGeneration) {
         return {
           text:
@@ -407,19 +414,11 @@ export class MonitorSession<TConfig extends MonitorConfig> {
           replyPrefix: config.ignoreCommentTag ?? "<!-- pr-monitor:reply -->",
           change: (ready) =>
             ready
-              ? markReadyForHumanReview(this.deps.runGh, target, config.readyLabel)
-              : removeReadyForHumanReview(this.deps.runGh, target, config.readyLabel),
+              ? addReadyLabel(this.deps.runGh, target, config.readyLabel)
+              : removeReadyLabel(this.deps.runGh, target, config.readyLabel),
           onChanged: (ready) => this.notifyReadyChanged({ target, ready, watched: true, config }),
         },
-        autoMerge: config.autoMerge
-          ? {
-              squashMerge: ({ pullRequest }) => squashMergePullRequest({
-                runGh: this.deps.runGh,
-                target,
-                pullRequest,
-              }),
-            }
-          : undefined,
+        autoMerge: this.autoMergeDeps({ target, enabled: config.autoMerge }),
         startupNotice,
       },
     })
@@ -452,10 +451,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     }
 
     this.deps.log(`started monitoring ${displayKey}`)
-    const autoMergeNotice = config.autoMerge
-      ? " Auto-merge enabled: automatic readiness and mark_ready make one squash-merge attempt for the " +
-        "accepted head using only the PR title."
-      : ""
+    const autoMergeNotice = config.autoMerge ? ` Auto-merge enabled: ${AUTO_MERGE_GUIDANCE}` : ""
     const resetNotice = startupNotice === undefined ? "" : ` Startup safety reset: ${startupNotice}`
     return {
       text: `Started monitoring ${displayKey} — "${initial.title}".${autoMergeNotice}${resetNotice}`,
@@ -549,10 +545,31 @@ export class MonitorSession<TConfig extends MonitorConfig> {
         mutation: () => this.changeStandaloneReady({ target, ready, loadConfig }),
       })
     } catch (error) {
-      const action = ready
-        ? `mark ${displayKey} as ready for human review`
-        : `withdraw the ready-for-human-review label from ${displayKey}`
+      const action = ready ? `mark ${displayKey} as ready` : `withdraw the ready label from ${displayKey}`
       return { text: `Cannot ${action}: ${(error as Error).message}` }
+    }
+  }
+
+  private autoMergeDeps({ target, enabled }: { target: Target; enabled: boolean }): AutoMergeDeps | undefined {
+    if (!enabled) return undefined
+    return {
+      squashMerge: ({ pullRequest }) => squashMergePullRequest({ runGh: this.deps.runGh, target, pullRequest }),
+    }
+  }
+
+  private async setAutoMerge({ pr, autoMerge }: { pr: string; autoMerge: boolean }): Promise<MonitorActionResult<TConfig>> {
+    const selected = this.select({ pr })
+    if ("error" in selected) {
+      return { text: `${selected.error} To monitor it with auto-merge ${autoMerge ? "on" : "off"}, use start with autoMerge.` }
+    }
+    const entry = selected[0]!
+    const displayKey = targetKey(entry.watch.target)
+    try {
+      const text = await entry.watch.setAutoMerge(this.autoMergeDeps({ target: entry.watch.target, enabled: autoMerge }))
+      entry.config = { ...entry.config, autoMerge }
+      return { text: autoMerge ? `${text} ${AUTO_MERGE_GUIDANCE}` : text }
+    } catch (error) {
+      return { text: `Cannot change auto-merge for ${displayKey}: ${(error as Error).message}` }
     }
   }
 
@@ -571,8 +588,8 @@ export class MonitorSession<TConfig extends MonitorConfig> {
       : undefined
     let effectiveReady = ready
     let text = ready
-      ? await markReadyForHumanReview(this.deps.runGh, target, config.readyLabel)
-      : await removeReadyForHumanReview(this.deps.runGh, target, config.readyLabel)
+      ? await addReadyLabel(this.deps.runGh, target, config.readyLabel)
+      : await removeReadyLabel(this.deps.runGh, target, config.readyLabel)
     if (acceptedPullRequest !== undefined) {
       let revalidatedPullRequest: AutoMergePullRequest | undefined
       try {
@@ -637,7 +654,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
   }): Promise<{ text: string; removed: boolean }> {
     const canceled = `Auto-merge canceled because ${reason}.`
     try {
-      const removed = await removeReadyForHumanReview(this.deps.runGh, target, config.readyLabel)
+      const removed = await removeReadyLabel(this.deps.runGh, target, config.readyLabel)
       return { text: `${canceled} ${removed}`, removed: true }
     } catch (error) {
       this.deps.log(`unsafe standalone readiness cleanup failed for ${targetKey(target)}: ${error}`)

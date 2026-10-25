@@ -1,13 +1,14 @@
-// Marking a PR as ready for human review: apply (or withdraw) a label via the
-// GitHub REST API. The label is ensured to exist first so it gets a deliberate
-// color and description — the add-labels endpoint auto-creates missing labels,
-// but as default grey with no description.
+// Marking a PR as ready (the agent's work is done; next comes human review or
+// auto-merge): apply (or withdraw) a label via the GitHub REST API. The label
+// is ensured to exist first so it gets a deliberate color and description —
+// the add-labels endpoint auto-creates missing labels, but as default grey
+// with no description.
 
 import { PollError, type GhRunner } from "./github"
 import { targetKey, type Target } from "./target"
 
 const READY_LABEL_COLOR = "0e8a16" // GitHub's standard green
-const READY_LABEL_DESCRIPTION = "This PR is ready for human review"
+const READY_LABEL_DESCRIPTION = "The agent finished its work on this PR"
 
 /**
  * Verify the target is an actual OPEN pull request. The labels endpoints
@@ -55,7 +56,7 @@ export async function getOpenPullRequest({
  * factual result line; throws when the target is not an open PR or the add
  * fails.
  */
-export async function markReadyForHumanReview(runGh: GhRunner, target: Target, label: string): Promise<string> {
+export async function addReadyLabel(runGh: GhRunner, target: Target, label: string): Promise<string> {
   const repo = `repos/${target.owner}/${target.repo}`
   await getOpenPullRequest({ runGh, target })
   try {
@@ -74,7 +75,7 @@ export async function markReadyForHumanReview(runGh: GhRunner, target: Target, l
     // Real problems (auth, missing repo) surface on the add call below.
   }
   await runGh(["api", `${repo}/issues/${target.number}/labels`, "-f", `labels[]=${label}`])
-  return `Marked ${targetKey(target)} as ready for human review: label "${label}" added.`
+  return `Marked ${targetKey(target)} as ready: label "${label}" added.`
 }
 
 /**
@@ -84,7 +85,7 @@ export async function markReadyForHumanReview(runGh: GhRunner, target: Target, l
  * Idempotent: a PR that does not carry the label is reported as such rather
  * than failing (the endpoint 404s in that case, and so does a missing label).
  */
-export async function removeReadyForHumanReview(runGh: GhRunner, target: Target, label: string): Promise<string> {
+export async function removeReadyLabel(runGh: GhRunner, target: Target, label: string): Promise<string> {
   const repo = `repos/${target.owner}/${target.repo}`
   await getOpenPullRequest({ runGh, target })
   try {
@@ -97,5 +98,5 @@ export async function removeReadyForHumanReview(runGh: GhRunner, target: Target,
     }
     throw error
   }
-  return `Removed the "${label}" label from ${targetKey(target)}: it is no longer flagged for human review.`
+  return `Removed the "${label}" label from ${targetKey(target)}: it is no longer marked ready.`
 }

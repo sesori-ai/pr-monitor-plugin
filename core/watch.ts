@@ -94,6 +94,8 @@ export class PrWatch {
   // retained across delivery failure, then cleared by delivery or a superseding
   // manual readiness action.
   private autoMergeNotice: string | undefined
+  // Mutable so set_auto_merge can toggle a running watch.
+  private autoMerge: AutoMergeDeps | undefined
   // A poll may observe new feedback and a prefixed response together. The
   // ready label is still withdrawn and reported first; only a later quiet
   // report can restore it, so the feedback never disappears behind one poll.
@@ -111,6 +113,7 @@ export class PrWatch {
     this.snapshot = input.initial
     this.lastFlushedSnapshot = input.initial
     this.initialAnnouncementPending = input.config.announceOnStart
+    this.autoMerge = input.deps.autoMerge
     this.rememberDefiniteMergeable(input.initial)
   }
 
@@ -130,9 +133,9 @@ export class PrWatch {
     const readiness = this.deps.readiness
     const ready =
       readiness !== undefined && this.snapshot !== undefined
-        ? `, ready for human review: ${hasReadyLabel(this.snapshot, readiness.label) ? "yes" : "no"}`
+        ? `, ready: ${hasReadyLabel(this.snapshot, readiness.label) ? "yes" : "no"}`
         : ""
-    const autoMerge = this.deps.autoMerge === undefined ? "" : ", auto-merge: squash"
+    const autoMerge = this.autoMerge === undefined ? "" : ", auto-merge: squash"
     return (
       `${targetKey(this.target)} — ${phase}, ${this.dirty ? "activity buffered" : "quiet"}, ` +
       `baseline ${baselineAge}m ago${failures}${ready}${autoMerge}`
@@ -204,6 +207,42 @@ export class PrWatch {
           }
         }
         return text
+      })
+    })
+  }
+
+  /**
+   * Toggle auto-merge on a running watch. Enabling it on an already-labeled PR
+   * removes the label, as start does: an earlier handoff is never merged
+   * without a fresh ready judgment.
+   */
+  async setAutoMerge(autoMerge: AutoMergeDeps | undefined): Promise<string> {
+    if (this.stopped) throw new Error("the monitor stopped before the auto-merge change could run")
+    return await this.runExclusive(async () => {
+      if (this.stopped) throw new Error("the monitor stopped before the auto-merge change could run")
+      const enabled = autoMerge !== undefined
+      if (enabled === (this.autoMerge !== undefined)) {
+        return `Auto-merge is already ${enabled ? "enabled" : "disabled"} for ${targetKey(this.target)}.`
+      }
+      const readiness = this.deps.readiness
+      const snapshot = this.snapshot
+      if (!enabled || readiness === undefined || snapshot === undefined || !hasReadyLabel(snapshot, readiness.label)) {
+        this.autoMerge = autoMerge
+        return `Auto-merge ${enabled ? "enabled" : "disabled"} for ${targetKey(this.target)}.`
+      }
+      return await this.trackReadinessMutation(async () => {
+        const removed = await readiness.change(false)
+        this.snapshot = withReadyLabel(snapshot, readiness.label, false)
+        this.autoMerge = autoMerge
+        if (!this.stopped) {
+          this.clearReadinessFailure()
+          this.autoReadyAfterInvalidation = false
+          this.notifyReadyChanged(false)
+        }
+        return (
+          `Auto-merge enabled for ${targetKey(this.target)}. ${removed} ` +
+          "Reassess the current head and call mark_ready once it is ready; that action squash-merges it, as intended."
+        )
       })
     })
   }
@@ -462,7 +501,7 @@ export class PrWatch {
         readyLabel: readiness.label,
         replyPrefix: readiness.replyPrefix,
         readinessError: this.readinessError,
-        autoMergeEnabled: this.deps.autoMerge !== undefined,
+        autoMergeEnabled: this.autoMerge !== undefined,
         autoMergeNotice: this.autoMergeNotice,
       }),
     ].join("\n")
@@ -617,7 +656,7 @@ export class PrWatch {
     snapshot: PrSnapshot
     report: boolean
   }): Promise<string | undefined> {
-    const autoMerge = this.deps.autoMerge
+    const autoMerge = this.autoMerge
     if (autoMerge === undefined) return undefined
     let notice: string
     try {
@@ -710,7 +749,7 @@ export class PrWatch {
       readyLabel: readiness?.label,
       replyPrefix: readiness?.replyPrefix,
       readinessError: this.readinessError,
-      autoMergeEnabled: this.deps.autoMerge !== undefined,
+      autoMergeEnabled: this.autoMerge !== undefined,
       autoMergeNotice: this.autoMergeNotice,
     })
     if (!this.initialAnnouncementPending || this.snapshot?.state !== "OPEN") return report

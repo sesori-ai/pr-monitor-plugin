@@ -133,7 +133,7 @@ export function registerPiMonitor({
       pr: Type.Optional(
         Type.String({
           description:
-            "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready; " +
+            "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready/set_auto_merge; " +
             "'all' allowed for stop/flush.",
         }),
       ),

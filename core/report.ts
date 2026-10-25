@@ -7,8 +7,16 @@ import { ciPhase, type CommentMeta, type PrSnapshot, type ReviewThreadInfo } fro
 import { assessAutomaticReadiness, hasReadyLabel } from "./readiness"
 import { targetKey, type Target } from "./target"
 
-const DEFAULT_READY_LABEL = "ready-for-human-review"
+const DEFAULT_READY_LABEL = "agent-ready"
 const DEFAULT_REPLY_PREFIX = "<!-- pr-monitor:reply -->"
+
+// Agents otherwise tend to withhold mark_ready "until a human reviews", which
+// defeats a merge the user explicitly delegated.
+export const AUTO_MERGE_GUIDANCE =
+  "the user chose to have this PR merged without waiting for human review. Marking it ready, automatically or " +
+  "with mark_ready, is the merge approval: the monitor makes one squash-merge attempt for the accepted head, " +
+  "titled with only the PR title. When nothing is left to do and the label is absent, call mark_ready; never hold " +
+  "it back to wait for a human."
 
 function authorBreakdown(comments: CommentMeta[]): string {
   const counts = new Map<string, number>()
@@ -167,13 +175,13 @@ export function buildReadinessLines({
   const ready = hasReadyLabel(snapshot, readyLabel)
   const lines = [
     ready
-      ? `- Ready for human review: YES — label "${readyLabel}" is present.`
-      : `- Ready for human review: NO — label "${readyLabel}" is absent.`,
+      ? `- Ready: YES — label "${readyLabel}" is present.`
+      : `- Ready: NO — label "${readyLabel}" is absent.`,
   ]
   if (autoMergeEnabled) {
     lines.push(
-      "- Auto-merge: ENABLED — automatic readiness and mark_ready make one squash-merge attempt for the " +
-        "accepted head; the squash commit uses only the PR title.",
+      "- Auto-merge: ENABLED — readiness (automatic or mark_ready) squash-merges this PR, as the user wants; " +
+        "never hold mark_ready back to wait for a human.",
     )
   }
   if (readinessError !== undefined) lines.push(`- Readiness automation failed: ${readinessError}`)
@@ -184,7 +192,7 @@ export function buildReadinessLines({
       lines.push(`- Automatic readiness blocked by: ${assessment.blockers.join("; ")}.`)
     }
     lines.push(
-      "- Required next step: Do more work until the PR is ready for review, or use " +
+      "- Required next step: Do more work until the PR is ready, or use " +
         `${inlineCode(`pr_monitor(action: "mark_ready", pr: "${targetKey(target)}")`)} if you believe nothing else ` +
         `is required. Local agent replies count only when they begin with ${inlineCode(replyPrefix)}.`,
     )
