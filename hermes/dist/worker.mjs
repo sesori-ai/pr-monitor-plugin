@@ -957,7 +957,7 @@ function buildReadinessLines({
   ];
   if (autoMergeEnabled) {
     lines.push(
-      "- Auto-merge: ENABLED \u2014 readiness (automatic or mark_ready) squash-merges this PR, as the user wants; never hold mark_ready back to wait for a human."
+      "- Auto-merge: ENABLED \u2014 readiness (automatic or mark_ready) makes one squash-merge attempt, as the user wants; never hold mark_ready back to wait for a human."
     );
   }
   if (readinessError !== void 0) lines.push(`- Readiness automation failed: ${readinessError}`);
@@ -1052,6 +1052,10 @@ var PrWatch = class {
   autoMergeNotice;
   // Mutable so set_auto_merge can toggle a running watch.
   autoMerge;
+  // Snapshot at a set_auto_merge label reset. Like the startup reset, activity
+  // buffered before it must not restore readiness (and merge) on its own; only
+  // later activity or a manual ready action lifts the fence.
+  readinessResetBaseline;
   // A poll may observe new feedback and a prefixed response together. The
   // ready label is still withdrawn and reported first; only a later quiet
   // report can restore it, so the feedback never disappears behind one poll.
@@ -1130,6 +1134,7 @@ var PrWatch = class {
         throw new Error("this watch does not have a readiness channel");
       }
       this.autoMergeNotice = void 0;
+      this.readinessResetBaseline = void 0;
       return await this.trackReadinessMutation(async () => {
         let text = await readiness.change(ready);
         this.snapshot = withReadyLabel(snapshot, readiness.label, ready);
@@ -1173,6 +1178,7 @@ ${autoMerge}`;
       return await this.trackReadinessMutation(async () => {
         const removed = await readiness.change(false);
         this.snapshot = withReadyLabel(snapshot, readiness.label, false);
+        this.readinessResetBaseline = this.snapshot;
         this.autoMerge = autoMerge;
         if (!this.stopped) {
           this.clearReadinessFailure();
@@ -1502,6 +1508,11 @@ ${autoMerge}`;
     // retries for agent assessment, but allow activity since that snapshot.
     this.initialAnnouncementPending && assessAutomaticReadiness(this.lastFlushedSnapshot).eligible && !detectActivity(this.lastFlushedSnapshot, snapshot, this.lastFlushedSnapshot.mergeable) || snapshot.state !== "OPEN" || hasReadyLabel(snapshot, readiness.label) || !assessAutomaticReadiness(snapshot).eligible) {
       return;
+    }
+    const resetBaseline = this.readinessResetBaseline;
+    if (resetBaseline !== void 0) {
+      if (!detectActivity(resetBaseline, snapshot, resetBaseline.mergeable)) return;
+      this.readinessResetBaseline = void 0;
     }
     this.snapshot = await this.changeSnapshotReadiness(snapshot, true);
   }
@@ -2050,16 +2061,18 @@ ${resetRace.watch.statusLine()}` };
     };
   }
   async setAutoMerge({ pr, autoMerge }) {
-    const selected = this.select({ pr });
-    if ("error" in selected) {
-      return { text: `${selected.error} To monitor it with auto-merge ${autoMerge ? "on" : "off"}, use start with autoMerge.` };
+    const target = parseTarget(pr);
+    if ("error" in target) return { text: target.error };
+    const entry = this.watches.get(targetRegistryKey(target));
+    if (entry === void 0) {
+      return {
+        text: `No monitor for ${targetKey(target)} in this session. ` + (autoMerge ? "To monitor it with auto-merge on, use start with autoMerge: true." : "Nothing to change.")
+      };
     }
-    const entry = selected[0];
     const displayKey = targetKey(entry.watch.target);
     try {
       const text = await entry.watch.setAutoMerge(this.autoMergeDeps({ target: entry.watch.target, enabled: autoMerge }));
-      entry.config = { ...entry.config, autoMerge };
-      return { text: autoMerge ? `${text} ${AUTO_MERGE_GUIDANCE}` : text };
+      return { text: autoMerge ? `${text} With auto-merge on, ${AUTO_MERGE_GUIDANCE}` : text };
     } catch (error) {
       return { text: `Cannot change auto-merge for ${displayKey}: ${error.message}` };
     }

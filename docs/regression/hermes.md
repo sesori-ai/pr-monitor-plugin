@@ -6,7 +6,7 @@ Highest level: L5. Result vocabulary and proof boundaries follow [README.md](REA
 
 | Level | Boundary | Requirement | Evidence / status |
 |---|---|---|---|
-| L1 | Adapter contract | Register all seven actions, one workflow skill, and unload/finalize/reset cleanup; do not stop on ordinary turn completion. | `test/hermes_adapter_test.py` |
+| L1 | Adapter contract | Register all seven actions, one workflow skill, and unload/finalize/reset cleanup; do not stop on ordinary turn completion. | `test/hermes_adapter_test.py`, `test/hermes.test.ts` |
 | L2 | Adapter contract | Two conversations and profiles keep separate workers, config, and delivery; reject absent monitoring identity, delegated children, native CLI/gateway/ACP monitoring, stale/replaced records, and disconnected transports. | `test/hermes_adapter_test.py` |
 | L2 | Packaged worker | Start, report acknowledgement/failure, retry, merge/close, stop, invalid input and worker exit pass through `hermes/dist/worker.mjs`. No live GitHub mutations. | `test/hermes_adapter_test.py` with a controlled `gh` executable on macOS/Linux |
 | L3 | Actual host loader | Installed Hermes discovers the copied Git plugin, tool, namespaced skill and prompt section; unload removes registrations. | Pass: 2026-09-07, Hermes 9a84bee265da, macOS / Python 3.11.16 |

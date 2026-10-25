@@ -1,8 +1,8 @@
 ---
 name: monitor-pr
 description: >-
-  Drive a GitHub PR to ready (handed to a human reviewer, or merged when
-  auto-merge is enabled) without supervision. Start pr_monitor immediately after opening a PR and act
+  Drive a GitHub PR to ready (handed to a human reviewer, or a merge attempt
+  when auto-merge is enabled) without supervision. Start pr_monitor immediately after opening a PR and act
   on every automatic report;
   the monitor owns polling and readiness labels, so never create sleeps,
   scheduled checks, or polling loops. Address new feedback on every changed
@@ -15,7 +15,8 @@ description: >-
 Own a PR from creation through handoff or opt-in auto-merge. The monitor polls GitHub, delivers
 reports, and automatically adds or withdraws the configured ready label
 (default `agent-ready`). The label means the agent's work is done. Without
-auto-merge a human reviews next; with auto-merge the PR is merged. The agent
+auto-merge a human reviews next; with auto-merge the monitor attempts a squash
+merge, and the PR counts as merged only after `Auto-merge succeeded`. The agent
 owns the substantive judgment: inspect every new comment, fix what is valid,
 and use `mark_ready` when new activity is non-actionable and deliberately needs
 no GitHub reply.
@@ -44,8 +45,10 @@ pr_monitor(action: "start", pr: "owner/repo#123")
   (or `false`). Turning it on for a PR that already carries the ready label
   removes the label; reassess and call `mark_ready` once it is ready.
 - With auto-merge enabled, the user has chosen to merge without waiting for
-  human review. `mark_ready` is the merge approval, so call it as soon as
-  nothing is left to do. Never hold it back to keep the PR from merging before
+  human review. `mark_ready` is the merge approval, so call it once checks and
+  automated reviews have settled, CI is green, the PR is mergeable, and nothing
+  actionable remains (after a rejected or unknown merge result, see section 2).
+  Never hold it back to keep the PR from merging before
   a human looks at it; that defeats the setting.
 - Start one monitor per PR. In a fresh session, use `status` once and restart a
   missing watch.
@@ -81,7 +84,7 @@ full existing feedback. Use the PR creation and latest-push history as context:
 PR age alone proves nothing: an old PR can have a new head. Assess the current
 head and repository workflow, not a fixed age cutoff. Requested human review
 can remain pending; this label hands the PR to that reviewer, or, with
-auto-merge enabled, merges it. If evidence is
+auto-merge enabled, triggers one merge attempt. If evidence is
 incomplete, keep the monitor active and use its delivered reports rather than
 creating sleeps or polling loops.
 

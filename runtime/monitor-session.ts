@@ -558,16 +558,21 @@ export class MonitorSession<TConfig extends MonitorConfig> {
   }
 
   private async setAutoMerge({ pr, autoMerge }: { pr: string; autoMerge: boolean }): Promise<MonitorActionResult<TConfig>> {
-    const selected = this.select({ pr })
-    if ("error" in selected) {
-      return { text: `${selected.error} To monitor it with auto-merge ${autoMerge ? "on" : "off"}, use start with autoMerge.` }
+    const target = parseTarget(pr)
+    if ("error" in target) return { text: target.error }
+    const entry = this.watches.get(targetRegistryKey(target))
+    if (entry === undefined) {
+      return {
+        text:
+          `No monitor for ${targetKey(target)} in this session. ` +
+          (autoMerge ? "To monitor it with auto-merge on, use start with autoMerge: true." : "Nothing to change."),
+      }
     }
-    const entry = selected[0]!
     const displayKey = targetKey(entry.watch.target)
     try {
       const text = await entry.watch.setAutoMerge(this.autoMergeDeps({ target: entry.watch.target, enabled: autoMerge }))
-      entry.config = { ...entry.config, autoMerge }
-      return { text: autoMerge ? `${text} ${AUTO_MERGE_GUIDANCE}` : text }
+      // PrWatch owns the live auto-merge choice; entry.config stays the start-time config.
+      return { text: autoMerge ? `${text} With auto-merge on, ${AUTO_MERGE_GUIDANCE}` : text }
     } catch (error) {
       return { text: `Cannot change auto-merge for ${displayKey}: ${(error as Error).message}` }
     }

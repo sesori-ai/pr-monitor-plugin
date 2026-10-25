@@ -208,8 +208,9 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 
 ## Configuration Matrix
 
-All hosts apply defaults, then user-global `~/.config/pr-monitor/config.json` (or an absolute XDG override), then
-its first readable project candidate. Every host prefers repository `.pr-monitor.json`; remaining candidates are:
+All hosts apply defaults, then user-global `~/.config/pr-monitor/config.json` (or an absolute XDG override). Hosts
+with project-trust evidence then apply their first readable project candidate, preferring repository
+`.pr-monitor.json`; remaining candidates are:
 
 - OpenCode: project/worktree `.opencode/pr-monitor.json` fallbacks.
 - Claude Code: `.claude/pr-monitor.json`, then `.opencode/pr-monitor.json`.

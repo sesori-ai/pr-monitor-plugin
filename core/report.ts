@@ -180,8 +180,8 @@ export function buildReadinessLines({
   ]
   if (autoMergeEnabled) {
     lines.push(
-      "- Auto-merge: ENABLED — readiness (automatic or mark_ready) squash-merges this PR, as the user wants; " +
-        "never hold mark_ready back to wait for a human.",
+      "- Auto-merge: ENABLED — readiness (automatic or mark_ready) makes one squash-merge attempt, as the user " +
+        "wants; never hold mark_ready back to wait for a human.",
     )
   }
   if (readinessError !== undefined) lines.push(`- Readiness automation failed: ${readinessError}`)

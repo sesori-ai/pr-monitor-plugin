@@ -41,8 +41,8 @@ Needs Node.js 18 or newer on macOS or Linux. Inside Claude Code:
 /plugin install pr-monitor@sesori
 ```
 
-You get the `pr_monitor` tool plus four slash commands: `/pr-monitor:watch`, `/pr-monitor:status`,
-`/pr-monitor:ready`, and `/pr-monitor:unready`.
+You get the `pr_monitor` tool plus five slash commands: `/pr-monitor:watch`, `/pr-monitor:status`,
+`/pr-monitor:ready`, `/pr-monitor:unready`, and `/pr-monitor:auto-merge`.
 
 ### Codex
 
@@ -146,7 +146,7 @@ The `pr_monitor` tool is the same on every host:
 | `stop` | one PR or `all` | Stop watching. |
 | `flush` | one PR or `all` | Send a full report right now. |
 | `status` | none | List the monitors this conversation owns. |
-| `mark_ready` | one PR | Add the ready label, accepting the PR as it is. With auto-merge on, also merge it. |
+| `mark_ready` | one PR | Add the ready label, accepting the PR as it is. With auto-merge on, also make one squash-merge attempt. |
 | `unmark_ready` | one PR | Remove the ready label. |
 | `set_auto_merge` | one watched PR | Turn auto-merge on or off for a running monitor (`autoMerge: true` or `false`). |
 

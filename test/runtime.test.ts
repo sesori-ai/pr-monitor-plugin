@@ -825,7 +825,7 @@ test("auto-merge startup clears a pre-existing ready label before requiring a fr
   assert.match(started.text, /pre-existing ready label .* was removed/)
   assert.match(started.text, /call mark_ready/)
   assert.match(channel.delivered[0]!, /Startup safety reset: pre-existing ready label/)
-  assert.match(channel.delivered[0]!, /Auto-merge: ENABLED — readiness \(automatic or mark_ready\) squash-merges this PR/)
+  assert.match(channel.delivered[0]!, /Auto-merge: ENABLED — readiness \(automatic or mark_ready\) makes one squash-merge attempt/)
   assert.match(channel.delivered[0]!, /never hold mark_ready back to wait for a human/)
   assert.equal(calls.some((args) => args.some((arg) => arg.endsWith("/merge"))), false)
   assert.equal(calls.some((args) => args.includes("DELETE")), true)
@@ -870,6 +870,10 @@ test("set_auto_merge toggles a running watch and resets a pre-existing ready lab
 
   const missing = await session.execute({ action: MonitorAction.setAutoMerge, pr: "sesori/example#42", autoMerge: true })
   assert.match(missing.text, /No monitor for sesori\/example#42.*use start with autoMerge/)
+  const missingOff = await session.execute({ action: MonitorAction.setAutoMerge, pr: "sesori/example#42", autoMerge: false })
+  assert.match(missingOff.text, /No monitor for sesori\/example#42.*Nothing to change\./)
+  const invalid = await session.execute({ action: MonitorAction.setAutoMerge, pr: "not a pr", autoMerge: true })
+  assert.doesNotMatch(invalid.text, /use start/)
   await session.execute({ action: MonitorAction.start, pr: "sesori/example#42", start: startOptions(channel) })
   assert.match(
     (await session.execute({ action: MonitorAction.setAutoMerge, pr: "sesori/example#42" })).text,
@@ -883,7 +887,6 @@ test("set_auto_merge toggles a running watch and resets a pre-existing ready lab
   assert.match(enabled.text, /never hold it back to wait for a human/)
   assert.equal(calls.some((args) => args.includes("DELETE")), true)
   assert.match(await status(), /ready: no, auto-merge: squash/)
-  assert.equal(session.list()[0]?.config.autoMerge, true)
   assert.match(
     (await session.execute({ action: MonitorAction.setAutoMerge, pr: "sesori/example#42", autoMerge: true })).text,
     /already enabled/,

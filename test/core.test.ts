@@ -1808,3 +1808,37 @@ test("ordinary activity waits for the two-minute quiet window", async () => {
   await harness.watch.tick()
   assert.equal(harness.reports.length, 1)
 })
+
+test("set_auto_merge label reset fences activity buffered before the toggle", async () => {
+  const initial = snapshot({ labels: ["agent-ready"] })
+  const buffered = snapshot({ labels: ["agent-ready"], pendingReviewers: ["alex"] })
+  const reset = snapshot({ pendingReviewers: ["alex"] })
+  const later = snapshot({ pendingReviewers: ["alex", "sam"] })
+  const harness = watchHarness(initial, [buffered, reset, reset, later, later], config({ announceOnStart: false }), {
+    readiness: true,
+  })
+  const merges: string[] = []
+  await harness.watch.tick()
+  const text = await harness.watch.setAutoMerge({
+    squashMerge: async ({ pullRequest }) => {
+      merges.push(pullRequest.headSha)
+      return "Auto-merge succeeded."
+    },
+  })
+  assert.match(text, /Auto-merge enabled .* ready removed/)
+  assert.deepEqual(harness.readyChanges, [false])
+
+  for (let i = 0; i < 2; i++) {
+    harness.advance(5 * 60_000)
+    await harness.watch.tick()
+  }
+  assert.deepEqual(harness.readyChanges, [false])
+  assert.deepEqual(merges, [])
+
+  for (let i = 0; i < 2; i++) {
+    harness.advance(5 * 60_000)
+    await harness.watch.tick()
+  }
+  assert.deepEqual(harness.readyChanges, [false, true])
+  assert.deepEqual(merges, ["head-1"])
+})
