@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 
 const bun = process.platform === "win32" ? "bun.exe" : "bun"
 const configuredModule = process.env["OMP_LOADER_MODULE"]
-const ompVersion = process.env["OMP_VERSION"] ?? "18.0.3"
+const ompVersion = process.env["OMP_VERSION"] ?? "18.12.6"
 const temporaryDirectory = configuredModule === undefined ? await mkdtemp(join(tmpdir(), "pr-monitor-omp-")) : undefined
 
 try {

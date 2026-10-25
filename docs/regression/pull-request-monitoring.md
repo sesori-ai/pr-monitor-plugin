@@ -192,7 +192,7 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   owning process remains able to receive them.
 - Claude discovers exactly one conventional waiter-aware `monitor-pr` skill.
 
-### Pi 0.84.2 or newer with Node.js 22.19 or newer
+### Pi 1.4.0 or newer with Node.js 22.19 or newer
 
 - The package registers one tool and delivers custom `pr-monitor` messages with
   `{ deliverAs: "steer", triggerTurn: true }` while both busy and idle.
@@ -201,7 +201,7 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 - Project config is read only after Pi marks the project trusted. Manifest-owned discovery supplies exactly one
   packaged push-host skill.
 
-### OMP 18.0.3 or newer
+### OMP 18.12.6 or newer
 
 - The OMP entry delegates all monitoring and delivery to the shared Pi-family implementation after compatibility
   import rewriting.

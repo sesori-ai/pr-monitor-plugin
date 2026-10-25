@@ -67,7 +67,7 @@ Install the same package in OMP:
 omp plugin install @sesori/pr-monitor-pi
 ```
 
-Required floors: Pi 0.84.2 with Node.js 22.19 or newer; OMP 18.0.3 with its bundled Bun runtime; authenticated `gh`
+Required floors: Pi 1.4.0 with Node.js 22.19 or newer; OMP 18.12.6 with its bundled Bun runtime; authenticated `gh`
 for monitoring actions.
 
 The tarball contains exactly:

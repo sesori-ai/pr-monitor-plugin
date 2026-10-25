@@ -72,7 +72,7 @@ app-server. See [Codex in the host guide](docs/hosts.md#codex) if monitoring say
 
 ### Pi
 
-Needs Pi 0.84.2 or newer and Node.js 22.19 or newer.
+Needs Pi 1.4.0 or newer and Node.js 22.19 or newer.
 
 ```sh
 pi install npm:@sesori/pr-monitor-pi
@@ -80,7 +80,7 @@ pi install npm:@sesori/pr-monitor-pi
 
 ### Oh My Pi (OMP)
 
-Needs OMP 18.0.3 or newer.
+Needs OMP 18.12.6 or newer.
 
 ```sh
 omp plugin install @sesori/pr-monitor-pi

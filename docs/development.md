@@ -48,7 +48,7 @@ Current-host checks can also run independently:
 
 ```sh
 OPENCODE_CLI="$(command -v opencode)" npm run host:check:opencode
-OMP_VERSION=18.0.4 npm run host:check:omp
+OMP_VERSION=18.12.6 npm run host:check:omp
 ```
 
 Use the current supported OMP version when it changes.
@@ -153,7 +153,7 @@ If release automation itself needs diagnosis, reproduce its candidate checks bef
 npm ci
 npm run release:check
 OPENCODE_CLI="$(command -v opencode)" npm run host:check:opencode
-OMP_VERSION=18.0.4 npm run host:check:omp
+OMP_VERSION=18.12.6 npm run host:check:omp
 git diff --exit-code -- claude-codex/dist/mcp-server.mjs hermes/dist hermes/skills
 ```
 
