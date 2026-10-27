@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   host-loader checks run against those versions (TypeBox 1.3.27) and CI uses Bun 1.4.4.
 - The Hermes Desktop delivery contract was re-inspected at Hermes commit `f219708926c5`.
 
+### Security
+
+- The Claude Code and Codex MCP server bundle now ships patched `zod` (4.6.7) and `@modelcontextprotocol/sdk` (1.32.2).
+  Development dependencies were updated to clear every `npm audit` advisory; `undici` is overridden to 8.12.3
+  because Pi 1.4.0 pins a vulnerable 8.10.2.
+
 ## [0.8.0]
 
 ### Changed
