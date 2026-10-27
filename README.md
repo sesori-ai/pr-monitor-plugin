@@ -156,6 +156,8 @@ The `pr_monitor` tool is the same on every host:
 | `mark_ready` | one PR | Add the ready label, accepting the PR as it is. With auto-merge on, also make one squash-merge attempt. |
 | `unmark_ready` | one PR | Remove the ready label. |
 | `set_auto_merge` | one watched PR | Turn auto-merge on or off for a running monitor (`autoMerge: true` or `false`). |
+| `feedback` | one PR | Show the bodies of every review thread, PR comment and review summary still awaiting a reply. |
+| `reply` | one PR | Post `body` with the reply prefix added: on review thread `thread`, or as a PR comment without it. |
 
 `mark_ready` is for feedback you have looked at and decided needs no reply, such as a bot comment. `unmark_ready`
 is not a permanent hold: if the PR later looks clean again, the label comes back.

@@ -6,6 +6,8 @@ export enum MonitorAction {
   markReady = "mark_ready",
   unmarkReady = "unmark_ready",
   setAutoMerge = "set_auto_merge",
+  feedback = "feedback",
+  reply = "reply",
 }
 
 export const MONITOR_ACTION_VALUES = [
@@ -16,7 +18,15 @@ export const MONITOR_ACTION_VALUES = [
   MonitorAction.markReady,
   MonitorAction.unmarkReady,
   MonitorAction.setAutoMerge,
+  MonitorAction.feedback,
+  MonitorAction.reply,
 ] as const
+
+export const THREAD_PARAM_DESCRIPTION =
+  "reply only. Review thread id from feedback (e.g. PRRT_...); omit it to post a PR comment instead."
+
+export const BODY_PARAM_DESCRIPTION =
+  "reply only. Reply text; the configured reply prefix is added automatically."
 
 export const AUTO_MERGE_PARAM_DESCRIPTION =
   "start and set_auto_merge only. Explicitly enable (true) or disable (false) auto-merge for this monitor, " +
@@ -55,7 +65,9 @@ export function buildMonitorToolDescription({
     "after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current " +
     "state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a " +
     "later clean assessment), and set_auto_merge (turn auto-merge on or off for an active monitor on explicit user " +
-    "request; enabling it on an already-ready PR removes the label so the current head is reassessed). The ready " +
+    "request; enabling it on an already-ready PR removes the label so the current head is reassessed), feedback " +
+    "(fetch the bodies of every thread, PR comment and review summary still awaiting a reply), and reply (post a " +
+    "prefixed reply to a review thread, or a PR comment when thread is omitted). The ready " +
     "label means the agent's work is done; without auto-merge a human reviews next. With autoMerge enabled, the " +
     "user has chosen to merge without waiting for human review: automatic readiness and mark_ready make one " +
     "squash-merge attempt for the accepted head using only the PR title, so call mark_ready as soon as nothing is " +

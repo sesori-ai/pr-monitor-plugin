@@ -177,26 +177,27 @@ turn and rely on host-native delivery.
 
 ## Replying to review feedback
 
-Fetch inline threads with their resolution state and author types:
+Reports omit comment bodies. Fetch the feedback still awaiting a reply:
 
-```bash
-gh api graphql -F owner=OWNER -F repo=REPO -F pr=NUMBER -f query='
-query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){
-  reviewThreads(first:100){nodes{id isResolved isOutdated path line
-    comments(first:50){nodes{databaseId body createdAt author{__typename login}}}}}}}}'
+```
+pr_monitor(action: "feedback", pr: "owner/repo#123")
 ```
 
 - Assess every comment against the code. Assume a human is right unless you
   have strong evidence otherwise; when you disagree, explain why, and do the
   work if they insist.
 - Commit and push fixes **before** replying, so the reply can cite the commit.
-- Reply on the thread with the configured prefix and a status word
-  (`Addressed`, `Not addressed`, `Partially addressed`, or `Question`):
-  `gh api repos/OWNER/REPO/pulls/NUMBER/comments/COMMENT_ID/replies -f body='PREFIX Addressed in abc1234: ...'`.
-  Answer review summaries and issue comments with a prefixed `gh pr comment`.
-- Resolve a thread only when it is `Addressed` and every non-agent author has
-  `__typename` `Bot`:
-  `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"THREAD_ID"}){thread{isResolved}}}'`.
+- Reply on each channel with a status word (`Addressed`, `Not addressed`,
+  `Partially addressed`, or `Question`). `reply` adds the configured prefix;
+  omit `thread` to answer review summaries and PR comments:
+
+```
+pr_monitor(action: "reply", pr: "owner/repo#123", thread: "PRRT_...", body: "Addressed in abc1234: ...")
+```
+
+- Resolve a thread only when it is `Addressed` and `feedback` marks it
+  bot-only:
+  `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"PRRT_..."}){thread{isResolved}}}'`.
   Never resolve a thread with a human comment, or one you did not fully address;
   its reviewer owns that decision.
 

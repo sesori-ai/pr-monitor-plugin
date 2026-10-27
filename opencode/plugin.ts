@@ -15,8 +15,10 @@ import {
 import { packageSkillDirectory } from "../runtime/package-skill"
 import {
   AUTO_MERGE_PARAM_DESCRIPTION,
+  BODY_PARAM_DESCRIPTION,
   buildMonitorToolDescription,
   MONITOR_ACTION_VALUES,
+  THREAD_PARAM_DESCRIPTION,
   MonitorAction,
 } from "../runtime/tool"
 import { readPackagedSkill } from "./skill"
@@ -27,7 +29,7 @@ export const UNLOAD_NOTICE =
   "Monitor stopped: the pr-monitor plugin was unloaded because OpenCode shut down or reloaded it. " +
   "Re-start monitoring if still needed."
 
-type MonitorToolInput = { action: MonitorAction; pr?: string; autoMerge?: boolean }
+type MonitorToolInput = { action: MonitorAction; pr?: string; autoMerge?: boolean; thread?: string; body?: string }
 
 const TOOL_INPUT_SCHEMA = {
   type: "object",
@@ -37,9 +39,11 @@ const TOOL_INPUT_SCHEMA = {
       type: "string",
       description:
         "PR identifier: 'owner/repo#123' or PR URL. " +
-        "Required for start/stop/flush/mark_ready/unmark_ready/set_auto_merge; 'all' allowed for stop/flush.",
+        "Required for start/stop/flush/mark_ready/unmark_ready/set_auto_merge/feedback/reply; 'all' allowed for stop/flush.",
     },
     autoMerge: { type: "boolean", description: AUTO_MERGE_PARAM_DESCRIPTION },
+    thread: { type: "string", description: THREAD_PARAM_DESCRIPTION },
+    body: { type: "string", description: BODY_PARAM_DESCRIPTION },
   },
   required: ["action"],
   additionalProperties: false,
@@ -58,7 +62,11 @@ function parseToolInput({ input }: { input: unknown }): MonitorToolInput {
   if (autoMerge !== undefined && typeof autoMerge !== "boolean") {
     throw new Error("pr_monitor autoMerge must be a boolean")
   }
-  return { action, pr, autoMerge }
+  const thread = fields.get("thread")
+  const body = fields.get("body")
+  if (thread !== undefined && typeof thread !== "string") throw new Error("pr_monitor thread must be a string")
+  if (body !== undefined && typeof body !== "string") throw new Error("pr_monitor body must be a string")
+  return { action, pr, autoMerge, thread, body }
 }
 
 function formatResult({ result }: { result: MonitorActionResult<MonitorConfig> }): string {
@@ -157,6 +165,8 @@ export function createPrMonitorPlugin({ runGh }: { runGh: GhRunner }): Plugin.Pl
               action: args.action,
               pr: args.pr,
               autoMerge: args.autoMerge,
+              thread: args.thread,
+              body: args.body,
               start:
                 args.action === MonitorAction.start
                   ? {

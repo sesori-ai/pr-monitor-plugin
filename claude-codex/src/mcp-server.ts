@@ -28,8 +28,10 @@ import {
 import { createNodeGhRunner } from "../../runtime/node-gh"
 import {
   AUTO_MERGE_PARAM_DESCRIPTION,
+  BODY_PARAM_DESCRIPTION,
   buildMonitorToolDescription,
   MONITOR_ACTION_VALUES,
+  THREAD_PARAM_DESCRIPTION,
   MonitorAction,
 } from "../../runtime/tool"
 import { messagingChannel, pushMessage } from "./push"
@@ -195,15 +197,21 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
     action,
     pr,
     autoMerge,
+    thread,
+    body,
   }: {
     action: MonitorAction
     pr: string | undefined
     autoMerge: boolean | undefined
+    thread: string | undefined
+    body: string | undefined
   }): Promise<string> => {
     const result = await monitorSession.execute({
       action,
       pr,
       autoMerge,
+      thread,
+      body,
       start:
         action === MonitorAction.start
           ? {
@@ -318,15 +326,17 @@ server.registerTool(
         .string()
         .optional()
         .describe(
-          "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready/set_auto_merge; " +
+          "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready/set_auto_merge/feedback/reply; " +
             "'all' allowed for stop/flush.",
         ),
       autoMerge: z.boolean().optional().describe(AUTO_MERGE_PARAM_DESCRIPTION),
+      thread: z.string().optional().describe(THREAD_PARAM_DESCRIPTION),
+      body: z.string().optional().describe(BODY_PARAM_DESCRIPTION),
     },
   },
-  async ({ action, pr, autoMerge }, extra) => {
+  async ({ action, pr, autoMerge, thread, body }, extra) => {
     try {
-      const text = await adapterFor(extra._meta).handle({ action, pr, autoMerge })
+      const text = await adapterFor(extra._meta).handle({ action, pr, autoMerge, thread, body })
       return { content: [{ type: "text" as const, text }] }
     } catch (error) {
       log(String(error))

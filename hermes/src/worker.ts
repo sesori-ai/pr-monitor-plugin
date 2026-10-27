@@ -5,7 +5,10 @@ import { isAbsolute, resolve } from "node:path"
 import { loadMonitorConfig } from "../../core/config"
 import { MonitorSession, InitialAnnouncementMode } from "../../runtime/monitor-session"
 import { createNodeGhRunner } from "../../runtime/node-gh"
-import { AUTO_MERGE_PARAM_DESCRIPTION, buildMonitorToolDescription, MONITOR_ACTION_VALUES, type MonitorAction } from "../../runtime/tool"
+import {
+  AUTO_MERGE_PARAM_DESCRIPTION, BODY_PARAM_DESCRIPTION, buildMonitorToolDescription, MONITOR_ACTION_VALUES, type MonitorAction,
+  THREAD_PARAM_DESCRIPTION,
+} from "../../runtime/tool"
 
 const description = buildMonitorToolDescription({
   delivery: "Background monitoring requires Hermes Desktop/TUI: reports start a turn in the owning conversation when idle and inject into its active turn when busy. Standalone mark_ready/unmark_ready actions need no background-delivery route and work on other Hermes hosts.",
@@ -19,6 +22,8 @@ const schema = {
     action: { type: "string", enum: MONITOR_ACTION_VALUES },
     pr: { type: "string", description: "Explicit owner/repo#123 or GitHub PR URL; all only for stop/flush." },
     autoMerge: { type: "boolean", description: AUTO_MERGE_PARAM_DESCRIPTION },
+    thread: { type: "string", description: THREAD_PARAM_DESCRIPTION },
+    body: { type: "string", description: BODY_PARAM_DESCRIPTION },
   }, required: ["action"], additionalProperties: false },
 }
 
@@ -69,12 +74,15 @@ if (process.argv.includes("--describe")) {
     if (!MONITOR_ACTION_VALUES.includes(message.action as MonitorAction) ||
         (message.pr !== undefined && typeof message.pr !== "string") ||
         (message.autoMerge !== undefined && typeof message.autoMerge !== "boolean") ||
+        (message.thread !== undefined && typeof message.thread !== "string") ||
+        (message.body !== undefined && typeof message.body !== "string") ||
         typeof message.cwd !== "string" || !isAbsolute(message.cwd)) {
       send({ type: "result", id, error: "Invalid monitor action or PR" }); return
     }
     void session.execute({
       action: message.action as MonitorAction, pr: message.pr as string | undefined,
       autoMerge: message.autoMerge as boolean | undefined,
+      thread: message.thread as string | undefined, body: message.body as string | undefined,
       loadConfig: () => loadConfig(message.cwd as string),
       start: { announcementMode: InitialAnnouncementMode.background, createChannel: () => ({ deliver }) },
     }).then(result => send({ type: "result", id, text: result.text + (result.start

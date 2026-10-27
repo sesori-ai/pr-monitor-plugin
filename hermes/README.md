@@ -22,7 +22,7 @@ No npm install or build step is needed. The worker, tool schema, and skill ship 
 ## Use
 
 Ask Hermes to monitor `owner/repo#123`, or open a PR and let the bundled `monitor-pr` skill start the monitor for you.
-The tool offers `start`, `stop`, `status`, `flush`, `mark_ready`, `unmark_ready`, and `set_auto_merge`. To read the
+The tool offers `start`, `stop`, `status`, `flush`, `mark_ready`, `unmark_ready`, `set_auto_merge`, `feedback`, and `reply`. To read the
 workflow the agent follows, run `skill_view(name="pr-monitor:monitor-pr")`. While a monitor runs, the agent ends its
 turn and lets PR Monitor do the polling.
 

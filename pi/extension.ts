@@ -17,8 +17,10 @@ import {
 import { createNodeGhRunner } from "../runtime/node-gh"
 import {
   AUTO_MERGE_PARAM_DESCRIPTION,
+  BODY_PARAM_DESCRIPTION,
   buildMonitorToolDescription,
   MONITOR_ACTION_VALUES,
+  THREAD_PARAM_DESCRIPTION,
   MonitorAction,
 } from "../runtime/tool"
 
@@ -133,17 +135,21 @@ export function registerPiMonitor({
       pr: Type.Optional(
         Type.String({
           description:
-            "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready/set_auto_merge; " +
+            "PR identifier: 'owner/repo#123' or PR URL. Required for start/stop/flush/mark_ready/unmark_ready/set_auto_merge/feedback/reply; " +
             "'all' allowed for stop/flush.",
         }),
       ),
       autoMerge: Type.Optional(Type.Boolean({ description: AUTO_MERGE_PARAM_DESCRIPTION })),
+      thread: Type.Optional(Type.String({ description: THREAD_PARAM_DESCRIPTION })),
+      body: Type.Optional(Type.String({ description: BODY_PARAM_DESCRIPTION })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, context) {
       const result = await getSession().execute({
         action: params.action,
         pr: params.pr,
         autoMerge: params.autoMerge,
+        thread: params.thread,
+        body: params.body,
         loadConfig: () => loadConfigForContext({ context }),
         start:
           params.action === MonitorAction.start

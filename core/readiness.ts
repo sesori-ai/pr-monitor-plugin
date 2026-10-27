@@ -31,7 +31,7 @@ function latestComments(comments: CommentMeta[]): CommentMeta[] {
   return latest
 }
 
-function channelIsAcknowledged(comments: CommentMeta[]): boolean {
+export function channelIsAcknowledged(comments: CommentMeta[]): boolean {
   // GitHub timestamps can collide at one-second precision. A mixed tie remains
   // unacknowledged until a later prefixed reply removes the ambiguity.
   return comments.length > 0 && latestComments(comments).every((comment) => comment.isAgentReply)

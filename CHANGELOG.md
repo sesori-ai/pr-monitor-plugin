@@ -11,8 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- The `monitor-pr` skill now explains how to handle review feedback: fetching inline threads, pushing fixes before
-  replying, prefixed status replies, and resolving only fully addressed bot-only threads.
+- `feedback` action: returns the bodies of every review thread, PR comment and review summary that automatic
+  readiness still counts as unanswered, marking bot-only threads and unprefixed local-account comments.
+- `reply` action: posts a reply to a review thread, or a PR comment without `thread`, with the configured reply prefix
+  added automatically.
+- The `monitor-pr` skill explains how to handle review feedback with these actions: push fixes before replying, use
+  status words, and resolve only fully addressed bot-only threads.
 
 ### Changed
 
