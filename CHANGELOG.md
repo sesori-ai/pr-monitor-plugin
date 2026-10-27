@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The `monitor-pr` skill now explains how to handle review feedback: fetching inline threads, pushing fixes before
+  replying, prefixed status replies, and resolving only fully addressed bot-only threads.
+
 ### Changed
 
 - **Breaking:** the Pi/OMP package now requires Pi 1.4.0 or newer and OMP 18.12.6 or newer; development, pack and

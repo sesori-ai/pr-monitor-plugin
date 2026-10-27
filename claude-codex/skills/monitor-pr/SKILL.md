@@ -193,6 +193,31 @@ call `pr_monitor(action: "stop", pr: "all")`.
 - `set_auto_merge`: turn auto-merge on or off for an active watch, only on
   explicit user request.
 
+## Replying to review feedback
+
+Fetch inline threads with their resolution state and author types:
+
+```bash
+gh api graphql -F owner=OWNER -F repo=REPO -F pr=NUMBER -f query='
+query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){
+  reviewThreads(first:100){nodes{id isResolved isOutdated path line
+    comments(first:50){nodes{databaseId body createdAt author{__typename login}}}}}}}}'
+```
+
+- Assess every comment against the code. Assume a human is right unless you
+  have strong evidence otherwise; when you disagree, explain why, and do the
+  work if they insist.
+- Commit and push fixes **before** replying, so the reply can cite the commit.
+- Reply on the thread with the configured prefix and a status word
+  (`Addressed`, `Not addressed`, `Partially addressed`, or `Question`):
+  `gh api repos/OWNER/REPO/pulls/NUMBER/comments/COMMENT_ID/replies -f body='PREFIX Addressed in abc1234: ...'`.
+  Answer review summaries and issue comments with a prefixed `gh pr comment`.
+- Resolve a thread only when it is `Addressed` and every non-agent author has
+  `__typename` `Bot`:
+  `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"THREAD_ID"}){thread{isResolved}}}'`.
+  Never resolve a thread with a human comment, or one you did not fully address;
+  its reviewer owns that decision.
+
 ## Avoid the bot-review spiral
 
 A bot edge case earns a code change only when plausible and consequential.
