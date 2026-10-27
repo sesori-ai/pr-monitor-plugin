@@ -293,7 +293,7 @@ process.on("SIGINT", shutdown)
 claimSpool(claudePid)
 collectDeadSpools(claudePid)
 
-const server = new McpServer({ name: "pr-monitor", version: "0.8.0" })
+const server = new McpServer({ name: "pr-monitor", version: "0.9.0" })
 
 server.registerTool(
   "pr_monitor",
