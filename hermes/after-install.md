@@ -6,6 +6,6 @@
    monitor a PR URL.
 
 Background monitoring works in the original live Desktop/TUI conversation with `dashboard.turn_isolation: false`.
-The CLI, messaging gateways, ACP, and isolated Desktop turns can use the manual `mark_ready` and `unmark_ready`
-actions but cannot start background monitors. Restart those hosts after enabling the plugin.
+The CLI, messaging gateways, ACP, and isolated Desktop turns can use the manual `mark_ready`, `unmark_ready`,
+`feedback` and `reply` actions but cannot start background monitors. Restart those hosts after enabling the plugin.
 Monitors stop when the conversation or host closes, so start them again after a restart. See README.md for details.

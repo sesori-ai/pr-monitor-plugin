@@ -13,7 +13,7 @@ hermes plugins enable pr-monitor
 Then:
 
 - Restart Hermes Desktop's gateway and start or resume a conversation. On other Hermes hosts, where only the manual
-  ready actions are available, restart that host after enabling the plugin.
+  ready, feedback and reply actions are available, restart that host after enabling the plugin.
 - Make sure Node.js 18+ and a logged-in GitHub CLI (`gh auth status`) are on the **Hermes backend's** `PATH`.
 - If your profile uses an explicit toolset allow-list, add the `pr-monitor` toolset.
 
@@ -36,7 +36,8 @@ turn and lets PR Monitor do the polling.
   `dashboard.turn_isolation: true`**: background monitoring is not available, and `start` says so. These hosts
   cannot bind a future report to the original conversation, so a switched or reset conversation could receive
   another conversation's report.
-- **Manual ready actions work everywhere.** `mark_ready` and `unmark_ready` need neither a delivery route nor a
+- **Manual ready, feedback and reply actions work everywhere.** `mark_ready`, `unmark_ready`, `feedback` and
+  `reply` need neither a delivery route nor a
   running monitor. A short-lived worker does the job and exits. If the Desktop conversation already has a worker,
   the action reuses it and its settings.
 

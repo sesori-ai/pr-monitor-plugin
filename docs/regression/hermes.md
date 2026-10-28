@@ -11,7 +11,7 @@ Highest level: L5. Result vocabulary and proof boundaries follow [README.md](REA
 | L2 | Packaged worker | Start, report acknowledgement/failure, retry, merge/close, stop, invalid input and worker exit pass through `hermes/dist/worker.mjs`. No live GitHub mutations. | `test/hermes_adapter_test.py` with a controlled `gh` executable on macOS/Linux |
 | L3 | Actual host loader | Installed Hermes discovers the copied Git plugin, tool, namespaced skill and prompt section; unload removes registrations. | Pass: 2026-09-07, Hermes 9a84bee265da, macOS / Python 3.11.16 |
 | L3 | Model-driven Desktop gateway | A real model starts a monitor, ends its turn, and wakes for a later simulated merge report. | Pass: 2026-09-07, Hermes 9a84bee265da, macOS / Python 3.11.16 / Node 26.8.1 |
-| L2 | Unsupported hosts / labels | Native CLI/gateway/ACP injection availability cannot enable background monitoring; standalone ready actions need no delivery route and close their temporary worker. | `test/hermes_adapter_test.py` |
+| L2 | Unsupported hosts / labels | Native CLI/gateway/ACP injection availability cannot enable background monitoring; standalone ready, feedback and reply actions need no delivery route and close their temporary worker. | `test/hermes_adapter_test.py` |
 | L2 | Automated | Auto-merge configuration and safety. | `test/{merge,runtime,core,hermes}.test.ts` |
 | L3 | Actual host / external | Merge a disposable PR after readiness handoff; the original idle Desktop conversation gets one terminal report and monitoring stops. | Not run |
 | L4 | External auto-merge | Hermes config/env merges a disposable PR with title-only commit and marker. | Not run |
@@ -20,7 +20,7 @@ Highest level: L5. Result vocabulary and proof boundaries follow [README.md](REA
 | L5 | Packaged / external | Install the Hermes subdirectory from the release tag with no repository dependencies/build; exercise all supported hosts on macOS/Linux and version-update compatibility. | Not run |
 
 Native CLI and messaging-gateway injection is intentionally unsupported for monitoring: it does not accept an
-expected durable conversation ID at the dispatch boundary. Standalone label actions remain available there and in ACP.
+expected durable conversation ID at the dispatch boundary. Standalone label, feedback and reply actions remain available there and in ACP.
 
 Desktop API admission is narrower than a completed model turn: a successful background-turn admission schedules or
 starts work, while provider failures remain the host's responsibility. The public Python plugin injection API
