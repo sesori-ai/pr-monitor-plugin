@@ -223,6 +223,9 @@ export class MonitorSession<TConfig extends MonitorConfig> {
           return { text: "action 'reply' requires a single explicit pr: 'owner/repo#123' or a PR URL." }
         }
         if (!body?.trim()) return { text: "action 'reply' requires a non-empty body." }
+        if (thread !== undefined && !thread.trim()) {
+          return { text: "action 'reply' needs a thread id from feedback, or no thread for a PR comment." }
+        }
         return await this.reply({ pr, thread, body, loadConfig: actionLoadConfig })
     }
   }
@@ -265,7 +268,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     try {
       const config = await this.configFor({ target, loadConfig })
       const replyPrefix = config.ignoreCommentTag ?? DEFAULT_REPLY_PREFIX
-      return { text: await postReply({ runGh: this.deps.runGh, target, thread: thread || undefined, body, replyPrefix }) }
+      return { text: await postReply({ runGh: this.deps.runGh, target, thread, body, replyPrefix }) }
     } catch (error) {
       return { text: `Cannot reply on ${targetKey(target)}: ${(error as Error).message}` }
     }

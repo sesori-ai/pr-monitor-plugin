@@ -267,7 +267,8 @@ export async function fetchPrSnapshot(input: {
   return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin })
 }
 
-// The raw, fully paginated GraphQL payload. Comment bodies are only present here; snapshots keep metadata.
+// The raw GraphQL payload. Checks, latest reviews, review threads and labels are paginated; issue comments and
+// per-thread comments are the latest 100. Comment bodies are only present here; snapshots keep metadata.
 export async function fetchPrPayload(input: { runGh: GhRunner; target: Target }): Promise<unknown> {
   const payload = parseGhPayload(await input.runGh([
     "api", "graphql",

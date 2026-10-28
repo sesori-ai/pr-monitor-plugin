@@ -17,7 +17,8 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 - `start` accepts `owner/repo#number` or a full GitHub pull-request URL, rejects non-open targets, deduplicates
   owner/repository casing within one session, delivers the initial snapshot by default, and starts one owned timer.
 - `status`, `flush`, `stop`, `mark_ready`, `unmark_ready`, `set_auto_merge`, `feedback`, and `reply` expose the same
-  action contract in every host. Label actions do not require an active watch; watch actions never infer a target from the current directory.
+  action contract in every host. Label, feedback and reply actions do not require an active watch; watch actions
+  never infer a target from the current directory.
 - Ordinary activity is debounced from the latest visible change. A due report waits for running CI only up to
   `maxCiWaitMinutes`. Entering CI `running` and non-failing per-check progress are not ordinary activity.
 - With `flushOnCiFailure` enabled, a newly failing check is urgent and bypasses both debounce and the CI hold.
@@ -84,7 +85,8 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   cancellation plus later starts for that PR await an already-started startup ready-label reset.
 - `feedback` makes one read-only fetch and returns the bodies of the comments that automatic readiness still counts
   as unanswered: per review thread, and for PR comments plus review summaries together, only comments after the latest
-  prefixed agent reply. It marks bot-only threads and unprefixed local-account comments as human instructions.
+  prefixed agent reply. It marks bot-only threads as `bot-only` and unprefixed local-account comments as human instructions. Each body is
+  capped at 4,000 characters.
 - `reply` requires a non-empty `body`, adds the configured prefix unless already present, and posts to review thread
   `thread` or, without it, as a PR comment. It needs no active watch.
 - `set_auto_merge` requires one explicit watched PR and a boolean `autoMerge`; an unwatched PR is refused with a

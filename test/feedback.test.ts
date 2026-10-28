@@ -61,6 +61,11 @@ function payload(): string {
                 },
               },
               {
+                id: "PRRT_tie",
+                isResolved: false,
+                comments: { nodes: [comment("t1", human, "Same second", 6), comment("t2", self, `${PREFIX} Done`, 6)] },
+              },
+              {
                 id: "PRRT_done",
                 isResolved: true,
                 path: "b.ts",
@@ -96,10 +101,12 @@ function session(runGh: GhRunner) {
 }
 
 test("feedback returns only unanswered comments with bodies", async () => {
-  const { runGh } = harness()
+  const { runGh, calls } = harness()
   const { text } = await session(runGh).execute({ action: MonitorAction.feedback, pr: "o/r#7" })
+  assert.ok(calls.every((args) => !args.some((arg) => arg.includes("mutation"))), "feedback must stay read-only")
 
-  assert.match(text, /awaiting a reply \(2 channels\)/)
+  assert.match(text, /awaiting a reply \(3 channels\)/)
+  assert.match(text, /> Same second/)
   assert.match(text, /Thread `PRRT_open` on a\.ts:3 \(unresolved, bot-only\)/)
   assert.match(text, /> New finding/)
   assert.doesNotMatch(text, /Old finding|meta|PRRT_done|Rename this/)

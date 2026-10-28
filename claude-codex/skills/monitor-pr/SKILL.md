@@ -207,9 +207,11 @@ pr_monitor(action: "feedback", pr: "owner/repo#123")
   have strong evidence otherwise; when you disagree, explain why, and do the
   work if they insist.
 - Commit and push fixes **before** replying, so the reply can cite the commit.
-- Reply on each channel with a status word (`Addressed`, `Not addressed`,
-  `Partially addressed`, or `Question`). `reply` adds the configured prefix;
-  omit `thread` to answer review summaries and PR comments:
+- A prefixed reply tells the monitor the channel is handled, so reply only
+  once it is: `Addressed` (cite the commit) or `Not addressed` (with the
+  reason). If work or a question remains, finish it or ask the user; never post
+  an interim prefixed reply. `reply` adds the prefix; omit `thread` to answer
+  review summaries and PR comments:
 
 ```
 pr_monitor(action: "reply", pr: "owner/repo#123", thread: "PRRT_...", body: "Addressed in abc1234: ...")

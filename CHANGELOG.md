@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `feedback` action: returns the bodies of every review thread, PR comment and review summary that automatic
-  readiness still counts as unanswered, marking bot-only threads and unprefixed local-account comments.
+  readiness still counts as unanswered (up to 4,000 characters each), marking bot-only threads and unprefixed
+  local-account comments.
 - `reply` action: posts a reply to a review thread, or a PR comment without `thread`, with the configured reply prefix
   added automatically.
 - The `monitor-pr` skill explains how to handle review feedback with these actions: push fixes before replying, use

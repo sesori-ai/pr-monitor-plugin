@@ -21,11 +21,14 @@ function collectBodies(payload: unknown): Map<string, string> {
   return bodies
 }
 
-// Comments after the latest agent reply: earlier ones were already answered.
+// Comments at or after the latest agent reply: earlier ones were answered. A same-second tie stays visible because
+// readiness also treats it as unanswered.
 function unanswered(comments: CommentMeta[]): CommentMeta[] {
-  const sorted = [...comments].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-  const lastReply = sorted.map((comment) => comment.isAgentReply).lastIndexOf(true)
-  return sorted.slice(lastReply + 1).filter((comment) => !comment.isAgentReply)
+  const replyTimes = comments.filter((comment) => comment.isAgentReply).map((comment) => Date.parse(comment.createdAt))
+  const lastReply = replyTimes.length === 0 ? Number.NEGATIVE_INFINITY : Math.max(...replyTimes)
+  return comments
+    .filter((comment) => !comment.isAgentReply && !(Date.parse(comment.createdAt) < lastReply))
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
 }
 
 function renderComment(comment: CommentMeta, bodies: Map<string, string>): string {

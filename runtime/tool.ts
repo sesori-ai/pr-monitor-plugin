@@ -73,7 +73,7 @@ export function buildMonitorToolDescription({
     "squash-merge attempt for the accepted head using only the PR title, so call mark_ready as soon as nothing is " +
     "left to do and never hold it back to wait for a human. Rejected or unknown outcomes keep readiness and are " +
     "not retried automatically, while a changed head cancels standalone readiness. " +
-    "Ready actions do not require an active monitor. The PR must be `owner/repo#123` or a " +
+    "Ready, feedback and reply actions do not require an active monitor. The PR must be `owner/repo#123` or a " +
     `full URL; \`all\` is allowed only for stop/flush. Global tuning lives in ` +
     `~/.config/pr-monitor/config.json; ${configPath} overrides it. An explicit SESORI_PR_MONITOR_AUTO_MERGE ` +
     `environment value overrides autoMerge config; the start autoMerge argument overrides both for that monitor and ` +
