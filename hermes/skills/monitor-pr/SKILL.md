@@ -110,7 +110,7 @@ Address everything in one batch:
   `mark_ready` only when an explicit new merge attempt is warranted.
 - **Merged/closed:** monitoring stopped; no further action.
 
-When taking action, reply on GitHub with the configured prefix first. It is the
+After the fix is pushed, reply on GitHub with the configured prefix. It is the
 monitor's authoritative evidence that the latest feedback on that channel was
 handled. Threads may remain unresolved intentionally for a human reviewer; a
 prefixed final reply is what matters for automatic readiness.
@@ -174,6 +174,34 @@ The monitor owns polling and notifications. Never create sleeps, delayed jobs,
 cron, background polling loops, repeated `gh pr checks`, or routine
 `status`/`flush` calls. When there is no delivered report to handle, end the
 turn and rely on host-native delivery.
+
+## Replying to review feedback
+
+Reports omit comment bodies. Fetch the feedback still awaiting a reply:
+
+```
+pr_monitor(action: "feedback", pr: "owner/repo#123")
+```
+
+- Assess every comment against the code. Assume a human is right unless you
+  have strong evidence otherwise; when you disagree, explain why, and do the
+  work if they insist.
+- Commit and push fixes **before** replying, so the reply can cite the commit.
+- A prefixed reply tells the monitor the channel is handled, so reply only
+  once it is: `Addressed` (cite the commit) or `Not addressed` (with the
+  reason). If work or a question remains, finish it or ask the user; never post
+  an interim prefixed reply. `reply` adds the prefix; omit `thread` to answer
+  review summaries and PR comments:
+
+```
+pr_monitor(action: "reply", pr: "owner/repo#123", thread: "PRRT_...", body: "Addressed in abc1234: ...")
+```
+
+- Resolve a thread only when it is `Addressed` and `feedback` marks it
+  bot-only:
+  `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"PRRT_..."}){thread{isResolved}}}'`.
+  Never resolve a thread with a human comment, or one you did not fully address;
+  its reviewer owns that decision.
 
 ## Avoid the bot-review spiral
 

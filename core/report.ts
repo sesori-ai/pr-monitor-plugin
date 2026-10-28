@@ -8,7 +8,7 @@ import { assessAutomaticReadiness, hasReadyLabel } from "./readiness"
 import { targetKey, type Target } from "./target"
 
 const DEFAULT_READY_LABEL = "agent-ready"
-const DEFAULT_REPLY_PREFIX = "<!-- pr-monitor:reply -->"
+export const DEFAULT_REPLY_PREFIX = "<!-- pr-monitor:reply -->"
 
 // Agents otherwise tend to withhold mark_ready "until a human reviews", which
 // defeats a merge the user explicitly delegated.

@@ -3,6 +3,7 @@
 // adapters own transport, lifecycle policy, and truthful host wording.
 
 import type { MonitorConfig } from "../core/config"
+import { fetchFeedback, postReply } from "../core/feedback"
 import { fetchPrSnapshot, type GhRunner, type PrSnapshot } from "../core/github"
 import { addReadyLabel, removeReadyLabel } from "../core/label"
 import {
@@ -13,7 +14,7 @@ import {
   squashMergePullRequest,
 } from "../core/merge"
 import { hasReadyLabel, withReadyLabel } from "../core/readiness"
-import { AUTO_MERGE_GUIDANCE } from "../core/report"
+import { AUTO_MERGE_GUIDANCE, DEFAULT_REPLY_PREFIX } from "../core/report"
 import { parseTarget, targetKey, targetRegistryKey, type Target } from "../core/target"
 import { type AutoMergeDeps, PrWatch } from "../core/watch"
 import { MonitorAction } from "./tool"
@@ -165,6 +166,8 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     start,
     loadConfig,
     autoMerge,
+    thread,
+    body,
   }: {
     action: MonitorAction
     pr: string | undefined
@@ -172,6 +175,8 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     loadConfig?: () => Promise<TConfig>
     // User-requested override for start or set_auto_merge; wins over config and environment for that watch only.
     autoMerge?: boolean
+    thread?: string
+    body?: string
   }): Promise<MonitorActionResult<TConfig>> {
     const actionLoadConfig =
       loadConfig ??
@@ -208,6 +213,75 @@ export class MonitorSession<TConfig extends MonitorConfig> {
         }
         if (autoMerge === undefined) return { text: "action 'set_auto_merge' requires autoMerge: true or false." }
         return await this.setAutoMerge({ pr, autoMerge })
+      case MonitorAction.feedback:
+        if (!pr || pr === "all") {
+          return { text: "action 'feedback' requires a single explicit pr: 'owner/repo#123' or a PR URL." }
+        }
+        return await this.feedback({ pr, loadConfig: actionLoadConfig })
+      case MonitorAction.reply:
+        if (!pr || pr === "all") {
+          return { text: "action 'reply' requires a single explicit pr: 'owner/repo#123' or a PR URL." }
+        }
+        if (!body?.trim()) return { text: "action 'reply' requires a non-empty body." }
+        if (thread !== undefined && !thread.trim()) {
+          return { text: "action 'reply' needs a thread id from feedback, or no thread for a PR comment." }
+        }
+        return await this.reply({ pr, thread, body, loadConfig: actionLoadConfig })
+    }
+  }
+
+  private async configFor({ target, loadConfig }: { target: Target; loadConfig: () => Promise<TConfig> }) {
+    return this.watches.get(targetRegistryKey(target))?.config ?? (await loadConfig())
+  }
+
+  private async feedback({ pr, loadConfig }: { pr: string; loadConfig: () => Promise<TConfig> }) {
+    const target = parseTarget(pr)
+    if ("error" in target) return { text: target.error }
+    try {
+      const config = await this.configFor({ target, loadConfig })
+      if (config.ignoreCommentTag !== undefined) await this.resolveSelfLogin()
+      const text = await fetchFeedback({
+        runGh: this.deps.runGh,
+        target,
+        ignoreTag: config.ignoreCommentTag,
+        selfLogin: this.selfLogin,
+      })
+      return { text }
+    } catch (error) {
+      return { text: `Cannot fetch feedback for ${targetKey(target)}: ${(error as Error).message}` }
+    }
+  }
+
+  private async reply({
+    pr,
+    thread,
+    body,
+    loadConfig,
+  }: {
+    pr: string
+    thread: string | undefined
+    body: string
+    loadConfig: () => Promise<TConfig>
+  }) {
+    const target = parseTarget(pr)
+    if ("error" in target) return { text: target.error }
+    try {
+      const config = await this.configFor({ target, loadConfig })
+      const replyPrefix = config.ignoreCommentTag ?? DEFAULT_REPLY_PREFIX
+      return { text: await postReply({ runGh: this.deps.runGh, target, thread, body, replyPrefix }) }
+    } catch (error) {
+      return { text: `Cannot reply on ${targetKey(target)}: ${(error as Error).message}` }
+    }
+  }
+
+  private async resolveSelfLogin(): Promise<void> {
+    if (this.selfLogin !== undefined) return
+    try {
+      this.selfLoginPromise ??= this.deps.runGh(["api", "user", "--jq", ".login"]).then((login) => login.trim())
+      this.selfLogin = await this.selfLoginPromise
+    } catch (error) {
+      this.selfLoginPromise = undefined
+      throw error
     }
   }
 
@@ -313,12 +387,10 @@ export class MonitorSession<TConfig extends MonitorConfig> {
         text: `Cannot start monitor for ${displayKey}: loading configuration failed (${(error as Error).message}).`,
       }
     }
-    if (config.ignoreCommentTag !== undefined && this.selfLogin === undefined) {
+    if (config.ignoreCommentTag !== undefined) {
       try {
-        this.selfLoginPromise ??= this.deps.runGh(["api", "user", "--jq", ".login"]).then((login) => login.trim())
-        this.selfLogin = await this.selfLoginPromise
+        await this.resolveSelfLogin()
       } catch (error) {
-        this.selfLoginPromise = undefined
         return {
           text:
             "Cannot start monitor: resolving the authenticated gh user for the reply prefix failed " +

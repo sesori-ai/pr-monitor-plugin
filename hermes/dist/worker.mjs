@@ -289,6 +289,10 @@ async function paginateConnection({
   }
 }
 async function fetchPrSnapshot(input) {
+  const payload = await fetchPrPayload(input);
+  return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin });
+}
+async function fetchPrPayload(input) {
   const payload = parseGhPayload(await input.runGh([
     "api",
     "graphql",
@@ -303,7 +307,7 @@ async function fetchPrSnapshot(input) {
   ]));
   const pr = payload?.data?.repository?.pullRequest;
   assertCompleteGraphQlPayload(payload);
-  if (!pr) return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin });
+  if (!pr) return payload;
   const pageInput = { runGh: input.runGh, target: input.target };
   await paginateConnection({
     input: pageInput,
@@ -336,7 +340,7 @@ async function fetchPrSnapshot(input) {
     select: (page) => page?.data?.repository?.pullRequest?.labels,
     name: "label"
   });
-  return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin });
+  return payload;
 }
 function toMeta(raw, classifier) {
   const author = raw.author?.login ?? "ghost";
@@ -433,6 +437,165 @@ function ciPhase(snapshot) {
   return snapshot.checks.some((check) => check.outcome === "pending") ? "running" : "concluded";
 }
 
+// core/activity.ts
+function reviewSig(snapshot) {
+  const states = snapshot.reviews.map((review) => `${review.login}=${review.state}@${review.submittedAt}`).sort();
+  const pending = [...snapshot.pendingReviewers].sort();
+  return `${states.join(",")}|${pending.join(",")}`;
+}
+function relevantComments(comments) {
+  return comments.filter((comment) => !comment.isAgentReply);
+}
+function hasAddedRelevantComment(prev, next) {
+  const before = new Set(prev.map((comment) => comment.id));
+  return next.some((comment) => !comment.isAgentReply && !before.has(comment.id));
+}
+function reviewThreadsReceivedNewComments(prev, next) {
+  const before = new Map(prev.map((thread) => [thread.id, thread]));
+  return next.some((thread) => {
+    const previous = before.get(thread.id);
+    return hasAddedRelevantComment(previous?.comments ?? [], thread.comments);
+  });
+}
+function reviewThreadsChanged(prev, next) {
+  const before = new Map(prev.map((thread) => [thread.id, thread]));
+  const after = new Set(next.map((thread) => thread.id));
+  if (prev.some((thread) => !after.has(thread.id))) return true;
+  return next.some((thread) => {
+    const previous = before.get(thread.id);
+    if (!previous) return relevantComments(thread.comments).length > 0 || !thread.isResolved;
+    return previous.isResolved !== thread.isResolved || hasAddedRelevantComment(previous.comments, thread.comments);
+  });
+}
+function checkKey(check) {
+  return check.id ?? check.name;
+}
+function ciConcludedSig(snapshot) {
+  const failed = snapshot.checks.filter((check) => check.outcome === "failure").map(checkKey).sort();
+  return `${snapshot.headSha}:${failed.join(",")}`;
+}
+function mergeableChanged(lastDefinite, next) {
+  if (next.mergeable === "UNKNOWN") return false;
+  if (lastDefinite === void 0) return false;
+  return lastDefinite !== next.mergeable;
+}
+function hasNewMergeConflict(lastDefinite, next) {
+  return next.state === "OPEN" && next.mergeable === "CONFLICTING" && lastDefinite !== "CONFLICTING";
+}
+function hasNewCiFailure(prev, next) {
+  const failing = next.checks.filter((check) => check.outcome === "failure");
+  if (failing.length === 0) return false;
+  if (prev.headSha !== next.headSha) return true;
+  const before = new Set(prev.checks.filter((check) => check.outcome === "failure").map(checkKey));
+  return failing.some((check) => !before.has(checkKey(check)));
+}
+function detectActivity(prev, next, lastDefiniteMergeable) {
+  if (prev.state !== next.state) return true;
+  if (prev.headSha !== next.headSha) return true;
+  if (mergeableChanged(lastDefiniteMergeable, next)) return true;
+  if (reviewSig(prev) !== reviewSig(next)) return true;
+  if (reviewThreadsChanged(prev.reviewThreads, next.reviewThreads)) return true;
+  if (prev.issueCommentsTotal !== next.issueCommentsTotal || hasAddedRelevantComment(prev.issueComments, next.issueComments) || hasAddedRelevantComment(prev.reviewSummaries, next.reviewSummaries)) {
+    return true;
+  }
+  if (ciPhase(next) === "concluded" && (ciPhase(prev) !== "concluded" || ciConcludedSig(prev) !== ciConcludedSig(next))) {
+    return true;
+  }
+  return false;
+}
+
+// core/readiness.ts
+function latestComments(comments) {
+  let latestAt = Number.NEGATIVE_INFINITY;
+  let latest = [];
+  for (const comment of comments) {
+    const createdAt = Date.parse(comment.createdAt);
+    if (Number.isNaN(createdAt)) return comments;
+    if (createdAt > latestAt) {
+      latestAt = createdAt;
+      latest = [comment];
+    } else if (createdAt === latestAt) {
+      latest.push(comment);
+    }
+  }
+  return latest;
+}
+function channelIsAcknowledged(comments) {
+  return comments.length > 0 && latestComments(comments).every((comment) => comment.isAgentReply);
+}
+function feedbackChannels(snapshot) {
+  const channels = /* @__PURE__ */ new Map();
+  channels.set("unthreaded", [...snapshot.issueComments, ...snapshot.reviewSummaries]);
+  for (const thread of snapshot.reviewThreads) channels.set(`thread:${thread.id}`, thread.comments);
+  return channels;
+}
+function hasAcknowledgementRegression(prev, next) {
+  const before = feedbackChannels(prev);
+  return [...feedbackChannels(next)].some(([channel, comments]) => {
+    const previous = before.get(channel);
+    if (channel === "unthreaded") {
+      return comments.length > 0 && channelIsAcknowledged(previous ?? []) && !channelIsAcknowledged(comments);
+    }
+    return !channelIsAcknowledged(comments) && (previous === void 0 || channelIsAcknowledged(previous));
+  });
+}
+function ciIsReady(snapshot) {
+  const phase = ciPhase(snapshot);
+  return phase === "none" || phase === "concluded" && snapshot.checks.every((check) => check.outcome === "success");
+}
+function assessAutomaticReadiness(snapshot) {
+  const blockers = [];
+  if (snapshot.state !== "OPEN") blockers.push(`PR is ${snapshot.state.toLowerCase()}`);
+  if (!ciIsReady(snapshot)) {
+    blockers.push(ciPhase(snapshot) === "running" ? "CI is running" : "CI is failing");
+  }
+  if (snapshot.mergeable !== "MERGEABLE") {
+    blockers.push(
+      snapshot.mergeable === "CONFLICTING" ? "the PR has a merge conflict" : "mergeability is still unknown"
+    );
+  }
+  const awaitingThreadReplies = snapshot.reviewThreads.filter(
+    (thread) => !channelIsAcknowledged(thread.comments)
+  ).length;
+  if (awaitingThreadReplies > 0) {
+    blockers.push(
+      `${awaitingThreadReplies} review ${awaitingThreadReplies === 1 ? "thread awaits" : "threads await"} a prefixed reply from the local GitHub account`
+    );
+  }
+  const unthreaded = [...snapshot.issueComments, ...snapshot.reviewSummaries];
+  const awaitingUnthreadedReply = unthreaded.length > 0 && !channelIsAcknowledged(unthreaded);
+  if (awaitingUnthreadedReply) {
+    blockers.push("issue or review-summary feedback awaits a prefixed reply from the local GitHub account");
+  }
+  return {
+    eligible: blockers.length === 0,
+    blockers,
+    awaitingThreadReplies,
+    awaitingUnthreadedReply
+  };
+}
+function hasReadyLabel(snapshot, readyLabel) {
+  const normalized = readyLabel.toLowerCase();
+  return snapshot.labels.some((label) => label.toLowerCase() === normalized);
+}
+function withReadyLabel(snapshot, readyLabel, ready) {
+  const normalized = readyLabel.toLowerCase();
+  const withoutReady = snapshot.labels.filter((label) => label.toLowerCase() !== normalized);
+  return { ...snapshot, labels: ready ? [...withoutReady, readyLabel] : withoutReady };
+}
+function hasReadinessInvalidation(prev, next, lastDefiniteMergeable) {
+  if (next.state !== "OPEN") return false;
+  if (prev.headSha !== next.headSha) return true;
+  if (hasNewMergeConflict(lastDefiniteMergeable, next)) return true;
+  if (ciIsReady(prev) && !ciIsReady(next)) return true;
+  if (hasNewCiFailure(prev, next)) return true;
+  if (hasAcknowledgementRegression(prev, next)) return true;
+  if (reviewThreadsReceivedNewComments(prev.reviewThreads, next.reviewThreads)) return true;
+  if (hasAddedRelevantComment(prev.issueComments, next.issueComments)) return true;
+  if (hasAddedRelevantComment(prev.reviewSummaries, next.reviewSummaries)) return true;
+  return false;
+}
+
 // core/target.ts
 var SHORT_RE = /^([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+)#(\d+)$/;
 var URL_RE = /^https:\/\/github\.com\/([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+)\/pull\/(\d+)(?:[/?#].*)?$/;
@@ -454,6 +617,102 @@ function targetRegistryKey(target) {
 }
 function targetUrl(target) {
   return `https://github.com/${target.owner}/${target.repo}/pull/${target.number}`;
+}
+
+// core/feedback.ts
+var MAX_BODY_CHARS = 4e3;
+function collectBodies(payload) {
+  const pr = payload?.data?.repository?.pullRequest;
+  const bodies = /* @__PURE__ */ new Map();
+  const add = (node) => {
+    if (typeof node?.id === "string" && typeof node.body === "string") bodies.set(node.id, node.body);
+  };
+  for (const review of pr?.latestReviews?.nodes ?? []) add(review);
+  for (const thread of pr?.reviewThreads?.nodes ?? []) for (const comment of thread.comments?.nodes ?? []) add(comment);
+  for (const comment of pr?.comments?.nodes ?? []) add(comment);
+  return bodies;
+}
+function unanswered(comments) {
+  const replyTimes = comments.filter((comment) => comment.isAgentReply).map((comment) => Date.parse(comment.createdAt));
+  const lastReply = replyTimes.length === 0 ? Number.NEGATIVE_INFINITY : Math.max(...replyTimes);
+  return comments.filter((comment) => !comment.isAgentReply && !(Date.parse(comment.createdAt) < lastReply)).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+}
+function renderComment(comment, bodies) {
+  const raw = (bodies.get(comment.id) ?? "").replace(/<!--[\s\S]*?-->/g, "").trim();
+  const body = raw.length > MAX_BODY_CHARS ? `${raw.slice(0, MAX_BODY_CHARS)}
+[truncated]` : raw;
+  const kind = comment.isBot ? "bot" : comment.isLocal ? "local account, unprefixed: a human instruction" : "human";
+  const quoted = (body.length > 0 ? body : "(no text)").replace(/^/gm, "> ");
+  return `**${comment.author}** (${kind}, ${comment.createdAt}):
+${quoted}`;
+}
+async function fetchFeedback({
+  runGh,
+  target,
+  ignoreTag,
+  selfLogin
+}) {
+  const payload = await fetchPrPayload({ runGh, target });
+  const snapshot = normalizeSnapshot(payload, { ignoreTag, selfLogin });
+  const bodies = collectBodies(payload);
+  const sections = [];
+  for (const thread of snapshot.reviewThreads) {
+    if (channelIsAcknowledged(thread.comments)) continue;
+    const location = thread.path === void 0 ? "" : ` on ${thread.path}${thread.line === void 0 ? "" : `:${thread.line}`}`;
+    const state = thread.isResolved ? "resolved" : "unresolved";
+    const allBots = thread.comments.every((comment) => comment.isAgentReply || comment.isBot);
+    sections.push(
+      `### Thread \`${thread.id}\`${location} (${state}${allBots ? ", bot-only" : ""})
+
+` + unanswered(thread.comments).map((comment) => renderComment(comment, bodies)).join("\n\n")
+    );
+  }
+  const unthreaded = [...snapshot.issueComments, ...snapshot.reviewSummaries];
+  if (unthreaded.length > 0 && !channelIsAcknowledged(unthreaded)) {
+    sections.push(
+      "### PR comments and review summaries (reply without `thread`)\n\n" + unanswered(unthreaded).map((comment) => renderComment(comment, bodies)).join("\n\n")
+    );
+  }
+  const key = targetKey(target);
+  if (sections.length === 0) return `No feedback on ${key} is awaiting a reply.`;
+  return `Feedback on ${key} awaiting a reply (${sections.length} channel${sections.length === 1 ? "" : "s"}):
+
+` + sections.join("\n\n") + `
+
+Answer each channel with pr_monitor(action: "reply", pr: "${key}", thread: "<thread id>", body: "...") or omit thread for a PR comment; the reply prefix is added for you. A non-actionable bot acknowledgement needs no reply: use mark_ready instead.`;
+}
+async function postReply({
+  runGh,
+  target,
+  thread,
+  body,
+  replyPrefix
+}) {
+  const text = body.startsWith(replyPrefix) ? body : `${replyPrefix} ${body}`;
+  if (thread === void 0) {
+    const url2 = await runGh([
+      "api",
+      `repos/${target.owner}/${target.repo}/issues/${target.number}/comments`,
+      "-f",
+      `body=${text}`,
+      "--jq",
+      ".html_url"
+    ]);
+    return `Posted a PR comment on ${targetKey(target)}: ${url2.trim()}`;
+  }
+  const payload = parseGhPayload(await runGh([
+    "api",
+    "graphql",
+    "-f",
+    "query=mutation($thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { url } } }",
+    "-f",
+    `thread=${thread}`,
+    "-f",
+    `body=${text}`
+  ]));
+  const url = payload?.data?.addPullRequestReviewThreadReply?.comment?.url;
+  if (typeof url !== "string") throw new Error(`GitHub did not confirm the reply to thread ${thread}.`);
+  return `Replied on thread ${thread}: ${url}`;
 }
 
 // core/label.ts
@@ -680,165 +939,6 @@ async function squashMergePullRequest({
     throw new Error(detail);
   }
   return await successfulMergeText({ runGh, target, pullRequest });
-}
-
-// core/activity.ts
-function reviewSig(snapshot) {
-  const states = snapshot.reviews.map((review) => `${review.login}=${review.state}@${review.submittedAt}`).sort();
-  const pending = [...snapshot.pendingReviewers].sort();
-  return `${states.join(",")}|${pending.join(",")}`;
-}
-function relevantComments(comments) {
-  return comments.filter((comment) => !comment.isAgentReply);
-}
-function hasAddedRelevantComment(prev, next) {
-  const before = new Set(prev.map((comment) => comment.id));
-  return next.some((comment) => !comment.isAgentReply && !before.has(comment.id));
-}
-function reviewThreadsReceivedNewComments(prev, next) {
-  const before = new Map(prev.map((thread) => [thread.id, thread]));
-  return next.some((thread) => {
-    const previous = before.get(thread.id);
-    return hasAddedRelevantComment(previous?.comments ?? [], thread.comments);
-  });
-}
-function reviewThreadsChanged(prev, next) {
-  const before = new Map(prev.map((thread) => [thread.id, thread]));
-  const after = new Set(next.map((thread) => thread.id));
-  if (prev.some((thread) => !after.has(thread.id))) return true;
-  return next.some((thread) => {
-    const previous = before.get(thread.id);
-    if (!previous) return relevantComments(thread.comments).length > 0 || !thread.isResolved;
-    return previous.isResolved !== thread.isResolved || hasAddedRelevantComment(previous.comments, thread.comments);
-  });
-}
-function checkKey(check) {
-  return check.id ?? check.name;
-}
-function ciConcludedSig(snapshot) {
-  const failed = snapshot.checks.filter((check) => check.outcome === "failure").map(checkKey).sort();
-  return `${snapshot.headSha}:${failed.join(",")}`;
-}
-function mergeableChanged(lastDefinite, next) {
-  if (next.mergeable === "UNKNOWN") return false;
-  if (lastDefinite === void 0) return false;
-  return lastDefinite !== next.mergeable;
-}
-function hasNewMergeConflict(lastDefinite, next) {
-  return next.state === "OPEN" && next.mergeable === "CONFLICTING" && lastDefinite !== "CONFLICTING";
-}
-function hasNewCiFailure(prev, next) {
-  const failing = next.checks.filter((check) => check.outcome === "failure");
-  if (failing.length === 0) return false;
-  if (prev.headSha !== next.headSha) return true;
-  const before = new Set(prev.checks.filter((check) => check.outcome === "failure").map(checkKey));
-  return failing.some((check) => !before.has(checkKey(check)));
-}
-function detectActivity(prev, next, lastDefiniteMergeable) {
-  if (prev.state !== next.state) return true;
-  if (prev.headSha !== next.headSha) return true;
-  if (mergeableChanged(lastDefiniteMergeable, next)) return true;
-  if (reviewSig(prev) !== reviewSig(next)) return true;
-  if (reviewThreadsChanged(prev.reviewThreads, next.reviewThreads)) return true;
-  if (prev.issueCommentsTotal !== next.issueCommentsTotal || hasAddedRelevantComment(prev.issueComments, next.issueComments) || hasAddedRelevantComment(prev.reviewSummaries, next.reviewSummaries)) {
-    return true;
-  }
-  if (ciPhase(next) === "concluded" && (ciPhase(prev) !== "concluded" || ciConcludedSig(prev) !== ciConcludedSig(next))) {
-    return true;
-  }
-  return false;
-}
-
-// core/readiness.ts
-function latestComments(comments) {
-  let latestAt = Number.NEGATIVE_INFINITY;
-  let latest = [];
-  for (const comment of comments) {
-    const createdAt = Date.parse(comment.createdAt);
-    if (Number.isNaN(createdAt)) return comments;
-    if (createdAt > latestAt) {
-      latestAt = createdAt;
-      latest = [comment];
-    } else if (createdAt === latestAt) {
-      latest.push(comment);
-    }
-  }
-  return latest;
-}
-function channelIsAcknowledged(comments) {
-  return comments.length > 0 && latestComments(comments).every((comment) => comment.isAgentReply);
-}
-function feedbackChannels(snapshot) {
-  const channels = /* @__PURE__ */ new Map();
-  channels.set("unthreaded", [...snapshot.issueComments, ...snapshot.reviewSummaries]);
-  for (const thread of snapshot.reviewThreads) channels.set(`thread:${thread.id}`, thread.comments);
-  return channels;
-}
-function hasAcknowledgementRegression(prev, next) {
-  const before = feedbackChannels(prev);
-  return [...feedbackChannels(next)].some(([channel, comments]) => {
-    const previous = before.get(channel);
-    if (channel === "unthreaded") {
-      return comments.length > 0 && channelIsAcknowledged(previous ?? []) && !channelIsAcknowledged(comments);
-    }
-    return !channelIsAcknowledged(comments) && (previous === void 0 || channelIsAcknowledged(previous));
-  });
-}
-function ciIsReady(snapshot) {
-  const phase = ciPhase(snapshot);
-  return phase === "none" || phase === "concluded" && snapshot.checks.every((check) => check.outcome === "success");
-}
-function assessAutomaticReadiness(snapshot) {
-  const blockers = [];
-  if (snapshot.state !== "OPEN") blockers.push(`PR is ${snapshot.state.toLowerCase()}`);
-  if (!ciIsReady(snapshot)) {
-    blockers.push(ciPhase(snapshot) === "running" ? "CI is running" : "CI is failing");
-  }
-  if (snapshot.mergeable !== "MERGEABLE") {
-    blockers.push(
-      snapshot.mergeable === "CONFLICTING" ? "the PR has a merge conflict" : "mergeability is still unknown"
-    );
-  }
-  const awaitingThreadReplies = snapshot.reviewThreads.filter(
-    (thread) => !channelIsAcknowledged(thread.comments)
-  ).length;
-  if (awaitingThreadReplies > 0) {
-    blockers.push(
-      `${awaitingThreadReplies} review ${awaitingThreadReplies === 1 ? "thread awaits" : "threads await"} a prefixed reply from the local GitHub account`
-    );
-  }
-  const unthreaded = [...snapshot.issueComments, ...snapshot.reviewSummaries];
-  const awaitingUnthreadedReply = unthreaded.length > 0 && !channelIsAcknowledged(unthreaded);
-  if (awaitingUnthreadedReply) {
-    blockers.push("issue or review-summary feedback awaits a prefixed reply from the local GitHub account");
-  }
-  return {
-    eligible: blockers.length === 0,
-    blockers,
-    awaitingThreadReplies,
-    awaitingUnthreadedReply
-  };
-}
-function hasReadyLabel(snapshot, readyLabel) {
-  const normalized = readyLabel.toLowerCase();
-  return snapshot.labels.some((label) => label.toLowerCase() === normalized);
-}
-function withReadyLabel(snapshot, readyLabel, ready) {
-  const normalized = readyLabel.toLowerCase();
-  const withoutReady = snapshot.labels.filter((label) => label.toLowerCase() !== normalized);
-  return { ...snapshot, labels: ready ? [...withoutReady, readyLabel] : withoutReady };
-}
-function hasReadinessInvalidation(prev, next, lastDefiniteMergeable) {
-  if (next.state !== "OPEN") return false;
-  if (prev.headSha !== next.headSha) return true;
-  if (hasNewMergeConflict(lastDefiniteMergeable, next)) return true;
-  if (ciIsReady(prev) && !ciIsReady(next)) return true;
-  if (hasNewCiFailure(prev, next)) return true;
-  if (hasAcknowledgementRegression(prev, next)) return true;
-  if (reviewThreadsReceivedNewComments(prev.reviewThreads, next.reviewThreads)) return true;
-  if (hasAddedRelevantComment(prev.issueComments, next.issueComments)) return true;
-  if (hasAddedRelevantComment(prev.reviewSummaries, next.reviewSummaries)) return true;
-  return false;
 }
 
 // core/report.ts
@@ -1662,8 +1762,12 @@ var MONITOR_ACTION_VALUES = [
   "status" /* status */,
   "mark_ready" /* markReady */,
   "unmark_ready" /* unmarkReady */,
-  "set_auto_merge" /* setAutoMerge */
+  "set_auto_merge" /* setAutoMerge */,
+  "feedback" /* feedback */,
+  "reply" /* reply */
 ];
+var THREAD_PARAM_DESCRIPTION = "reply only. Review thread id from feedback (e.g. PRRT_...); omit it to post a PR comment instead.";
+var BODY_PARAM_DESCRIPTION = "reply only. Reply text; the configured reply prefix is added automatically.";
 var AUTO_MERGE_PARAM_DESCRIPTION = "start and set_auto_merge only. Explicitly enable (true) or disable (false) auto-merge for this monitor, overriding autoMerge config and SESORI_PR_MONITOR_AUTO_MERGE. Set it only when the user asks to enable or disable auto-merge; omit it on start otherwise so configuration decides. Required for set_auto_merge.";
 function buildMonitorToolDescription({
   delivery,
@@ -1671,7 +1775,7 @@ function buildMonitorToolDescription({
   lifecycle,
   waiting
 }) {
-  return `Monitor a GitHub PR in the background. Detects head changes, CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states whether the configured ready label is present and tells the agent to keep working or manually mark ready when judgment says no action remains. Startup reports normally observe the existing label; when autoMerge is enabled by trusted config, SESORI_PR_MONITOR_AUTO_MERGE=true, or the start autoMerge argument, start removes a pre-existing ready label and requires fresh assessment. Assess current-head checks, automated reviews and feedback immediately, including after restarting a monitor. Mark an already-settled PR ready without waiting for a new event, but never infer readiness from empty results after creation or a fresh push. On later activity, the monitor automatically adds readiness when CI is passing (or absent), mergeability is definite, and every feedback channel ends in a correctly prefixed local-account reply. It withdraws readiness on later commits, relevant comments, CI regression, or conflict. A newly failing check (when flushOnCiFailure is enabled), readiness withdrawal, merge conflict, or terminal state skips debounce. The monitor owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a later clean assessment), and set_auto_merge (turn auto-merge on or off for an active monitor on explicit user request; enabling it on an already-ready PR removes the label so the current head is reassessed). The ready label means the agent's work is done; without auto-merge a human reviews next. With autoMerge enabled, the user has chosen to merge without waiting for human review: automatic readiness and mark_ready make one squash-merge attempt for the accepted head using only the PR title, so call mark_ready as soon as nothing is left to do and never hold it back to wait for a human. Rejected or unknown outcomes keep readiness and are not retried automatically, while a changed head cancels standalone readiness. Ready actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Global tuning lives in ~/.config/pr-monitor/config.json; ${configPath} overrides it. An explicit SESORI_PR_MONITOR_AUTO_MERGE environment value overrides autoMerge config; the start autoMerge argument overrides both for that monitor and must be set only on explicit user request, as must set_auto_merge. ${lifecycle}`;
+  return `Monitor a GitHub PR in the background. Detects head changes, CI conclusions, reviews, inline/issue comments (including follow-ups on existing or resolved threads), mergeability changes, and merge/close. Activity is aggregated with a rolling debounce; ${delivery} Reports never include comment bodies. Every report states whether the configured ready label is present and tells the agent to keep working or manually mark ready when judgment says no action remains. Startup reports normally observe the existing label; when autoMerge is enabled by trusted config, SESORI_PR_MONITOR_AUTO_MERGE=true, or the start autoMerge argument, start removes a pre-existing ready label and requires fresh assessment. Assess current-head checks, automated reviews and feedback immediately, including after restarting a monitor. Mark an already-settled PR ready without waiting for a new event, but never infer readiness from empty results after creation or a fresh push. On later activity, the monitor automatically adds readiness when CI is passing (or absent), mergeability is definite, and every feedback channel ends in a correctly prefixed local-account reply. It withdraws readiness on later commits, relevant comments, CI regression, or conflict. A newly failing check (when flushOnCiFailure is enabled), readiness withdrawal, merge conflict, or terminal state skips debounce. The monitor owns all polling and notifications arrive automatically. NEVER create sleeps, delayed or scheduled jobs, background polling loops, repeated \`gh pr checks\`, or routine status/flush calls while waiting. ${waiting} Actions: start (watch one PR), stop (stop one or all), flush (on-demand full report; never routine after a delivered report), status (list this session's monitors), mark_ready (unconditionally accept current state and add the configured ready label), and unmark_ready (remove it now; automation may restore it after a later clean assessment), and set_auto_merge (turn auto-merge on or off for an active monitor on explicit user request; enabling it on an already-ready PR removes the label so the current head is reassessed), feedback (fetch the bodies of every thread, PR comment and review summary still awaiting a reply), and reply (post a prefixed reply to a review thread, or a PR comment when thread is omitted). The ready label means the agent's work is done; without auto-merge a human reviews next. With autoMerge enabled, the user has chosen to merge without waiting for human review: automatic readiness and mark_ready make one squash-merge attempt for the accepted head using only the PR title, so call mark_ready as soon as nothing is left to do and never hold it back to wait for a human. Rejected or unknown outcomes keep readiness and are not retried automatically, while a changed head cancels standalone readiness. Ready, feedback and reply actions do not require an active monitor. The PR must be \`owner/repo#123\` or a full URL; \`all\` is allowed only for stop/flush. Global tuning lives in ~/.config/pr-monitor/config.json; ${configPath} overrides it. An explicit SESORI_PR_MONITOR_AUTO_MERGE environment value overrides autoMerge config; the start autoMerge argument overrides both for that monitor and must be set only on explicit user request, as must set_auto_merge. ${lifecycle}`;
 }
 
 // runtime/monitor-session.ts
@@ -1736,7 +1840,9 @@ var MonitorSession = class {
     pr,
     start,
     loadConfig,
-    autoMerge
+    autoMerge,
+    thread,
+    body
   }) {
     const actionLoadConfig = loadConfig ?? this.deps.loadConfig ?? (() => Promise.reject(new Error("this host did not provide a configuration loader")));
     switch (action) {
@@ -1770,6 +1876,66 @@ var MonitorSession = class {
         }
         if (autoMerge === void 0) return { text: "action 'set_auto_merge' requires autoMerge: true or false." };
         return await this.setAutoMerge({ pr, autoMerge });
+      case "feedback" /* feedback */:
+        if (!pr || pr === "all") {
+          return { text: "action 'feedback' requires a single explicit pr: 'owner/repo#123' or a PR URL." };
+        }
+        return await this.feedback({ pr, loadConfig: actionLoadConfig });
+      case "reply" /* reply */:
+        if (!pr || pr === "all") {
+          return { text: "action 'reply' requires a single explicit pr: 'owner/repo#123' or a PR URL." };
+        }
+        if (!body?.trim()) return { text: "action 'reply' requires a non-empty body." };
+        if (thread !== void 0 && !thread.trim()) {
+          return { text: "action 'reply' needs a thread id from feedback, or no thread for a PR comment." };
+        }
+        return await this.reply({ pr, thread, body, loadConfig: actionLoadConfig });
+    }
+  }
+  async configFor({ target, loadConfig }) {
+    return this.watches.get(targetRegistryKey(target))?.config ?? await loadConfig();
+  }
+  async feedback({ pr, loadConfig }) {
+    const target = parseTarget(pr);
+    if ("error" in target) return { text: target.error };
+    try {
+      const config = await this.configFor({ target, loadConfig });
+      if (config.ignoreCommentTag !== void 0) await this.resolveSelfLogin();
+      const text = await fetchFeedback({
+        runGh: this.deps.runGh,
+        target,
+        ignoreTag: config.ignoreCommentTag,
+        selfLogin: this.selfLogin
+      });
+      return { text };
+    } catch (error) {
+      return { text: `Cannot fetch feedback for ${targetKey(target)}: ${error.message}` };
+    }
+  }
+  async reply({
+    pr,
+    thread,
+    body,
+    loadConfig
+  }) {
+    const target = parseTarget(pr);
+    if ("error" in target) return { text: target.error };
+    try {
+      const config = await this.configFor({ target, loadConfig });
+      const replyPrefix = config.ignoreCommentTag ?? DEFAULT_REPLY_PREFIX;
+      return { text: await postReply({ runGh: this.deps.runGh, target, thread, body, replyPrefix }) };
+    } catch (error) {
+      return { text: `Cannot reply on ${targetKey(target)}: ${error.message}` };
+    }
+  }
+  async resolveSelfLogin() {
+    if (this.selfLogin !== void 0) return;
+    try {
+      this.selfLoginPromise ??= this.deps.runGh(["api", "user", "--jq", ".login"]).then((login) => login.trim());
+      this.selfLogin = await this.selfLoginPromise;
+    } catch (error) {
+      this.selfLoginPromise = void 0;
+      throw error;
     }
   }
   async stopAll({
@@ -1849,12 +2015,10 @@ ${existing.watch.statusLine()}` };
         text: `Cannot start monitor for ${displayKey}: loading configuration failed (${error.message}).`
       };
     }
-    if (config.ignoreCommentTag !== void 0 && this.selfLogin === void 0) {
+    if (config.ignoreCommentTag !== void 0) {
       try {
-        this.selfLoginPromise ??= this.deps.runGh(["api", "user", "--jq", ".login"]).then((login) => login.trim());
-        this.selfLogin = await this.selfLoginPromise;
+        await this.resolveSelfLogin();
       } catch (error) {
-        this.selfLoginPromise = void 0;
         return {
           text: `Cannot start monitor: resolving the authenticated gh user for the reply prefix failed (${error.message}). Run \`gh auth status\` to check.`
         };
@@ -2215,7 +2379,9 @@ var schema = {
   parameters: { type: "object", properties: {
     action: { type: "string", enum: MONITOR_ACTION_VALUES },
     pr: { type: "string", description: "Explicit owner/repo#123 or GitHub PR URL; all only for stop/flush." },
-    autoMerge: { type: "boolean", description: AUTO_MERGE_PARAM_DESCRIPTION }
+    autoMerge: { type: "boolean", description: AUTO_MERGE_PARAM_DESCRIPTION },
+    thread: { type: "string", description: THREAD_PARAM_DESCRIPTION },
+    body: { type: "string", description: BODY_PARAM_DESCRIPTION }
   }, required: ["action"], additionalProperties: false }
 };
 if (process.argv.includes("--describe")) {
@@ -2268,7 +2434,7 @@ if (process.argv.includes("--describe")) {
     }
     if (message.type !== "command" || closed) return;
     const id = message.id;
-    if (!MONITOR_ACTION_VALUES.includes(message.action) || message.pr !== void 0 && typeof message.pr !== "string" || message.autoMerge !== void 0 && typeof message.autoMerge !== "boolean" || typeof message.cwd !== "string" || !isAbsolute2(message.cwd)) {
+    if (!MONITOR_ACTION_VALUES.includes(message.action) || message.pr !== void 0 && typeof message.pr !== "string" || message.autoMerge !== void 0 && typeof message.autoMerge !== "boolean" || message.thread !== void 0 && typeof message.thread !== "string" || message.body !== void 0 && typeof message.body !== "string" || typeof message.cwd !== "string" || !isAbsolute2(message.cwd)) {
       send({ type: "result", id, error: "Invalid monitor action or PR" });
       return;
     }
@@ -2276,6 +2442,8 @@ if (process.argv.includes("--describe")) {
       action: message.action,
       pr: message.pr,
       autoMerge: message.autoMerge,
+      thread: message.thread,
+      body: message.body,
       loadConfig: () => loadConfig(message.cwd),
       start: { announcementMode: "background" /* background */, createChannel: () => ({ deliver }) }
     }).then(

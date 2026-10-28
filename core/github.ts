@@ -179,7 +179,7 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String!) {
   }
 }`
 
-function parseGhPayload(stdout: string): any {
+export function parseGhPayload(stdout: string): any {
   try {
     return JSON.parse(stdout)
   } catch {
@@ -263,6 +263,13 @@ export async function fetchPrSnapshot(input: {
   ignoreTag: string | undefined
   selfLogin: string | undefined
 }): Promise<PrSnapshot> {
+  const payload = await fetchPrPayload(input)
+  return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin })
+}
+
+// The raw GraphQL payload. Checks, latest reviews, review threads and labels are paginated; issue comments and
+// per-thread comments are the latest 100. Comment bodies are only present here; snapshots keep metadata.
+export async function fetchPrPayload(input: { runGh: GhRunner; target: Target }): Promise<unknown> {
   const payload = parseGhPayload(await input.runGh([
     "api", "graphql",
     "-f", `query=${PR_QUERY}`,
@@ -272,7 +279,7 @@ export async function fetchPrSnapshot(input: {
   ]))
   const pr = payload?.data?.repository?.pullRequest
   assertCompleteGraphQlPayload(payload)
-  if (!pr) return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin })
+  if (!pr) return payload
 
   const pageInput = { runGh: input.runGh, target: input.target }
   await paginateConnection({
@@ -306,7 +313,7 @@ export async function fetchPrSnapshot(input: {
     select: (page) => page?.data?.repository?.pullRequest?.labels,
     name: "label",
   })
-  return normalizeSnapshot(payload, { ignoreTag: input.ignoreTag, selfLogin: input.selfLogin })
+  return payload
 }
 
 type RawComment = {

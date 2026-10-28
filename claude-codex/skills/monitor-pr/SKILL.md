@@ -190,8 +190,38 @@ call `pr_monitor(action: "stop", pr: "all")`.
 - `status`: list this session's watches and handoff state.
 - `flush`: deliberately fetch a full status; never routine after a report.
 - `stop`: stop one/all watches without waiting for merge.
+- `feedback` / `reply`: read unanswered feedback and post prefixed replies
+  (see below).
 - `set_auto_merge`: turn auto-merge on or off for an active watch, only on
   explicit user request.
+
+## Replying to review feedback
+
+Reports omit comment bodies. Fetch the feedback still awaiting a reply:
+
+```
+pr_monitor(action: "feedback", pr: "owner/repo#123")
+```
+
+- Assess every comment against the code. Assume a human is right unless you
+  have strong evidence otherwise; when you disagree, explain why, and do the
+  work if they insist.
+- Commit and push fixes **before** replying, so the reply can cite the commit.
+- A prefixed reply tells the monitor the channel is handled, so reply only
+  once it is: `Addressed` (cite the commit) or `Not addressed` (with the
+  reason). If work or a question remains, finish it or ask the user; never post
+  an interim prefixed reply. `reply` adds the prefix; omit `thread` to answer
+  review summaries and PR comments:
+
+```
+pr_monitor(action: "reply", pr: "owner/repo#123", thread: "PRRT_...", body: "Addressed in abc1234: ...")
+```
+
+- Resolve a thread only when it is `Addressed` and `feedback` marks it
+  bot-only:
+  `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"PRRT_..."}){thread{isResolved}}}'`.
+  Never resolve a thread with a human comment, or one you did not fully address;
+  its reviewer owns that decision.
 
 ## Avoid the bot-review spiral
 

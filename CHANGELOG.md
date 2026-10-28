@@ -7,11 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0]
+
+### Added
+
+- `feedback` action: returns the bodies of every review thread, PR comment and review summary that automatic
+  readiness still counts as unanswered (up to 4,000 characters each), marking bot-only threads and unprefixed
+  local-account comments.
+- `reply` action: posts a reply to a review thread, or a PR comment without `thread`, with the configured reply prefix
+  added automatically.
+- The `monitor-pr` skill explains how to handle review feedback with these actions: push fixes before replying, use
+  status words, and resolve only fully addressed bot-only threads.
+
 ### Changed
 
 - **Breaking:** the Pi/OMP package now requires Pi 1.4.0 or newer and OMP 18.12.6 or newer; development, pack and
   host-loader checks run against those versions (TypeBox 1.3.27) and CI uses Bun 1.4.4.
 - The Hermes Desktop delivery contract was re-inspected at Hermes commit `f219708926c5`.
+
+### Security
+
+- The Claude Code and Codex MCP server bundle now ships patched `zod` (4.6.7) and `@modelcontextprotocol/sdk` (1.32.2).
+  Development dependencies were updated to clear every `npm audit` advisory; `undici` is overridden to 8.12.3
+  because Pi 1.4.0 pins a vulnerable 8.10.2.
 
 ## [0.8.0]
 

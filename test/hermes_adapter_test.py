@@ -237,11 +237,11 @@ class LifecycleTests(unittest.TestCase):
 
     def test_standalone_ready_actions_need_no_delivery_route_or_session_identity(self):
         with patch("hermes.DesktopRoute.capture", side_effect=AssertionError("label actions must not capture delivery")):
-            for action in ("mark_ready", "unmark_ready"):
+            for action in ("mark_ready", "unmark_ready", "feedback", "reply"):
                 result = self.calls["handler"]({"action": action, "pr": "example/repo#1"})
                 self.assertEqual(result, "started")
                 self.assertTrue(self.workers[-1]._closed)
-        self.assertEqual(len(self.workers), 2)
+        self.assertEqual(len(self.workers), 4)
 
     def test_ready_actions_reuse_an_existing_worker_without_recapturing_delivery(self):
         self.assertEqual(self.start(), "started")

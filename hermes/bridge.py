@@ -49,7 +49,8 @@ class Bridge:
         try:
             self._send({"type": "command", "id": ident, "action": args.get("action"), "cwd": cwd or self.cwd,
                         **({"pr": args["pr"]} if "pr" in args else {}),
-                        **({"autoMerge": args["autoMerge"]} if args.get("autoMerge") is not None else {})})
+                        **({"autoMerge": args["autoMerge"]} if args.get("autoMerge") is not None else {}),
+                        **{key: args[key] for key in ("thread", "body") if args.get(key) is not None}})
             try:
                 response = result.get(timeout=120)
             except queue.Empty:
