@@ -22,7 +22,7 @@ class ActionRoute:
         return True
 
     def deliver(self, report):
-        raise RuntimeError("A standalone label action cannot deliver monitor reports")
+        raise RuntimeError("A standalone action cannot deliver monitor reports")
 
 
 def register(ctx):
@@ -39,7 +39,7 @@ def register(ctx):
         sid = get_session_env("HERMES_UI_SESSION_ID")
         route = DesktopRoute.capture(session_id, sid)
         if route is None:
-            raise RuntimeError("Background PR monitoring requires Hermes Desktop/TUI. CLI, messaging gateways and ACP do not provide conversation-bound report delivery; standalone mark_ready/unmark_ready actions remain available.")
+            raise RuntimeError("Background PR monitoring requires Hermes Desktop/TUI. CLI, messaging gateways and ACP do not provide conversation-bound report delivery; standalone mark_ready/unmark_ready/feedback/reply actions remain available.")
         return ("desktop", sid), route, str(resolve_agent_cwd().resolve())
 
     def capture_action(session_id):
@@ -60,7 +60,8 @@ def register(ctx):
         admission = None
         action_bridge = None
         stale_bridges = []
-        is_ready_action = args.get("action") in ("mark_ready", "unmark_ready")
+        # Actions that never deliver reports run on a one-shot worker without a Desktop/TUI route.
+        is_ready_action = args.get("action") in ("mark_ready", "unmark_ready", "feedback", "reply")
         try:
             if not session_id and not is_ready_action:
                 raise RuntimeError("Hermes did not provide a conversation identity")
@@ -153,4 +154,4 @@ def register(ctx):
     atexit.register(close_all)
     ctx.on_unload(lambda: atexit.unregister(close_all))
     ctx.register_skill("monitor-pr", Path(__file__).parent / "skills" / "monitor-pr" / "SKILL.md")
-    ctx.register_system_prompt_section("pr-monitor.workflow", "Background monitoring requires Hermes Desktop/TUI; other hosts can use standalone mark_ready/unmark_ready actions. In Desktop/TUI, after opening a GitHub PR, load pr-monitor:monitor-pr with skill_view and call pr_monitor(action='start', pr='owner/repo#123'). Act on every [PR Monitor] report. The monitor owns waiting; end your turn when nothing needs action.")
+    ctx.register_system_prompt_section("pr-monitor.workflow", "Background monitoring requires Hermes Desktop/TUI; other hosts can use standalone mark_ready/unmark_ready/feedback/reply actions. In Desktop/TUI, after opening a GitHub PR, load pr-monitor:monitor-pr with skill_view and call pr_monitor(action='start', pr='owner/repo#123'). Act on every [PR Monitor] report. The monitor owns waiting; end your turn when nothing needs action.")

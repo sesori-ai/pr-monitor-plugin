@@ -110,7 +110,7 @@ Address everything in one batch:
   `mark_ready` only when an explicit new merge attempt is warranted.
 - **Merged/closed:** monitoring stopped; no further action.
 
-When taking action, reply on GitHub with the configured prefix first. It is the
+After the fix is pushed, reply on GitHub with the configured prefix. It is the
 monitor's authoritative evidence that the latest feedback on that channel was
 handled. Threads may remain unresolved intentionally for a human reviewer; a
 prefixed final reply is what matters for automatic readiness.
