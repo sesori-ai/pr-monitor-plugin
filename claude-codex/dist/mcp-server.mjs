@@ -39150,10 +39150,10 @@ function planDelivery({
   keepAliveUntilMs
 }) {
   const reminder = kind === "idle_reminder" /* idleReminder */;
-  if (hasPushChannel) return { route: "push" /* push */, extendKeepAlive: !reminder };
-  if (!reminder) return { route: "spool" /* spool */, extendKeepAlive: true };
+  if (hasPushChannel) return { route: "push" /* push */, extendKeepAlive: !reminder, notifyDesktop: !reminder };
+  if (!reminder) return { route: "spool" /* spool */, extendKeepAlive: true, notifyDesktop: true };
   const held = keepAliveArmed && nowMs < keepAliveUntilMs;
-  return { route: held ? "spool" /* spool */ : "drop" /* drop */, extendKeepAlive: false };
+  return { route: held ? "spool" /* spool */ : "drop" /* drop */, extendKeepAlive: false, notifyDesktop: false };
 }
 
 // claude-codex/src/push.ts
@@ -39408,7 +39408,7 @@ var createAdapter = ({ sessionId, projectDir }) => {
     }
     if (plan.extendKeepAlive) extendKeepAlive({ config: config2 });
     refreshSessionState();
-    if (config2.desktopNotifications) {
+    if (config2.desktopNotifications && plan.notifyDesktop) {
       const verb = pushChannel !== void 0 ? "delivered to" : "waiting in";
       notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report ${verb} your ${hostName} session`);
     }

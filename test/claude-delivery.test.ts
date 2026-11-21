@@ -6,34 +6,37 @@ import { ReportKind } from "../core/watch"
 const NOW = Date.parse("2026-11-20T12:00:00Z")
 const held = { keepAliveArmed: true, nowMs: NOW, keepAliveUntilMs: NOW + 60_000 }
 
-test("reports push with a channel, otherwise spool, and always extend keep-alive", () => {
+test("reports push with a channel, otherwise spool, extend keep-alive, and may notify the desktop", () => {
   const expired = { ...held, keepAliveUntilMs: NOW - 1 }
   assert.deepEqual(planDelivery({ kind: ReportKind.update, hasPushChannel: true, ...held }), {
     route: DeliveryRoute.push,
     extendKeepAlive: true,
+    notifyDesktop: true,
   })
   assert.deepEqual(planDelivery({ kind: ReportKind.update, hasPushChannel: false, ...expired }), {
     route: DeliveryRoute.spool,
     extendKeepAlive: true,
+    notifyDesktop: true,
   })
 })
 
-test("idle reminders push with a channel without extending keep-alive", () => {
+test("idle reminders push with a channel without extending keep-alive or notifying the desktop", () => {
   for (const state of [held, { ...held, keepAliveArmed: false, keepAliveUntilMs: 0 }]) {
     assert.deepEqual(planDelivery({ kind: ReportKind.idleReminder, hasPushChannel: true, ...state }), {
       route: DeliveryRoute.push,
       extendKeepAlive: false,
+      notifyDesktop: false,
     })
   }
 })
 
-test("spooled idle reminders need the session's keep-alive loop holding and never extend it", () => {
+test("spooled idle reminders need the session's keep-alive loop holding, never extend it, and never notify", () => {
   const plan = (state: typeof held) => planDelivery({ kind: ReportKind.idleReminder, hasPushChannel: false, ...state })
   // Armed by any watch not yet handed off, even when the reminded PR itself is
   // ready with a stuck auto-merge.
-  assert.deepEqual(plan(held), { route: DeliveryRoute.spool, extendKeepAlive: false })
+  assert.deepEqual(plan(held), { route: DeliveryRoute.spool, extendKeepAlive: false, notifyDesktop: false })
   for (const notHeld of [{ ...held, keepAliveArmed: false }, { ...held, keepAliveUntilMs: NOW }]) {
-    assert.deepEqual(plan(notHeld), { route: DeliveryRoute.drop, extendKeepAlive: false })
+    assert.deepEqual(plan(notHeld), { route: DeliveryRoute.drop, extendKeepAlive: false, notifyDesktop: false })
   }
 })
 

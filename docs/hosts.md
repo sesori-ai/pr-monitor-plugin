@@ -58,7 +58,7 @@ it is dropped, so stale reminders do not pile up for your next prompt.
 
 `desktopNotifications: true` is separate from the fallback and is not tied to the socket. It makes a best-effort
 attempt to show an OS notification whenever a report is delivered or queued, using `osascript` on macOS and
-`notify-send` on Linux. If that tool is missing or fails, nothing is shown and no error is reported.
+`notify-send` on Linux. Idle reminders are for the agent only and never show a notification. If that tool is missing or fails, nothing is shown and no error is reported.
 
 ### Lifecycle
 

@@ -53,7 +53,8 @@ no activity and no report for `idleReminderMinutes` (default 25), the monitor se
 names the PR, says how long it has been idle, summarizes CI, mergeability, reviews, unresolved threads, and readiness,
 and asks the agent to re-check the PR and either act or call `mark_ready`. The timer runs from the later of the last
 activity and the last report or ready action, so another reminder follows one delay later while the PR stays still.
-`0` turns reminders off. They are checked at each poll, so they fire up to one `pollIntervalSeconds` late.
+`0` turns reminders off. They are for the agent only: they never show a desktop notification, even with
+`desktopNotifications` on. They are checked at each poll, so they fire up to one `pollIntervalSeconds` late.
 
 There is no reminder while activity is waiting for its batched report, or after the PR merges or closes. A ready PR
 with auto-merge off has been handed to a human, so it gets no reminder. With auto-merge on, a ready PR that is still

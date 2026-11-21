@@ -118,7 +118,7 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
     }
     if (plan.extendKeepAlive) extendKeepAlive({ config })
     refreshSessionState()
-    if (config.desktopNotifications) {
+    if (config.desktopNotifications && plan.notifyDesktop) {
       const verb = pushChannel !== undefined ? "delivered to" : "waiting in"
       notifyDesktop(`PR Monitor — ${targetKey(target)}`, `New report ${verb} your ${hostName} session`)
     }

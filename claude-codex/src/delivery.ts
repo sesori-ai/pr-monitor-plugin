@@ -13,6 +13,9 @@ export type DeliveryPlan = {
   route: DeliveryRoute
   // Whether delivery refreshes the rolling keepAliveMaxMinutes idle cap.
   extendKeepAlive: boolean
+  // Whether desktopNotifications may show a popup. Idle reminders are for the
+  // agent only.
+  notifyDesktop: boolean
 }
 
 // Whether a watched PR is handed off, which releases the hook-based keep-alive
@@ -50,11 +53,11 @@ export function planDelivery({
   // An idle reminder is not PR activity: it must never extend the keep-alive
   // idle cap, or a still PR would hold the session open forever.
   const reminder = kind === ReportKind.idleReminder
-  if (hasPushChannel) return { route: DeliveryRoute.push, extendKeepAlive: !reminder }
-  if (!reminder) return { route: DeliveryRoute.spool, extendKeepAlive: true }
+  if (hasPushChannel) return { route: DeliveryRoute.push, extendKeepAlive: !reminder, notifyDesktop: !reminder }
+  if (!reminder) return { route: DeliveryRoute.spool, extendKeepAlive: true, notifyDesktop: true }
   // A spooled report wakes the session only while the keep-alive loop holds
   // it. Drop a reminder nothing would read before the next prompt instead of
   // stacking stale reminders in the spool.
   const held = keepAliveArmed && nowMs < keepAliveUntilMs
-  return { route: held ? DeliveryRoute.spool : DeliveryRoute.drop, extendKeepAlive: false }
+  return { route: held ? DeliveryRoute.spool : DeliveryRoute.drop, extendKeepAlive: false, notifyDesktop: false }
 }

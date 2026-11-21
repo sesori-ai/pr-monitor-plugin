@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent to re-check the PR and act or mark it ready. It repeats one delay later while the PR stays still and is
   skipped for a ready PR handed to a human (auto-merge off). The default stays under the agent's roughly 30-minute
   prompt cache lifetime. On the Claude Code/Codex hook fallback a reminder never extends `keepAliveMaxMinutes` and is
-  spooled only while the keep-alive loop is holding the session.
+  spooled only while the keep-alive loop is holding the session. Idle reminders never show a desktop notification,
+  even with `desktopNotifications` on.
 - Claude Code/Codex hook fallback: a ready PR whose auto-merge attempt was rejected or came back unknown is no longer
   treated as handed off, so the keep-alive loop keeps waiting for it (still capped by `keepAliveMaxMinutes`) and its
   idle reminder reaches the session. A ready PR with auto-merge off is still handed off.
