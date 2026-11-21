@@ -137,7 +137,7 @@ function runnerHarness({ states = ["OPEN"] }: { states?: PrSnapshot["state"][] }
     if (args[0] === "api" && args[1] === "user") return "sesori-bot"
     const route = args.find((arg) => arg.startsWith("repos/")) ?? ""
     if (route.includes("/pulls/")) return JSON.stringify({ state: "open", merged: false })
-    if (/\/labels$/.test(route) && !route.includes("/issues/")) throw new Error("label already exists")
+    if (route.endsWith("/labels") && !route.includes("/issues/")) throw new Error("label already exists")
     if (route.includes("/issues/") && args.includes("DELETE")) {
       labelAdded = false
       return ""

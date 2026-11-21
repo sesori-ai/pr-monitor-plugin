@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `npm run lint` runs oxlint 1.94.0's default correctness rules over all TypeScript and JavaScript sources, scripts
+  and tests, with warnings treated as errors. It is part of `release:check` (and so `make check`) and fails PR CI.
+
 ### Changed
 
 - Development tooling: TypeScript 7.0.2 (was 5.9.3), esbuild 0.28.2, tsx 4.23.15 and `@types/node` 24.19.2;

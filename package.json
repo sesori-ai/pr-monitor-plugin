@@ -21,7 +21,8 @@
     "host:check:opencode": "npm run build:opencode && node scripts/check-opencode-loader.mjs",
     "host:check:omp": "npm run build:pi && node scripts/run-omp-loader-check.mjs",
     "version:check": "node scripts/check-versions.mjs",
-    "release:check": "npm test && npm run typecheck && npm run build && npm run version:check && npm run pack:check && npm run host:check"
+    "release:check": "npm run lint && npm test && npm run typecheck && npm run build && npm run version:check && npm run pack:check && npm run host:check",
+    "lint": "oxlint --deny-warnings core runtime opencode pi claude-codex/src claude-codex/hooks hermes/src scripts test"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "1.4.0",
@@ -30,6 +31,7 @@
     "@opencode/plugin": "2.1.4",
     "@types/node": "^24.19.2",
     "esbuild": "^0.28.2",
+    "oxlint": "1.94.0",
     "tsx": "^4.23.15",
     "typebox": "1.3.27",
     "typescript": "^7.0.2",

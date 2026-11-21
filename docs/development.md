@@ -34,6 +34,7 @@ instructions—needs a concise entry under `[Unreleased]` in [`CHANGELOG.md`](..
 
 ```sh
 npm ci
+npm run lint         # oxlint correctness rules; warnings fail
 npm test             # core, runtime, and adapter regression tests
 npm run typecheck    # core + runtime + all TypeScript adapters
 npm run build        # all host artifacts
