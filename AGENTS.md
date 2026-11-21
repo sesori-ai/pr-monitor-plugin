@@ -147,6 +147,13 @@ Hermes plugin version is part of the lockstep release check. Rebuild and commit 
   transitions into "running" and non-failing per-check progress do **NOT** count unless a new head caused them.
   Mergeability is compared against the last *definite* value so transient `UNKNOWN` churn stays quiet while a real
   `MERGEABLE -> UNKNOWN -> CONFLICTING` settle is caught and flushed immediately.
+- **Idle reminder** (`maybeRemindIdle`, `core/watch.ts`): after each poll, an OPEN, non-dirty watch whose PR has had
+  no activity (`lastActivityAt`) and no delivered report or manual ready/auto-merge action (`lastReportAt`) for
+  `idleReminderMinutes` (default 25, under the ~30-minute prompt cache; `0` off) delivers `buildIdleReminder` with
+  `ReportKind.idleReminder`, then restarts its timer. It is skipped when the ready label is present and auto-merge is
+  off (handed off); with auto-merge on a ready open PR means the merge got stuck. Failure counts toward the
+  delivery-failure stop and retries next poll. The Claude adapter never extends the keep-alive cap for a reminder and
+  drops it in spool mode unless the keep-alive loop is holding the session.
 - **Failure handling** — notFound → stop with notice; 10 consecutive poll failures → stop; 10 consecutive delivery failures → stop. Delivery failures roll back the baseline so the same activity is retried. A failed initial announcement keeps its zero baseline, marks the watch urgent, and retries the complete startup report at the next poll.
 - **Reentrancy guard** — `runExclusive` (per-watch promise queue) serializes `tick()` and `manualFlush()` so overlapping fetches can't apply out of order; ticks skip while an op is pending, manual flushes queue. Auto-flush delivery is **awaited inside** that op, not fire-and-forget: its failure path rolls back exactly the state a later flush advances (`lastFlushAt`, `lastFlushedSnapshot`, `dirty`, `holdStartedAt`, `urgent`), so a late rejection from an overlapping delivery would otherwise rewind a newer report's baseline and re-fire it immediately. Comment "new since" comparisons use IDs from `lastFlushedSnapshot`, avoiding GitHub's second-granularity timestamp race. Ticks skipping while a report is in flight is the intended consequence. `tick` also re-checks `stopped` after its awaited fetch so a concurrent `stop()` prevents any late apply/deliver.
 - **Stop/mutation fencing** — a stopped watch rejects queued flush/ready actions and remains registered until an

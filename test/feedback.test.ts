@@ -18,6 +18,7 @@ function config(): MonitorConfig {
     flushOnCiFailure: true,
     readyLabel: "agent-ready",
     autoMerge: false,
+    idleReminderMinutes: 0,
   }
 }
 

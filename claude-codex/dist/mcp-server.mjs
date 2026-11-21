@@ -36672,6 +36672,10 @@ var DEFAULT_MONITOR_CONFIG = {
   ignoreCommentTag: "<!-- pr-monitor:reply -->",
   announceOnStart: true,
   flushOnCiFailure: true,
+  // The agent's prompt cache expires after about 30 minutes, so waking the
+  // session any later makes its next request much more expensive. 25 minutes
+  // leaves a margin for poll granularity.
+  idleReminderMinutes: 25,
   readyLabel: "agent-ready",
   autoMerge: false
 };
@@ -36696,6 +36700,10 @@ function positiveNumber(record2, key) {
   const value = record2[key];
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : void 0;
 }
+function nonNegativeNumber(record2, key) {
+  const value = record2[key];
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
+}
 function environmentAutoMergeOverride(environment, log2) {
   const raw = environment[AUTO_MERGE_ENV];
   if (raw === void 0) return void 0;
@@ -36712,6 +36720,7 @@ function applyMonitorConfig(config2, raw) {
   config2.maxCiWaitMinutes = positiveNumber(record2, "maxCiWaitMinutes") ?? config2.maxCiWaitMinutes;
   const poll = positiveNumber(record2, "pollIntervalSeconds") ?? config2.pollIntervalSeconds;
   config2.pollIntervalSeconds = Math.min(Math.max(poll, MIN_POLL_INTERVAL_SECONDS), MAX_POLL_INTERVAL_SECONDS);
+  config2.idleReminderMinutes = nonNegativeNumber(record2, "idleReminderMinutes") ?? config2.idleReminderMinutes;
   const tag = record2["ignoreCommentTag"];
   config2.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : config2.ignoreCommentTag;
   const announce = record2["announceOnStart"];
@@ -37204,194 +37213,6 @@ function detectActivity(prev, next, lastDefiniteMergeable) {
   return false;
 }
 
-// core/readiness.ts
-function latestComments(comments) {
-  let latestAt = Number.NEGATIVE_INFINITY;
-  let latest = [];
-  for (const comment of comments) {
-    const createdAt = Date.parse(comment.createdAt);
-    if (Number.isNaN(createdAt)) return comments;
-    if (createdAt > latestAt) {
-      latestAt = createdAt;
-      latest = [comment];
-    } else if (createdAt === latestAt) {
-      latest.push(comment);
-    }
-  }
-  return latest;
-}
-function channelIsAcknowledged(comments) {
-  return comments.length > 0 && latestComments(comments).every((comment) => comment.isAgentReply);
-}
-function feedbackChannels(snapshot) {
-  const channels = /* @__PURE__ */ new Map();
-  channels.set("unthreaded", [...snapshot.issueComments, ...snapshot.reviewSummaries]);
-  for (const thread of snapshot.reviewThreads) channels.set(`thread:${thread.id}`, thread.comments);
-  return channels;
-}
-function hasAcknowledgementRegression(prev, next) {
-  const before = feedbackChannels(prev);
-  return [...feedbackChannels(next)].some(([channel, comments]) => {
-    const previous = before.get(channel);
-    if (channel === "unthreaded") {
-      return comments.length > 0 && channelIsAcknowledged(previous ?? []) && !channelIsAcknowledged(comments);
-    }
-    return !channelIsAcknowledged(comments) && (previous === void 0 || channelIsAcknowledged(previous));
-  });
-}
-function ciIsReady(snapshot) {
-  const phase = ciPhase(snapshot);
-  return phase === "none" || phase === "concluded" && snapshot.checks.every((check2) => check2.outcome === "success");
-}
-function assessAutomaticReadiness(snapshot) {
-  const blockers = [];
-  if (snapshot.state !== "OPEN") blockers.push(`PR is ${snapshot.state.toLowerCase()}`);
-  if (!ciIsReady(snapshot)) {
-    blockers.push(ciPhase(snapshot) === "running" ? "CI is running" : "CI is failing");
-  }
-  if (snapshot.mergeable !== "MERGEABLE") {
-    blockers.push(
-      snapshot.mergeable === "CONFLICTING" ? "the PR has a merge conflict" : "mergeability is still unknown"
-    );
-  }
-  const awaitingThreadReplies = snapshot.reviewThreads.filter(
-    (thread) => !channelIsAcknowledged(thread.comments)
-  ).length;
-  if (awaitingThreadReplies > 0) {
-    blockers.push(
-      `${awaitingThreadReplies} review ${awaitingThreadReplies === 1 ? "thread awaits" : "threads await"} a prefixed reply from the local GitHub account`
-    );
-  }
-  const unthreaded = [...snapshot.issueComments, ...snapshot.reviewSummaries];
-  const awaitingUnthreadedReply = unthreaded.length > 0 && !channelIsAcknowledged(unthreaded);
-  if (awaitingUnthreadedReply) {
-    blockers.push("issue or review-summary feedback awaits a prefixed reply from the local GitHub account");
-  }
-  return {
-    eligible: blockers.length === 0,
-    blockers,
-    awaitingThreadReplies,
-    awaitingUnthreadedReply
-  };
-}
-function hasReadyLabel(snapshot, readyLabel) {
-  const normalized = readyLabel.toLowerCase();
-  return snapshot.labels.some((label) => label.toLowerCase() === normalized);
-}
-function withReadyLabel(snapshot, readyLabel, ready) {
-  const normalized = readyLabel.toLowerCase();
-  const withoutReady = snapshot.labels.filter((label) => label.toLowerCase() !== normalized);
-  return { ...snapshot, labels: ready ? [...withoutReady, readyLabel] : withoutReady };
-}
-function hasReadinessInvalidation(prev, next, lastDefiniteMergeable) {
-  if (next.state !== "OPEN") return false;
-  if (prev.headSha !== next.headSha) return true;
-  if (hasNewMergeConflict(lastDefiniteMergeable, next)) return true;
-  if (ciIsReady(prev) && !ciIsReady(next)) return true;
-  if (hasNewCiFailure(prev, next)) return true;
-  if (hasAcknowledgementRegression(prev, next)) return true;
-  if (reviewThreadsReceivedNewComments(prev.reviewThreads, next.reviewThreads)) return true;
-  if (hasAddedRelevantComment(prev.issueComments, next.issueComments)) return true;
-  if (hasAddedRelevantComment(prev.reviewSummaries, next.reviewSummaries)) return true;
-  return false;
-}
-
-// core/feedback.ts
-var MAX_BODY_CHARS = 4e3;
-function collectBodies(payload) {
-  const pr = payload?.data?.repository?.pullRequest;
-  const bodies = /* @__PURE__ */ new Map();
-  const add = (node2) => {
-    if (typeof node2?.id === "string" && typeof node2.body === "string") bodies.set(node2.id, node2.body);
-  };
-  for (const review of pr?.latestReviews?.nodes ?? []) add(review);
-  for (const thread of pr?.reviewThreads?.nodes ?? []) for (const comment of thread.comments?.nodes ?? []) add(comment);
-  for (const comment of pr?.comments?.nodes ?? []) add(comment);
-  return bodies;
-}
-function unanswered(comments) {
-  const replyTimes = comments.filter((comment) => comment.isAgentReply).map((comment) => Date.parse(comment.createdAt));
-  const lastReply = replyTimes.length === 0 ? Number.NEGATIVE_INFINITY : Math.max(...replyTimes);
-  return comments.filter((comment) => !comment.isAgentReply && !(Date.parse(comment.createdAt) < lastReply)).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-}
-function renderComment(comment, bodies) {
-  const raw = (bodies.get(comment.id) ?? "").replace(/<!--[\s\S]*?-->/g, "").trim();
-  const body = raw.length > MAX_BODY_CHARS ? `${raw.slice(0, MAX_BODY_CHARS)}
-[truncated]` : raw;
-  const kind = comment.isBot ? "bot" : comment.isLocal ? "local account, unprefixed: a human instruction" : "human";
-  const quoted = (body.length > 0 ? body : "(no text)").replace(/^/gm, "> ");
-  return `**${comment.author}** (${kind}, ${comment.createdAt}):
-${quoted}`;
-}
-async function fetchFeedback({
-  runGh: runGh2,
-  target,
-  ignoreTag,
-  selfLogin
-}) {
-  const payload = await fetchPrPayload({ runGh: runGh2, target });
-  const snapshot = normalizeSnapshot(payload, { ignoreTag, selfLogin });
-  const bodies = collectBodies(payload);
-  const sections = [];
-  for (const thread of snapshot.reviewThreads) {
-    if (channelIsAcknowledged(thread.comments)) continue;
-    const location = thread.path === void 0 ? "" : ` on ${thread.path}${thread.line === void 0 ? "" : `:${thread.line}`}`;
-    const state = thread.isResolved ? "resolved" : "unresolved";
-    const allBots = thread.comments.every((comment) => comment.isAgentReply || comment.isBot);
-    sections.push(
-      `### Thread \`${thread.id}\`${location} (${state}${allBots ? ", bot-only" : ""})
-
-` + unanswered(thread.comments).map((comment) => renderComment(comment, bodies)).join("\n\n")
-    );
-  }
-  const unthreaded = [...snapshot.issueComments, ...snapshot.reviewSummaries];
-  if (unthreaded.length > 0 && !channelIsAcknowledged(unthreaded)) {
-    sections.push(
-      "### PR comments and review summaries (reply without `thread`)\n\n" + unanswered(unthreaded).map((comment) => renderComment(comment, bodies)).join("\n\n")
-    );
-  }
-  const key = targetKey(target);
-  if (sections.length === 0) return `No feedback on ${key} is awaiting a reply.`;
-  return `Feedback on ${key} awaiting a reply (${sections.length} channel${sections.length === 1 ? "" : "s"}):
-
-` + sections.join("\n\n") + `
-
-Answer each channel with pr_monitor(action: "reply", pr: "${key}", thread: "<thread id>", body: "...") or omit thread for a PR comment; the reply prefix is added for you. A non-actionable bot acknowledgement needs no reply: use mark_ready instead.`;
-}
-async function postReply({
-  runGh: runGh2,
-  target,
-  thread,
-  body,
-  replyPrefix
-}) {
-  const text = body.startsWith(replyPrefix) ? body : `${replyPrefix} ${body}`;
-  if (thread === void 0) {
-    const url3 = await runGh2([
-      "api",
-      `repos/${target.owner}/${target.repo}/issues/${target.number}/comments`,
-      "-f",
-      `body=${text}`,
-      "--jq",
-      ".html_url"
-    ]);
-    return `Posted a PR comment on ${targetKey(target)}: ${url3.trim()}`;
-  }
-  const payload = parseGhPayload(await runGh2([
-    "api",
-    "graphql",
-    "-f",
-    "query=mutation($thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { url } } }",
-    "-f",
-    `thread=${thread}`,
-    "-f",
-    `body=${text}`
-  ]));
-  const url2 = payload?.data?.addPullRequestReviewThreadReply?.comment?.url;
-  if (typeof url2 !== "string") throw new Error(`GitHub did not confirm the reply to thread ${thread}.`);
-  return `Replied on thread ${thread}: ${url2}`;
-}
-
 // core/label.ts
 var READY_LABEL_COLOR = "0e8a16";
 var READY_LABEL_DESCRIPTION = "The agent finished its work on this PR";
@@ -37618,6 +37439,98 @@ async function squashMergePullRequest({
   return await successfulMergeText({ runGh: runGh2, target, pullRequest });
 }
 
+// core/readiness.ts
+function latestComments(comments) {
+  let latestAt = Number.NEGATIVE_INFINITY;
+  let latest = [];
+  for (const comment of comments) {
+    const createdAt = Date.parse(comment.createdAt);
+    if (Number.isNaN(createdAt)) return comments;
+    if (createdAt > latestAt) {
+      latestAt = createdAt;
+      latest = [comment];
+    } else if (createdAt === latestAt) {
+      latest.push(comment);
+    }
+  }
+  return latest;
+}
+function channelIsAcknowledged(comments) {
+  return comments.length > 0 && latestComments(comments).every((comment) => comment.isAgentReply);
+}
+function feedbackChannels(snapshot) {
+  const channels = /* @__PURE__ */ new Map();
+  channels.set("unthreaded", [...snapshot.issueComments, ...snapshot.reviewSummaries]);
+  for (const thread of snapshot.reviewThreads) channels.set(`thread:${thread.id}`, thread.comments);
+  return channels;
+}
+function hasAcknowledgementRegression(prev, next) {
+  const before = feedbackChannels(prev);
+  return [...feedbackChannels(next)].some(([channel, comments]) => {
+    const previous = before.get(channel);
+    if (channel === "unthreaded") {
+      return comments.length > 0 && channelIsAcknowledged(previous ?? []) && !channelIsAcknowledged(comments);
+    }
+    return !channelIsAcknowledged(comments) && (previous === void 0 || channelIsAcknowledged(previous));
+  });
+}
+function ciIsReady(snapshot) {
+  const phase = ciPhase(snapshot);
+  return phase === "none" || phase === "concluded" && snapshot.checks.every((check2) => check2.outcome === "success");
+}
+function assessAutomaticReadiness(snapshot) {
+  const blockers = [];
+  if (snapshot.state !== "OPEN") blockers.push(`PR is ${snapshot.state.toLowerCase()}`);
+  if (!ciIsReady(snapshot)) {
+    blockers.push(ciPhase(snapshot) === "running" ? "CI is running" : "CI is failing");
+  }
+  if (snapshot.mergeable !== "MERGEABLE") {
+    blockers.push(
+      snapshot.mergeable === "CONFLICTING" ? "the PR has a merge conflict" : "mergeability is still unknown"
+    );
+  }
+  const awaitingThreadReplies = snapshot.reviewThreads.filter(
+    (thread) => !channelIsAcknowledged(thread.comments)
+  ).length;
+  if (awaitingThreadReplies > 0) {
+    blockers.push(
+      `${awaitingThreadReplies} review ${awaitingThreadReplies === 1 ? "thread awaits" : "threads await"} a prefixed reply from the local GitHub account`
+    );
+  }
+  const unthreaded = [...snapshot.issueComments, ...snapshot.reviewSummaries];
+  const awaitingUnthreadedReply = unthreaded.length > 0 && !channelIsAcknowledged(unthreaded);
+  if (awaitingUnthreadedReply) {
+    blockers.push("issue or review-summary feedback awaits a prefixed reply from the local GitHub account");
+  }
+  return {
+    eligible: blockers.length === 0,
+    blockers,
+    awaitingThreadReplies,
+    awaitingUnthreadedReply
+  };
+}
+function hasReadyLabel(snapshot, readyLabel) {
+  const normalized = readyLabel.toLowerCase();
+  return snapshot.labels.some((label) => label.toLowerCase() === normalized);
+}
+function withReadyLabel(snapshot, readyLabel, ready) {
+  const normalized = readyLabel.toLowerCase();
+  const withoutReady = snapshot.labels.filter((label) => label.toLowerCase() !== normalized);
+  return { ...snapshot, labels: ready ? [...withoutReady, readyLabel] : withoutReady };
+}
+function hasReadinessInvalidation(prev, next, lastDefiniteMergeable) {
+  if (next.state !== "OPEN") return false;
+  if (prev.headSha !== next.headSha) return true;
+  if (hasNewMergeConflict(lastDefiniteMergeable, next)) return true;
+  if (ciIsReady(prev) && !ciIsReady(next)) return true;
+  if (hasNewCiFailure(prev, next)) return true;
+  if (hasAcknowledgementRegression(prev, next)) return true;
+  if (reviewThreadsReceivedNewComments(prev.reviewThreads, next.reviewThreads)) return true;
+  if (hasAddedRelevantComment(prev.issueComments, next.issueComments)) return true;
+  if (hasAddedRelevantComment(prev.reviewSummaries, next.reviewSummaries)) return true;
+  return false;
+}
+
 // core/report.ts
 var DEFAULT_READY_LABEL = "agent-ready";
 var DEFAULT_REPLY_PREFIX = "<!-- pr-monitor:reply -->";
@@ -37750,6 +37663,33 @@ function buildReadinessLines({
   }
   return lines;
 }
+function buildIdleReminder(target, snapshot, opts) {
+  const title = snapshot.title.replace(/\s+/g, " ").trim();
+  const readyLabel = opts.readyLabel ?? DEFAULT_READY_LABEL;
+  const unresolved = snapshot.reviewThreads.filter((thread) => !thread.isResolved).length;
+  const lines = [
+    `[PR Monitor] [${targetKey(target)}](${snapshot.url}) \u2014 "${title}" \u2014 idle reminder`,
+    `- Idle: no PR activity and no report for ${opts.idleMinutes}m. Pick this PR back up now: re-check the current head's checks, expected reviews, and feedback instead of waiting for another report.`,
+    ciLine(snapshot, void 0),
+    `- Mergeable: ${snapshot.mergeable}`,
+    reviewLine(snapshot),
+    `- [comment:inline] ${countLabel(unresolved, "unresolved thread")}`,
+    ...buildReadinessLines({
+      target,
+      snapshot,
+      readyLabel,
+      replyPrefix: opts.replyPrefix ?? DEFAULT_REPLY_PREFIX,
+      readinessError: opts.readinessError,
+      autoMergeEnabled: opts.autoMergeEnabled
+    })
+  ];
+  if (opts.autoMergeEnabled === true && hasReadyLabel(snapshot, readyLabel)) {
+    lines.push(
+      `- Required next step: the PR is ready with auto-merge on but is still open, so the merge did not go through. Find out why (checks, required reviews, branch protection, conflicts), fix what you can and call ${inlineCode(`pr_monitor(action: "mark_ready", pr: "${targetKey(target)}")`)} to retry the merge, or tell the user what blocks it.`
+    );
+  }
+  return lines.join("\n");
+}
 function buildReport(target, snapshot, opts) {
   const stateSuffix = snapshot.state !== "OPEN" ? ` \u2014 ${snapshot.state}` : "";
   const title = snapshot.title.replace(/\s+/g, " ").trim();
@@ -37795,6 +37735,9 @@ var PrWatch = class {
   lastDefiniteMergeable;
   dirty = false;
   lastActivityAt = 0;
+  // Last report or agent action that reached the session; with lastActivityAt
+  // it starts the idle-reminder timer.
+  lastReportAt;
   lastFlushAt;
   lastFlushedSnapshot;
   // True until the configured startup report is successfully delivered or a
@@ -37848,6 +37791,7 @@ var PrWatch = class {
     this.deps = input2.deps;
     this.startedAt = input2.deps.now();
     this.lastFlushAt = this.startedAt;
+    this.lastReportAt = this.startedAt;
     this.snapshot = input2.initial;
     this.lastFlushedSnapshot = input2.initial;
     this.initialAnnouncementPending = input2.config.announceOnStart;
@@ -37912,6 +37856,7 @@ var PrWatch = class {
       if (readiness === void 0 || snapshot === void 0) {
         throw new Error("this watch does not have a readiness channel");
       }
+      this.lastReportAt = this.deps.now();
       this.autoMergeNotice = void 0;
       this.readinessResetPending = false;
       return await this.trackReadinessMutation(async () => {
@@ -37944,6 +37889,7 @@ ${autoMerge}`;
     if (this.stopped) throw new Error("the monitor stopped before the auto-merge change could run");
     return await this.runExclusive(async () => {
       if (this.stopped) throw new Error("the monitor stopped before the auto-merge change could run");
+      this.lastReportAt = this.deps.now();
       const enabled = autoMerge !== void 0;
       if (enabled === (this.autoMerge !== void 0)) {
         return `Auto-merge is already ${enabled ? "enabled" : "disabled"} for ${targetKey(this.target)}.`;
@@ -37995,6 +37941,7 @@ ${autoMerge}`;
     if (this.stopped) return;
     this.rememberDefiniteMergeable(next);
     await this.maybeAutoFlush();
+    await this.maybeRemindIdle();
   }
   async applySnapshot(next) {
     const previous = this.snapshot;
@@ -38247,7 +38194,7 @@ ${autoMerge}`;
     const previousUrgent = this.urgent;
     const report = this.flush(forcedHoldMinutes);
     try {
-      await this.deps.deliver(report);
+      await this.deps.deliver(report, "update" /* update */);
       this.deliveryFailures = 0;
       this.afterReportDelivered();
       this.stopIfTerminal();
@@ -38258,27 +38205,61 @@ ${autoMerge}`;
       this.dirty = true;
       this.holdStartedAt = previousHoldStartedAt;
       this.urgent = previousUrgent;
-      this.deliveryFailures += 1;
+      await this.recordDeliveryFailure(error62);
+    }
+  }
+  /**
+   * Nudge the session when an open PR has had no activity and no report for
+   * idleReminderMinutes, so a PR the agent stopped waiting on is not forgotten.
+   * Buffered activity already has a report coming. A ready PR without
+   * auto-merge is handed off to a human, so it gets no reminder; with
+   * auto-merge on, a ready PR that is still open means the merge got stuck.
+   */
+  async maybeRemindIdle() {
+    const snapshot = this.snapshot;
+    const delayMinutes = this.config.idleReminderMinutes;
+    if (delayMinutes <= 0 || this.stopped || this.dirty || snapshot === void 0 || snapshot.state !== "OPEN") return;
+    const readiness = this.deps.readiness;
+    if (readiness !== void 0 && this.autoMerge === void 0 && hasReadyLabel(snapshot, readiness.label)) return;
+    const now = this.deps.now();
+    const idleMs = now - Math.max(this.lastActivityAt, this.lastReportAt);
+    if (idleMs < delayMinutes * 6e4) return;
+    const reminder = buildIdleReminder(this.target, snapshot, {
+      idleMinutes: Math.round(idleMs / 6e4),
+      readyLabel: readiness?.label,
+      replyPrefix: readiness?.replyPrefix,
+      readinessError: this.readinessError,
+      autoMergeEnabled: this.autoMerge !== void 0
+    });
+    try {
+      await this.deps.deliver(reminder, "idle_reminder" /* idleReminder */);
+      this.deliveryFailures = 0;
+      this.lastReportAt = now;
+    } catch (error62) {
+      await this.recordDeliveryFailure(error62);
+    }
+  }
+  async recordDeliveryFailure(error62) {
+    this.deliveryFailures += 1;
+    this.deps.log(
+      `report delivery failed for ${targetKey(this.target)} (${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error62}`
+    );
+    if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
       this.deps.log(
-        `report delivery failed for ${targetKey(this.target)} (${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error62}`
+        `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`
       );
-      if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
-        this.deps.log(
-          `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`
-        );
-        if (!this.stopped && this.deps.persist !== void 0) {
-          try {
-            await this.deps.persist(
-              this.stopNotice(
-                `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures. Last error: ${error62 instanceof Error ? error62.message : String(error62)}`
-              )
-            );
-          } catch (persistError) {
-            this.deps.log(`terminal stop notice could not be persisted for ${targetKey(this.target)}: ${persistError}`);
-          }
+      if (!this.stopped && this.deps.persist !== void 0) {
+        try {
+          await this.deps.persist(
+            this.stopNotice(
+              `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures. Last error: ${error62 instanceof Error ? error62.message : String(error62)}`
+            )
+          );
+        } catch (persistError) {
+          this.deps.log(`terminal stop notice could not be persisted for ${targetKey(this.target)}: ${persistError}`);
         }
-        this.stop();
       }
+      this.stop();
     }
   }
   async prepareAutomaticReady() {
@@ -38354,6 +38335,7 @@ ${autoMerge}`;
     }
   }
   afterReportDelivered() {
+    this.lastReportAt = this.deps.now();
     this.reportedReadinessError = this.readinessError;
     this.autoMergeNotice = void 0;
     if (!this.autoReadyAfterInvalidation) return;
@@ -38383,7 +38365,7 @@ ${autoMerge}`;
   }
   async deliverOrLog(message) {
     try {
-      await this.deps.deliver(message);
+      await this.deps.deliver(message, "update" /* update */);
       return true;
     } catch (error62) {
       this.deps.log(`report delivery failed for ${targetKey(this.target)}: ${error62}`);
@@ -38430,6 +38412,102 @@ ${autoMerge}`;
     if (this.snapshot !== void 0 && this.snapshot.state !== "OPEN") this.stop();
   }
 };
+
+// core/feedback.ts
+var MAX_BODY_CHARS = 4e3;
+function collectBodies(payload) {
+  const pr = payload?.data?.repository?.pullRequest;
+  const bodies = /* @__PURE__ */ new Map();
+  const add = (node2) => {
+    if (typeof node2?.id === "string" && typeof node2.body === "string") bodies.set(node2.id, node2.body);
+  };
+  for (const review of pr?.latestReviews?.nodes ?? []) add(review);
+  for (const thread of pr?.reviewThreads?.nodes ?? []) for (const comment of thread.comments?.nodes ?? []) add(comment);
+  for (const comment of pr?.comments?.nodes ?? []) add(comment);
+  return bodies;
+}
+function unanswered(comments) {
+  const replyTimes = comments.filter((comment) => comment.isAgentReply).map((comment) => Date.parse(comment.createdAt));
+  const lastReply = replyTimes.length === 0 ? Number.NEGATIVE_INFINITY : Math.max(...replyTimes);
+  return comments.filter((comment) => !comment.isAgentReply && !(Date.parse(comment.createdAt) < lastReply)).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+}
+function renderComment(comment, bodies) {
+  const raw = (bodies.get(comment.id) ?? "").replace(/<!--[\s\S]*?-->/g, "").trim();
+  const body = raw.length > MAX_BODY_CHARS ? `${raw.slice(0, MAX_BODY_CHARS)}
+[truncated]` : raw;
+  const kind = comment.isBot ? "bot" : comment.isLocal ? "local account, unprefixed: a human instruction" : "human";
+  const quoted = (body.length > 0 ? body : "(no text)").replace(/^/gm, "> ");
+  return `**${comment.author}** (${kind}, ${comment.createdAt}):
+${quoted}`;
+}
+async function fetchFeedback({
+  runGh: runGh2,
+  target,
+  ignoreTag,
+  selfLogin
+}) {
+  const payload = await fetchPrPayload({ runGh: runGh2, target });
+  const snapshot = normalizeSnapshot(payload, { ignoreTag, selfLogin });
+  const bodies = collectBodies(payload);
+  const sections = [];
+  for (const thread of snapshot.reviewThreads) {
+    if (channelIsAcknowledged(thread.comments)) continue;
+    const location = thread.path === void 0 ? "" : ` on ${thread.path}${thread.line === void 0 ? "" : `:${thread.line}`}`;
+    const state = thread.isResolved ? "resolved" : "unresolved";
+    const allBots = thread.comments.every((comment) => comment.isAgentReply || comment.isBot);
+    sections.push(
+      `### Thread \`${thread.id}\`${location} (${state}${allBots ? ", bot-only" : ""})
+
+` + unanswered(thread.comments).map((comment) => renderComment(comment, bodies)).join("\n\n")
+    );
+  }
+  const unthreaded = [...snapshot.issueComments, ...snapshot.reviewSummaries];
+  if (unthreaded.length > 0 && !channelIsAcknowledged(unthreaded)) {
+    sections.push(
+      "### PR comments and review summaries (reply without `thread`)\n\n" + unanswered(unthreaded).map((comment) => renderComment(comment, bodies)).join("\n\n")
+    );
+  }
+  const key = targetKey(target);
+  if (sections.length === 0) return `No feedback on ${key} is awaiting a reply.`;
+  return `Feedback on ${key} awaiting a reply (${sections.length} channel${sections.length === 1 ? "" : "s"}):
+
+` + sections.join("\n\n") + `
+
+Answer each channel with pr_monitor(action: "reply", pr: "${key}", thread: "<thread id>", body: "...") or omit thread for a PR comment; the reply prefix is added for you. A non-actionable bot acknowledgement needs no reply: use mark_ready instead.`;
+}
+async function postReply({
+  runGh: runGh2,
+  target,
+  thread,
+  body,
+  replyPrefix
+}) {
+  const text = body.startsWith(replyPrefix) ? body : `${replyPrefix} ${body}`;
+  if (thread === void 0) {
+    const url3 = await runGh2([
+      "api",
+      `repos/${target.owner}/${target.repo}/issues/${target.number}/comments`,
+      "-f",
+      `body=${text}`,
+      "--jq",
+      ".html_url"
+    ]);
+    return `Posted a PR comment on ${targetKey(target)}: ${url3.trim()}`;
+  }
+  const payload = parseGhPayload(await runGh2([
+    "api",
+    "graphql",
+    "-f",
+    "query=mutation($thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { url } } }",
+    "-f",
+    `thread=${thread}`,
+    "-f",
+    `body=${text}`
+  ]));
+  const url2 = payload?.data?.addPullRequestReviewThreadReply?.comment?.url;
+  if (typeof url2 !== "string") throw new Error(`GitHub did not confirm the reply to thread ${thread}.`);
+  return `Replied on thread ${thread}: ${url2}`;
+}
 
 // runtime/tool.ts
 var MONITOR_ACTION_VALUES = [
@@ -38636,7 +38714,7 @@ var MonitorSession = class {
         const report = entry.watch.stopNotice(notice);
         const send = channel === "persistent" /* persistent */ ? entry.channel.persist ?? entry.channel.deliver : entry.channel.deliver;
         try {
-          await send({ report });
+          await send({ report, kind: "update" /* update */ });
         } catch (error62) {
           this.deps.log(`stop notice delivery failed for ${targetKey(entry.watch.target)}: ${error62}`);
         }
@@ -38762,7 +38840,7 @@ ${resetRace.watch.statusLine()}` };
       deps: {
         now: this.deps.now,
         fetchSnapshot: () => this.fetchSnapshot({ target, config: config2 }),
-        deliver: (report) => reportChannel.deliver({ report }),
+        deliver: (report, kind) => reportChannel.deliver({ report, kind }),
         persist: reportChannel.persist === void 0 ? void 0 : (report) => reportChannel.persist?.({ report }) ?? Promise.resolve(),
         log: this.deps.log,
         onStopped: () => {
@@ -39275,19 +39353,23 @@ var createAdapter = ({ sessionId, projectDir }) => {
   const deliver = async ({
     target,
     config: config2,
-    report
+    report,
+    kind
   }) => {
+    const reminder = kind === "idle_reminder" /* idleReminder */;
     if (pushChannel !== void 0) {
       await pushMessage({ channel: pushChannel, text: report });
-      extendKeepAlive({ config: config2 });
+      if (!reminder) extendKeepAlive({ config: config2 });
       refreshSessionState();
       if (config2.desktopNotifications) {
         notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report delivered to your ${hostName} session`);
       }
       return;
     }
+    const held = config2.keepAlive && !handedOff.has(targetRegistryKey(target)) && Date.now() < keepAliveUntilMs;
+    if (reminder && !held) return;
     spoolReport(claudePid, report, sessionId);
-    extendKeepAlive({ config: config2 });
+    if (!reminder) extendKeepAlive({ config: config2 });
     refreshSessionState();
     if (config2.desktopNotifications) {
       notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report waiting in your ${hostName} session`);
@@ -39352,7 +39434,7 @@ Still monitoring it, but it no longer holds this session open; new activity re-o
         prepare: prepareStart,
         announcementMode: "await_delivery" /* awaitDelivery */,
         createChannel: ({ target, config: config2 }) => ({
-          deliver: ({ report }) => deliver({ target, config: config2, report }),
+          deliver: ({ report, kind }) => deliver({ target, config: config2, report, kind }),
           persist: ({ report }) => {
             spoolReport(claudePid, report, sessionId);
             return Promise.resolve();

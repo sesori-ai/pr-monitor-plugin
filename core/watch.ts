@@ -16,7 +16,7 @@ import {
   hasReadyLabel,
   withReadyLabel,
 } from "./readiness"
-import { buildReadinessLines, buildReport } from "./report"
+import { buildIdleReminder, buildReadinessLines, buildReport } from "./report"
 import { targetKey, targetUrl, type Target } from "./target"
 
 export type ReadinessDeps = {
@@ -30,10 +30,17 @@ export type AutoMergeDeps = {
   squashMerge: (input: { pullRequest: AutoMergePullRequest }) => Promise<string>
 }
 
+// Lets a shell treat an idle reminder differently from a real report, for
+// example so it does not extend a keep-alive idle cap.
+export enum ReportKind {
+  update = "update",
+  idleReminder = "idle_reminder",
+}
+
 export type WatchDeps = {
   now: () => number
   fetchSnapshot: () => Promise<PrSnapshot>
-  deliver: (report: string) => Promise<void>
+  deliver: (report: string, kind: ReportKind) => Promise<void>
   /**
    * Best-effort persistence for a terminal notice when `deliver` itself is the
    * broken channel (consecutive delivery failures). Shells with a durable side
@@ -62,6 +69,9 @@ export class PrWatch {
   private lastDefiniteMergeable: "MERGEABLE" | "CONFLICTING" | undefined
   private dirty = false
   private lastActivityAt = 0
+  // Last report or agent action that reached the session; with lastActivityAt
+  // it starts the idle-reminder timer.
+  private lastReportAt: number
   private lastFlushAt: number
   private lastFlushedSnapshot: PrSnapshot
   // True until the configured startup report is successfully delivered or a
@@ -116,6 +126,7 @@ export class PrWatch {
     this.deps = input.deps
     this.startedAt = input.deps.now()
     this.lastFlushAt = this.startedAt
+    this.lastReportAt = this.startedAt
     this.snapshot = input.initial
     this.lastFlushedSnapshot = input.initial
     this.initialAnnouncementPending = input.config.announceOnStart
@@ -193,6 +204,7 @@ export class PrWatch {
       if (readiness === undefined || snapshot === undefined) {
         throw new Error("this watch does not have a readiness channel")
       }
+      this.lastReportAt = this.deps.now()
       // A manual action returns its own merge result directly. Do not let an
       // undelivered automatic-attempt notice leak into a later report.
       this.autoMergeNotice = undefined
@@ -227,6 +239,7 @@ export class PrWatch {
     if (this.stopped) throw new Error("the monitor stopped before the auto-merge change could run")
     return await this.runExclusive(async () => {
       if (this.stopped) throw new Error("the monitor stopped before the auto-merge change could run")
+      this.lastReportAt = this.deps.now()
       const enabled = autoMerge !== undefined
       if (enabled === (this.autoMerge !== undefined)) {
         return `Auto-merge is already ${enabled ? "enabled" : "disabled"} for ${targetKey(this.target)}.`
@@ -283,6 +296,7 @@ export class PrWatch {
     if (this.stopped) return
     this.rememberDefiniteMergeable(next)
     await this.maybeAutoFlush()
+    await this.maybeRemindIdle()
   }
 
   private async applySnapshot(next: PrSnapshot): Promise<PrSnapshot> {
@@ -564,7 +578,7 @@ export class PrWatch {
     const previousUrgent = this.urgent
     const report = this.flush(forcedHoldMinutes)
     try {
-      await this.deps.deliver(report)
+      await this.deps.deliver(report, ReportKind.update)
       this.deliveryFailures = 0
       this.afterReportDelivered()
       this.stopIfTerminal()
@@ -575,32 +589,70 @@ export class PrWatch {
       this.dirty = true
       this.holdStartedAt = previousHoldStartedAt
       this.urgent = previousUrgent
-      this.deliveryFailures += 1
+      await this.recordDeliveryFailure(error)
+    }
+  }
+
+  /**
+   * Nudge the session when an open PR has had no activity and no report for
+   * idleReminderMinutes, so a PR the agent stopped waiting on is not forgotten.
+   * Buffered activity already has a report coming. A ready PR without
+   * auto-merge is handed off to a human, so it gets no reminder; with
+   * auto-merge on, a ready PR that is still open means the merge got stuck.
+   */
+  private async maybeRemindIdle(): Promise<void> {
+    const snapshot = this.snapshot
+    const delayMinutes = this.config.idleReminderMinutes
+    if (delayMinutes <= 0 || this.stopped || this.dirty || snapshot === undefined || snapshot.state !== "OPEN") return
+    const readiness = this.deps.readiness
+    if (readiness !== undefined && this.autoMerge === undefined && hasReadyLabel(snapshot, readiness.label)) return
+    const now = this.deps.now()
+    const idleMs = now - Math.max(this.lastActivityAt, this.lastReportAt)
+    if (idleMs < delayMinutes * 60_000) return
+    const reminder = buildIdleReminder(this.target, snapshot, {
+      idleMinutes: Math.round(idleMs / 60_000),
+      readyLabel: readiness?.label,
+      replyPrefix: readiness?.replyPrefix,
+      readinessError: this.readinessError,
+      autoMergeEnabled: this.autoMerge !== undefined,
+    })
+    try {
+      await this.deps.deliver(reminder, ReportKind.idleReminder)
+      this.deliveryFailures = 0
+      // Repeats one delay later while the PR stays still.
+      this.lastReportAt = now
+    } catch (error) {
+      // The timer is left alone, so the reminder retries at the next poll.
+      await this.recordDeliveryFailure(error)
+    }
+  }
+
+  private async recordDeliveryFailure(error: unknown): Promise<void> {
+    this.deliveryFailures += 1
+    this.deps.log(
+      `report delivery failed for ${targetKey(this.target)} ` +
+        `(${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error}`,
+    )
+    if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
       this.deps.log(
-        `report delivery failed for ${targetKey(this.target)} ` +
-          `(${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error}`,
+        `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`,
       )
-      if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
-        this.deps.log(
-          `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`,
-        )
-        // The delivery channel is the thing that is broken, so the notice goes
-        // through the shell's persistent side channel when one exists. A watch
-        // stopped manually while this attempt was in flight owes no notice.
-        if (!this.stopped && this.deps.persist !== undefined) {
-          try {
-            await this.deps.persist(
-              this.stopNotice(
-                `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures. Last error: ` +
-                  `${error instanceof Error ? error.message : String(error)}`,
-              ),
-            )
-          } catch (persistError) {
-            this.deps.log(`terminal stop notice could not be persisted for ${targetKey(this.target)}: ${persistError}`)
-          }
+      // The delivery channel is the thing that is broken, so the notice goes
+      // through the shell's persistent side channel when one exists. A watch
+      // stopped manually while this attempt was in flight owes no notice.
+      if (!this.stopped && this.deps.persist !== undefined) {
+        try {
+          await this.deps.persist(
+            this.stopNotice(
+              `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures. Last error: ` +
+                `${error instanceof Error ? error.message : String(error)}`,
+            ),
+          )
+        } catch (persistError) {
+          this.deps.log(`terminal stop notice could not be persisted for ${targetKey(this.target)}: ${persistError}`)
         }
-        this.stop()
       }
+      this.stop()
     }
   }
 
@@ -697,6 +749,7 @@ export class PrWatch {
   }
 
   private afterReportDelivered(): void {
+    this.lastReportAt = this.deps.now()
     this.reportedReadinessError = this.readinessError
     this.autoMergeNotice = undefined
     if (!this.autoReadyAfterInvalidation) return
@@ -734,7 +787,7 @@ export class PrWatch {
 
   private async deliverOrLog(message: string): Promise<boolean> {
     try {
-      await this.deps.deliver(message)
+      await this.deps.deliver(message, ReportKind.update)
       return true
     } catch (error) {
       this.deps.log(`report delivery failed for ${targetKey(this.target)}: ${error}`)

@@ -16,7 +16,7 @@ import {
 import { hasReadyLabel, withReadyLabel } from "../core/readiness"
 import { AUTO_MERGE_GUIDANCE, DEFAULT_REPLY_PREFIX } from "../core/report"
 import { parseTarget, targetKey, targetRegistryKey, type Target } from "../core/target"
-import { type AutoMergeDeps, PrWatch } from "../core/watch"
+import { type AutoMergeDeps, PrWatch, ReportKind } from "../core/watch"
 import { MonitorAction } from "./tool"
 
 export enum InitialAnnouncementMode {
@@ -42,7 +42,8 @@ export enum WatchChangeType {
 }
 
 export type ReportChannel = {
-  deliver: (input: { report: string }) => Promise<void>
+  // `kind` lets a shell tell an idle reminder from a report it must count as activity.
+  deliver: (input: { report: string; kind: ReportKind }) => Promise<void>
   persist?: (input: { report: string }) => Promise<void>
 }
 
@@ -313,7 +314,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
             ? (entry.channel.persist ?? entry.channel.deliver)
             : entry.channel.deliver
         try {
-          await send({ report })
+          await send({ report, kind: ReportKind.update })
         } catch (error) {
           this.deps.log(`stop notice delivery failed for ${targetKey(entry.watch.target)}: ${error}`)
         }
@@ -467,7 +468,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
       deps: {
         now: this.deps.now,
         fetchSnapshot: () => this.fetchSnapshot({ target, config }),
-        deliver: (report) => reportChannel.deliver({ report }),
+        deliver: (report, kind) => reportChannel.deliver({ report, kind }),
         persist:
           reportChannel.persist === undefined
             ? undefined

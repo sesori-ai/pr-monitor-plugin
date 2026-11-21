@@ -31,6 +31,7 @@ function config(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
     flushOnCiFailure: true,
     readyLabel: "agent-ready",
     autoMerge: false,
+    idleReminderMinutes: 0,
     ...overrides,
   }
 }

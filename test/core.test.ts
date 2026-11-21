@@ -1,4 +1,7 @@
 import assert from "node:assert/strict"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import test from "node:test"
 
 import { detectActivity, hasNewCiFailure, hasNewMergeConflict } from "../core/activity"
@@ -19,7 +22,7 @@ import {
 } from "../core/readiness"
 import { buildReport } from "../core/report"
 import type { Target } from "../core/target"
-import { PrWatch } from "../core/watch"
+import { PrWatch, ReportKind } from "../core/watch"
 
 const target: Target = { owner: "sesori", repo: "example", number: 42 }
 
@@ -77,6 +80,7 @@ function config(overrides: Partial<WatchConfig> = {}): WatchConfig {
     ignoreCommentTag: undefined,
     announceOnStart: true,
     flushOnCiFailure: true,
+    idleReminderMinutes: 0,
     ...overrides,
   }
 }
@@ -100,6 +104,7 @@ function watchHarness(
   let remainingAutoMergeFailures = opts.autoMergeFailures ?? 0
   let deliveryAttempts = 0
   const reports: string[] = []
+  const kinds: ReportKind[] = []
   const persisted: string[] = []
   const readyChanges: boolean[] = []
   const readyObservations: boolean[] = []
@@ -111,13 +116,14 @@ function watchHarness(
     deps: {
       now: () => now,
       fetchSnapshot: async () => polled[Math.min(index++, polled.length - 1)]!,
-      deliver: async (report) => {
+      deliver: async (report, kind) => {
         deliveryAttempts += 1
         if (remainingDeliveryFailures > 0) {
           remainingDeliveryFailures -= 1
           throw new Error("delivery failed")
         }
         reports.push(report)
+        kinds.push(kind)
       },
       persist: async (report) => {
         persisted.push(report)
@@ -156,6 +162,7 @@ function watchHarness(
   return {
     watch,
     reports,
+    kinds,
     persisted,
     readyChanges,
     readyObservations,
@@ -180,6 +187,7 @@ test("the default debounce is two minutes", async () => {
   assert.equal(loaded.debounceMinutes, 2)
   assert.equal(loaded.ignoreCommentTag, "<!-- pr-monitor:reply -->")
   assert.equal(loaded.autoMerge, false)
+  assert.equal(loaded.idleReminderMinutes, 25)
 })
 
 test("ready-label matching follows GitHub's case-insensitive label identity", () => {
@@ -1892,4 +1900,94 @@ test("set_auto_merge label reset lets a later prefixed reply restore readiness",
   }
   assert.deepEqual(harness.readyChanges, [false, true])
   assert.deepEqual(merges, ["head-1"])
+})
+
+test("idleReminderMinutes accepts 0 to turn the reminder off and ignores negative values", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pr-monitor-idle-config-"))
+  const off = join(directory, "off.json")
+  const negative = join(directory, "negative.json")
+  await writeFile(off, JSON.stringify({ idleReminderMinutes: 0 }))
+  await writeFile(negative, JSON.stringify({ idleReminderMinutes: -5 }))
+  try {
+    const load = (path: string) => loadMonitorConfig({ paths: [path], globalPaths: [], environment: {}, log: () => {} })
+    assert.equal((await load(off)).idleReminderMinutes, 0)
+    assert.equal((await load(negative)).idleReminderMinutes, 25)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+const MINUTE = 60_000
+
+test("an idle open PR gets a reminder after the delay and another one delay later", async () => {
+  const still = snapshot({ checks: [{ name: "ci", outcome: "success", id: "ci-1" }] })
+  const harness = watchHarness(still, [still], config({ announceOnStart: false, idleReminderMinutes: 25 }))
+  harness.advance(24 * MINUTE)
+  await harness.watch.tick()
+  assert.equal(harness.reports.length, 0)
+  harness.advance(MINUTE)
+  await harness.watch.tick()
+  assert.equal(harness.reports.length, 1)
+  assert.deepEqual(harness.kinds, [ReportKind.idleReminder])
+  const reminder = harness.reports.at(0) ?? ""
+  assert.match(reminder, /^\[PR Monitor\] \[sesori\/example#42\]\(.*\) — "test PR" — idle reminder/)
+  assert.match(reminder, /no PR activity and no report for 25m/)
+  assert.match(reminder, /- CI: passing \(1\/1\)/)
+  assert.match(reminder, /mark_ready/)
+
+  harness.advance(24 * MINUTE)
+  await harness.watch.tick()
+  assert.equal(harness.reports.length, 1)
+  harness.advance(MINUTE)
+  await harness.watch.tick()
+  assert.equal(harness.reports.length, 2)
+})
+
+test("PR activity and its report restart the idle-reminder timer", async () => {
+  const initial = snapshot()
+  const pushed = snapshot({ headSha: "head-2" })
+  const harness = watchHarness(initial, [pushed], config({ announceOnStart: false, idleReminderMinutes: 25 }))
+  harness.advance(20 * MINUTE)
+  await harness.watch.tick()
+  harness.advance(2 * MINUTE)
+  await harness.watch.tick()
+  assert.deepEqual(harness.kinds, [ReportKind.update])
+
+  // 46 minutes after start, but only 24 after the activity report.
+  harness.advance(24 * MINUTE)
+  await harness.watch.tick()
+  assert.equal(harness.reports.length, 1)
+  harness.advance(MINUTE)
+  await harness.watch.tick()
+  assert.deepEqual(harness.kinds, [ReportKind.update, ReportKind.idleReminder])
+})
+
+test("idleReminderMinutes 0 never sends a reminder", async () => {
+  const still = snapshot()
+  const harness = watchHarness(still, [still], config({ announceOnStart: false, idleReminderMinutes: 0 }))
+  for (let poll = 0; poll < 12; poll += 1) {
+    harness.advance(25 * MINUTE)
+    await harness.watch.tick()
+  }
+  assert.equal(harness.reports.length, 0)
+})
+
+test("a ready PR is reminded only when auto-merge should have merged it", async () => {
+  const ready = snapshot({ labels: ["agent-ready"] })
+  const handedOff = watchHarness(ready, [ready], config({ announceOnStart: false, idleReminderMinutes: 25 }), {
+    readiness: true,
+  })
+  handedOff.advance(60 * MINUTE)
+  await handedOff.watch.tick()
+  assert.equal(handedOff.reports.length, 0)
+
+  const stuck = watchHarness(ready, [ready], config({ announceOnStart: false, idleReminderMinutes: 25 }), {
+    readiness: true,
+    autoMerge: true,
+  })
+  stuck.advance(25 * MINUTE)
+  await stuck.watch.tick()
+  assert.deepEqual(stuck.kinds, [ReportKind.idleReminder])
+  assert.match(stuck.reports.at(0) ?? "", /still open, so the merge did not go through/)
+  assert.equal(stuck.autoMerges.length, 0)
 })

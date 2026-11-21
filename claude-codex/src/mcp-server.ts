@@ -17,6 +17,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 import { loadClaudeConfig, type ClaudeMonitorConfig } from "../../core/config"
 import { targetKey, targetRegistryKey, type Target } from "../../core/target"
+import { ReportKind } from "../../core/watch"
 import {
   InitialAnnouncementMode,
   InitialAnnouncementState,
@@ -85,11 +86,16 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
     target,
     config,
     report,
+    kind,
   }: {
     target: Target
     config: ClaudeMonitorConfig
     report: string
+    kind: ReportKind
   }): Promise<void> => {
+    // An idle reminder is not PR activity: it must not extend the keep-alive
+    // idle cap, or a still PR would hold the session open forever.
+    const reminder = kind === ReportKind.idleReminder
     if (pushChannel !== undefined) {
       // Rejection is deliberate: the watch rolls back its baseline and retries
       // the push at poll cadence, which can wake an idle session the moment the
@@ -97,15 +103,20 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
       // hook events an idle session never fires; persistent push failure ends in
       // the watch's own stop-after-consecutive-failures notice.
       await pushMessage({ channel: pushChannel, text: report })
-      extendKeepAlive({ config })
+      if (!reminder) extendKeepAlive({ config })
       refreshSessionState()
       if (config.desktopNotifications) {
         notifyDesktop(`PR Monitor — ${targetKey(target)}`, `New report delivered to your ${hostName} session`)
       }
       return
     }
+    // A spooled report wakes the session only while the keep-alive loop holds
+    // it. Drop a reminder nothing would read before the next prompt instead of
+    // stacking stale reminders in the spool.
+    const held = config.keepAlive && !handedOff.has(targetRegistryKey(target)) && Date.now() < keepAliveUntilMs
+    if (reminder && !held) return
     spoolReport(claudePid, report, sessionId)
-    extendKeepAlive({ config })
+    if (!reminder) extendKeepAlive({ config })
     refreshSessionState()
     if (config.desktopNotifications) {
       notifyDesktop(`PR Monitor — ${targetKey(target)}`, `New report waiting in your ${hostName} session`)
@@ -218,7 +229,7 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
               prepare: prepareStart,
               announcementMode: InitialAnnouncementMode.awaitDelivery,
               createChannel: ({ target, config }) => ({
-                deliver: ({ report }) => deliver({ target, config, report }),
+                deliver: ({ report, kind }) => deliver({ target, config, report, kind }),
                 persist: ({ report }) => {
                   spoolReport(claudePid, report, sessionId)
                   return Promise.resolve()

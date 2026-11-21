@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Idle reminders: when a watched open PR has had no activity and no report for `idleReminderMinutes` (default 25,
+  `0` turns it off), the monitor sends a short `[PR Monitor]` reminder that summarizes the current state and asks the
+  agent to re-check the PR and act or mark it ready. It repeats one delay later while the PR stays still and is
+  skipped for a ready PR handed to a human (auto-merge off). The default stays under the agent's roughly 30-minute
+  prompt cache lifetime. On the Claude Code/Codex hook fallback a reminder never extends `keepAliveMaxMinutes` and is
+  spooled only while the keep-alive loop is holding the session.
+
 - `npm run lint` runs oxlint 1.94.0's default correctness rules over all TypeScript and JavaScript sources, scripts
   and tests, with warnings treated as errors, then ruff 0.17.5 (`E4`/`E7`/`E9`/`F`, Python 3.11 target) over the
   Hermes Python adapter and its test. It is part of `release:check` (and so `make check`) and fails PR CI. Without

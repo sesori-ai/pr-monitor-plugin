@@ -46,6 +46,22 @@ Only one such instant failure report is sent per commit. Later failures on the s
 normal report. A check that was already failing when the monitor started is not new: it shows up in the startup
 report when `announceOnStart` is on, not as an instant alert.
 
+### Idle reminders
+
+An agent sometimes ends its turn expecting a review, a check, or a comment that never comes. When an open PR has had
+no activity and no report for `idleReminderMinutes` (default 25), the monitor sends a short idle reminder instead: it
+names the PR, says how long it has been idle, summarizes CI, mergeability, reviews, unresolved threads, and readiness,
+and asks the agent to re-check the PR and either act or call `mark_ready`. The timer runs from the later of the last
+activity and the last report or ready action, so another reminder follows one delay later while the PR stays still.
+`0` turns reminders off. They are checked at each poll, so they fire up to one `pollIntervalSeconds` late.
+
+There is no reminder while activity is waiting for its batched report, or after the PR merges or closes. A ready PR
+with auto-merge off has been handed to a human, so it gets no reminder. With auto-merge on, a ready PR that is still
+open means the merge did not go through, so the reminder asks the agent to find out why and retry with `mark_ready`.
+
+The default of 25 minutes stays under the agent's roughly 30-minute prompt cache lifetime, so a reminder does not wake
+the session into a much more expensive request.
+
 ## What a report contains
 
 Reports state facts and name people. They never quote comment bodies. A full report has:

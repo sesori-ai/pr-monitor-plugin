@@ -21,6 +21,10 @@ host loaders, authenticated GitHub state, and ready-label mutation.
   never infer a target from the current directory.
 - Ordinary activity is debounced from the latest visible change. A due report waits for running CI only up to
   `maxCiWaitMinutes`. Entering CI `running` and non-failing per-check progress are not ordinary activity.
+- With `idleReminderMinutes` above 0 (default 25), an OPEN PR with no activity, no buffered report, and no delivered
+  report or manual ready action for that long gets one idle reminder per delay. A ready PR with auto-merge off gets
+  none; one with auto-merge on does. On the Claude/Codex spool fallback, a reminder never extends
+  `keepAliveMaxMinutes` and is dropped unless the keep-alive loop holds the session.
 - With `flushOnCiFailure` enabled, a newly failing check is urgent and bypasses both debounce and the CI hold.
   Newly definite merge conflict, merge, and close are always urgent. Instant CI failure is limited to one delivery
   per head commit; the concluded suite can report later.
@@ -281,6 +285,8 @@ reconciliation, cleanup failure, and marker-label failure.
   marker failure falsely reports a successful merge as failed.
 - A canceled session transition loses a watch, a successful transition retains an old timer, or an old session
   delivers into/removes readiness from a successor watch or overlaps its standalone readiness mutation.
+- An idle reminder fires while activity awaits its report, after a recent report, for a handed-off ready PR with
+  auto-merge off, or with `idleReminderMinutes: 0`; or a reminder extends the keep-alive cap.
 - An agent creates a second wait/poll mechanism, Pi/OMP fails to trigger an idle turn, or a host discovers duplicate
   `monitor-pr` skills.
 

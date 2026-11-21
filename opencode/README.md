@@ -50,6 +50,7 @@ Global settings live in `~/.config/pr-monitor/config.json`. A repository can ove
 - `debounceMinutes`, `maxCiWaitMinutes`, and `pollIntervalSeconds`
 - `ignoreCommentTag`, the prefix agent replies must start with (default `<!-- pr-monitor:reply -->`)
 - `announceOnStart` and `flushOnCiFailure`
+- `idleReminderMinutes`, minutes of no activity before the agent is reminded about an open PR (default 25, `0` off)
 - `readyLabel` and `autoMerge`
 
 To merge ready PRs automatically, set `autoMerge: true` in the global file or a trusted project file. Project config

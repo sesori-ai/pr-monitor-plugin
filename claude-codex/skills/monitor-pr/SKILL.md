@@ -114,6 +114,9 @@ creating sleeps or polling loops.
   unchanged readiness is not retried. A changed head instead cancels standalone
   readiness. Inspect the result, address any blocker, then use `mark_ready` only
   when an explicit new attempt is warranted.
+- An idle reminder means the PR had no activity and no report for the
+  configured delay. Re-check the current head's checks, expected reviews, and
+  feedback now; act on what is left, or call `mark_ready` when nothing is.
 - A merged/closed report is terminal; the monitor stopped itself.
 
 When feedback needs a response, begin the GitHub reply with the configured
