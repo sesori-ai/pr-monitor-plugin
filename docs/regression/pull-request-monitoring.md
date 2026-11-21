@@ -244,8 +244,8 @@ overrides both JSON layers.
   start, report, and stop.
 - **L2 Routine:** Automated activity/readiness, acknowledgement ordering, same-account follow-ups,
   debounce/hold/urgency, report baselines, mutation/delivery retry, global/project/environment config layering,
-  head-fenced title-only auto-merge calls, startup reset, actions, races, and timer cleanup on Node 22 across Linux,
-  macOS, and Windows.
+  head-fenced title-only auto-merge calls, startup reset, actions, races, and timer cleanup on Node 22 (runtime
+  floor) and Node 26 (current LTS) across Linux, macOS, and Windows.
 - **L3 Release:** Shared-session adapter contracts represent OpenCode, Claude, Pi, and OMP. Packed OpenCode plus
   bundled Claude checks cover owning-session delivery, reload/process lifecycle, spool/hook injection, and handoff.
 - **L4 Extended:** Actual minimum and current Pi/OMP loaders, busy/idle steering, trust/config paths, successful and

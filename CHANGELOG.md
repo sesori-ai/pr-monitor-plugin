@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Development tooling: TypeScript 7.0.2 (was 5.9.3), esbuild 0.28.2, tsx 4.23.15 and `@types/node` 24.19.2;
+  `@modelcontextprotocol/sdk` (1.32.2) and `zod` (4.6.7) ranges now match the bundled versions. Committed
+  Claude/Codex and Hermes bundles rebuild byte-identical, and the published OpenCode declaration is unchanged.
+- CI runs on Node 22 (runtime floor) and Node 26 (current LTS) across Linux, macOS and Windows, uses
+  `actions/checkout`, `actions/setup-node` and `actions/setup-python` v7, and Bun 1.4.5.
+- The pack check's consumer type checks pass `--ignoreConfig`, which TypeScript 6+ requires when files are given on
+  the command line next to a `tsconfig.json`.
+- The OpenCode loader check accepts the plugin directory as the reported source path, which OpenCode 2.3.x reports
+  instead of the resolved entrypoint; it now passes on both the 2.1.4 floor and the current 2.3.2.
+
+### Security
+
+- Development-only `hono` (4.13.19) and `@hono/node-server` (2.1.9), pulled in by the MCP SDK's unused HTTP
+  transport, are updated past their advisories; neither is in a shipped bundle.
+
 ## [0.9.0]
 
 ### Added

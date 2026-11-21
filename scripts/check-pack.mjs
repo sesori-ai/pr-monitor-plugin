@@ -117,6 +117,7 @@ try {
     [
       resolve("node_modules/typescript/bin/tsc"),
       "--noEmit",
+      "--ignoreConfig",
       "--module",
       "NodeNext",
       "--moduleResolution",
@@ -178,6 +179,7 @@ try {
     [
       resolve("node_modules/typescript/bin/tsc"),
       "--noEmit",
+      "--ignoreConfig",
       "--module",
       "NodeNext",
       "--moduleResolution",
