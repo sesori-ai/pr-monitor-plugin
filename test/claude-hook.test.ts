@@ -48,6 +48,7 @@ test("Claude plugin root contains the exact tracked release payload", () => {
     "hooks/drain-spool.mjs",
     "hooks/hooks.json",
     "skills/monitor-pr/SKILL.md",
+    "src/delivery.ts",
     "src/mcp-server.ts",
     "src/push.ts",
     "src/session-state.ts",

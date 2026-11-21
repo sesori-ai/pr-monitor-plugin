@@ -39125,15 +39125,14 @@ function createNodeGhRunner() {
 function planDelivery({
   kind,
   hasPushChannel,
-  keepAlive,
-  handedOff,
+  keepAliveArmed,
   nowMs,
   keepAliveUntilMs
 }) {
   const reminder = kind === "idle_reminder" /* idleReminder */;
   if (hasPushChannel) return { route: "push" /* push */, extendKeepAlive: !reminder };
   if (!reminder) return { route: "spool" /* spool */, extendKeepAlive: true };
-  const held = keepAlive && !handedOff && nowMs < keepAliveUntilMs;
+  const held = keepAliveArmed && nowMs < keepAliveUntilMs;
   return { route: held ? "spool" /* spool */ : "drop" /* drop */, extendKeepAlive: false };
 }
 
@@ -39347,9 +39346,11 @@ var createAdapter = ({ sessionId, projectDir }) => {
   let keepAliveUntilMs = 0;
   const STATE_LIVENESS_FLOOR_MS = 5 * 6e4;
   let monitorSession;
+  const activeWatches = () => monitorSession.list().filter(({ target }) => !handedOff.has(targetRegistryKey(target)));
+  const keepAliveArmed = () => activeWatches().some(({ config: config2 }) => config2.keepAlive);
   const refreshSessionState = () => {
     const watches = monitorSession.list();
-    const active = watches.filter(({ target }) => !handedOff.has(targetRegistryKey(target)));
+    const active = activeWatches();
     const pollMs = Math.max(...watches.map(({ config: config2 }) => config2.pollIntervalSeconds * 1e3), 0);
     writeSessionState(claudePid, {
       version: 1,
@@ -39357,7 +39358,7 @@ var createAdapter = ({ sessionId, projectDir }) => {
       // wakes it by itself, so the Stop hook must not hold turn-end. A failed
       // push is retried by the watch at poll cadence (see deliver), never parked
       // behind hooks an idle session cannot fire.
-      keepAlive: pushChannel === void 0 && active.some(({ config: config2 }) => config2.keepAlive),
+      keepAlive: pushChannel === void 0 && keepAliveArmed(),
       expiresAtMs: Date.now() + Math.max(pollMs * 3 + 6e4, STATE_LIVENESS_FLOOR_MS),
       keepAliveUntilMs,
       monitors: active.map(({ target }) => targetKey(target))
@@ -39375,8 +39376,7 @@ var createAdapter = ({ sessionId, projectDir }) => {
     const plan = planDelivery({
       kind,
       hasPushChannel: pushChannel !== void 0,
-      keepAlive: config2.keepAlive,
-      handedOff: handedOff.has(targetRegistryKey(target)),
+      keepAliveArmed: keepAliveArmed(),
       nowMs: Date.now(),
       keepAliveUntilMs
     });

@@ -62,9 +62,13 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
 
   let monitorSession: MonitorSession<ClaudeMonitorConfig>
 
+  const activeWatches = () => monitorSession.list().filter(({ target }) => !handedOff.has(targetRegistryKey(target)))
+  // Whether the Stop hook holds the session open for the hook-based loop.
+  const keepAliveArmed = (): boolean => activeWatches().some(({ config }) => config.keepAlive)
+
   const refreshSessionState = (): void => {
     const watches = monitorSession.list()
-    const active = watches.filter(({ target }) => !handedOff.has(targetRegistryKey(target)))
+    const active = activeWatches()
     const pollMs = Math.max(...watches.map(({ config }) => config.pollIntervalSeconds * 1000), 0)
     writeSessionState(claudePid, {
       version: 1,
@@ -72,7 +76,7 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
       // wakes it by itself, so the Stop hook must not hold turn-end. A failed
       // push is retried by the watch at poll cadence (see deliver), never parked
       // behind hooks an idle session cannot fire.
-      keepAlive: pushChannel === undefined && active.some(({ config }) => config.keepAlive),
+      keepAlive: pushChannel === undefined && keepAliveArmed(),
       expiresAtMs: Date.now() + Math.max(pollMs * 3 + 60_000, STATE_LIVENESS_FLOOR_MS),
       keepAliveUntilMs,
       monitors: active.map(({ target }) => targetKey(target)),
@@ -97,8 +101,7 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
     const plan = planDelivery({
       kind,
       hasPushChannel: pushChannel !== undefined,
-      keepAlive: config.keepAlive,
-      handedOff: handedOff.has(targetRegistryKey(target)),
+      keepAliveArmed: keepAliveArmed(),
       nowMs: Date.now(),
       keepAliveUntilMs,
     })

@@ -18,15 +18,16 @@ export type DeliveryPlan = {
 export function planDelivery({
   kind,
   hasPushChannel,
-  keepAlive,
-  handedOff,
+  keepAliveArmed,
   nowMs,
   keepAliveUntilMs,
 }: {
   kind: ReportKind
   hasPushChannel: boolean
-  keepAlive: boolean
-  handedOff: boolean
+  // Session-wide: some watch not yet handed off has keepAlive on. The reminded
+  // PR itself may be handed off (ready with a stuck auto-merge) while another
+  // watch keeps the loop waiting.
+  keepAliveArmed: boolean
   nowMs: number
   keepAliveUntilMs: number
 }): DeliveryPlan {
@@ -38,6 +39,6 @@ export function planDelivery({
   // A spooled report wakes the session only while the keep-alive loop holds
   // it. Drop a reminder nothing would read before the next prompt instead of
   // stacking stale reminders in the spool.
-  const held = keepAlive && !handedOff && nowMs < keepAliveUntilMs
+  const held = keepAliveArmed && nowMs < keepAliveUntilMs
   return { route: held ? DeliveryRoute.spool : DeliveryRoute.drop, extendKeepAlive: false }
 }

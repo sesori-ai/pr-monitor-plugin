@@ -52,7 +52,7 @@ inject them:
 While a PR is not yet ready, the `Stop` hook may hand the agent the exact `claude-codex/hooks/await-activity.mjs`
 command to run. That is the only waiting command the agent is allowed to use. Two settings control this fallback:
 `keepAliveMaxMinutes` caps how long it waits and `keepAlive: false` turns it off. Hosts with the socket ignore both.
-An idle reminder does not extend that cap. It is spooled only while the loop is still holding the session; otherwise
+An idle reminder does not extend that cap. It is spooled only while the loop is still holding the session for any watched PR; otherwise
 it is dropped, so stale reminders do not pile up for your next prompt.
 
 `desktopNotifications: true` is separate from the fallback and is not tied to the socket. It makes a best-effort
