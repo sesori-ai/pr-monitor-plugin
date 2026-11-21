@@ -161,7 +161,11 @@ try {
     const local = await waitForPlugins({ client })
     const plugin = local.filter((entry) => entry.id === PLUGIN_ID)
     assert.equal(plugin.length, 1, "exactly one pr-monitor plugin is active")
-    assert.equal(plugin[0].source.path, pluginEntrypoint, "the built bundle is the loaded entrypoint")
+    // OpenCode 2.1.x reports the resolved entrypoint; 2.3.x reports the configured plugin directory.
+    assert.ok(
+      [pluginEntrypoint, pluginDirectory].includes(plugin[0].source.path),
+      `the built bundle is the loaded entrypoint (got ${plugin[0].source.path})`,
+    )
 
     const tools = (await client.tools()).filter((tool) => tool.id === "pr_monitor")
     assert.equal(tools.length, 1, "exactly one pr_monitor tool is registered")
