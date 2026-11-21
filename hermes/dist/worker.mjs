@@ -1191,6 +1191,9 @@ var PrWatch = class {
   autoMergeNotice;
   // Mutable so set_auto_merge can toggle a running watch.
   autoMerge;
+  // The ready label is present but the last auto-merge attempt was rejected or
+  // its outcome is unknown. Cleared when readiness or auto-merge goes away.
+  mergeStuck = false;
   // Set when set_auto_merge removes the label from an eligible PR. Like the
   // startup reset, activity buffered before it must not restore readiness (and
   // merge) on its own; activity observed by a later poll or a manual ready
@@ -1317,6 +1320,10 @@ ${autoMerge}`;
       const snapshot = this.snapshot;
       if (!enabled || readiness === void 0 || snapshot === void 0 || !hasReadyLabel(snapshot, readiness.label)) {
         this.autoMerge = autoMerge;
+        if (!enabled && this.mergeStuck) {
+          this.mergeStuck = false;
+          this.notifyReadyChanged(true);
+        }
         return `Auto-merge ${enabled ? "enabled" : "disabled"} for ${targetKey(this.target)}.`;
       }
       return await this.trackReadinessMutation(async () => {
@@ -1733,9 +1740,14 @@ ${autoMerge}`;
       notice = await autoMerge.squashMerge({
         pullRequest: { title: snapshot.title, headSha: snapshot.headSha }
       });
+      this.mergeStuck = false;
     } catch (error) {
       notice = autoMergeFailureText({ error });
       this.deps.log(`auto-merge failed for ${targetKey(this.target)}: ${error}`);
+      if (!(error instanceof AutoMergeHeadChangedError)) {
+        this.mergeStuck = true;
+        this.notifyReadyChanged(true);
+      }
     }
     if (report) this.autoMergeNotice = notice;
     return notice;
@@ -1747,8 +1759,9 @@ ${autoMerge}`;
     this.reportedReadinessError = void 0;
   }
   notifyReadyChanged(ready) {
+    if (!ready) this.mergeStuck = false;
     try {
-      this.deps.readiness?.onChanged(ready);
+      this.deps.readiness?.onChanged(ready, ready && this.mergeStuck);
     } catch (error) {
       this.deps.log(`ready-state observer failed for ${targetKey(this.target)}: ${error}`);
     }
@@ -2178,7 +2191,7 @@ ${resetRace.watch.statusLine()}` };
           label: config.readyLabel,
           replyPrefix: config.ignoreCommentTag ?? "<!-- pr-monitor:reply -->",
           change: (ready) => ready ? addReadyLabel(this.deps.runGh, target, config.readyLabel) : removeReadyLabel(this.deps.runGh, target, config.readyLabel),
-          onChanged: (ready) => this.notifyReadyChanged({ target, ready, watched: true, config })
+          onChanged: (ready, mergeStuck) => this.notifyReadyChanged({ target, ready, watched: true, mergeStuck, config })
         },
         autoMerge: this.autoMergeDeps({ target, enabled: config.autoMerge }),
         startupNotice
@@ -2376,7 +2389,7 @@ ${failure}`;
         }
       }
     }
-    this.notifyReadyChanged({ target, ready: effectiveReady, watched: false, config });
+    this.notifyReadyChanged({ target, ready: effectiveReady, watched: false, mergeStuck: false, config });
     return { text, ready: { target, ready: effectiveReady, watched: false } };
   }
   async withdrawUnsafeStandaloneReadiness({

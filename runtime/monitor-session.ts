@@ -87,7 +87,14 @@ type MonitorSessionDeps<TConfig extends MonitorConfig> = {
   cancel?: (input: { timer: unknown }) => void
   onWatchChanged?: (event: { type: WatchChangeType; target: Target; config: TConfig }) => void
   onTickSettled?: (event: { target: Target; config: TConfig }) => void
-  onReadyChanged?: (event: { target: Target; ready: boolean; watched: boolean; config: TConfig }) => void
+  onReadyChanged?: (event: {
+    target: Target
+    ready: boolean
+    watched: boolean
+    // Ready, but the auto-merge attempt was rejected or came back unknown.
+    mergeStuck: boolean
+    config: TConfig
+  }) => void
   statusSuffix?: (input: { target: Target; config: TConfig }) => string
 }
 
@@ -489,7 +496,8 @@ export class MonitorSession<TConfig extends MonitorConfig> {
             ready
               ? addReadyLabel(this.deps.runGh, target, config.readyLabel)
               : removeReadyLabel(this.deps.runGh, target, config.readyLabel),
-          onChanged: (ready) => this.notifyReadyChanged({ target, ready, watched: true, config }),
+          onChanged: (ready, mergeStuck) =>
+            this.notifyReadyChanged({ target, ready, watched: true, mergeStuck, config }),
         },
         autoMerge: this.autoMergeDeps({ target, enabled: config.autoMerge }),
         startupNotice,
@@ -717,7 +725,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
         }
       }
     }
-    this.notifyReadyChanged({ target, ready: effectiveReady, watched: false, config })
+    this.notifyReadyChanged({ target, ready: effectiveReady, watched: false, mergeStuck: false, config })
     return { text, ready: { target, ready: effectiveReady, watched: false } }
   }
 
@@ -770,7 +778,13 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     }
   }
 
-  private notifyReadyChanged(event: { target: Target; ready: boolean; watched: boolean; config: TConfig }): void {
+  private notifyReadyChanged(event: {
+    target: Target
+    ready: boolean
+    watched: boolean
+    mergeStuck: boolean
+    config: TConfig
+  }): void {
     try {
       this.deps.onReadyChanged?.(event)
     } catch (error) {

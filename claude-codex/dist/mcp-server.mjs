@@ -37868,6 +37868,9 @@ var PrWatch = class {
   autoMergeNotice;
   // Mutable so set_auto_merge can toggle a running watch.
   autoMerge;
+  // The ready label is present but the last auto-merge attempt was rejected or
+  // its outcome is unknown. Cleared when readiness or auto-merge goes away.
+  mergeStuck = false;
   // Set when set_auto_merge removes the label from an eligible PR. Like the
   // startup reset, activity buffered before it must not restore readiness (and
   // merge) on its own; activity observed by a later poll or a manual ready
@@ -37994,6 +37997,10 @@ ${autoMerge}`;
       const snapshot = this.snapshot;
       if (!enabled || readiness === void 0 || snapshot === void 0 || !hasReadyLabel(snapshot, readiness.label)) {
         this.autoMerge = autoMerge;
+        if (!enabled && this.mergeStuck) {
+          this.mergeStuck = false;
+          this.notifyReadyChanged(true);
+        }
         return `Auto-merge ${enabled ? "enabled" : "disabled"} for ${targetKey(this.target)}.`;
       }
       return await this.trackReadinessMutation(async () => {
@@ -38410,9 +38417,14 @@ ${autoMerge}`;
       notice = await autoMerge.squashMerge({
         pullRequest: { title: snapshot.title, headSha: snapshot.headSha }
       });
+      this.mergeStuck = false;
     } catch (error62) {
       notice = autoMergeFailureText({ error: error62 });
       this.deps.log(`auto-merge failed for ${targetKey(this.target)}: ${error62}`);
+      if (!(error62 instanceof AutoMergeHeadChangedError)) {
+        this.mergeStuck = true;
+        this.notifyReadyChanged(true);
+      }
     }
     if (report) this.autoMergeNotice = notice;
     return notice;
@@ -38424,8 +38436,9 @@ ${autoMerge}`;
     this.reportedReadinessError = void 0;
   }
   notifyReadyChanged(ready) {
+    if (!ready) this.mergeStuck = false;
     try {
-      this.deps.readiness?.onChanged(ready);
+      this.deps.readiness?.onChanged(ready, ready && this.mergeStuck);
     } catch (error62) {
       this.deps.log(`ready-state observer failed for ${targetKey(this.target)}: ${error62}`);
     }
@@ -38855,7 +38868,7 @@ ${resetRace.watch.statusLine()}` };
           label: config2.readyLabel,
           replyPrefix: config2.ignoreCommentTag ?? "<!-- pr-monitor:reply -->",
           change: (ready) => ready ? addReadyLabel(this.deps.runGh, target, config2.readyLabel) : removeReadyLabel(this.deps.runGh, target, config2.readyLabel),
-          onChanged: (ready) => this.notifyReadyChanged({ target, ready, watched: true, config: config2 })
+          onChanged: (ready, mergeStuck) => this.notifyReadyChanged({ target, ready, watched: true, mergeStuck, config: config2 })
         },
         autoMerge: this.autoMergeDeps({ target, enabled: config2.autoMerge }),
         startupNotice
@@ -39053,7 +39066,7 @@ ${failure2}`;
         }
       }
     }
-    this.notifyReadyChanged({ target, ready: effectiveReady, watched: false, config: config2 });
+    this.notifyReadyChanged({ target, ready: effectiveReady, watched: false, mergeStuck: false, config: config2 });
     return { text, ready: { target, ready: effectiveReady, watched: false } };
   }
   async withdrawUnsafeStandaloneReadiness({
@@ -39122,6 +39135,13 @@ function createNodeGhRunner() {
 }
 
 // claude-codex/src/delivery.ts
+function isHandedOff({
+  ready,
+  watched,
+  mergeStuck
+}) {
+  return ready && watched && !mergeStuck;
+}
 function planDelivery({
   kind,
   hasPushChannel,
@@ -39403,12 +39423,10 @@ var createAdapter = ({ sessionId, projectDir }) => {
       refreshSessionState();
     },
     onTickSettled: refreshSessionState,
-    onReadyChanged: ({ target, ready, watched, config: config2 }) => {
-      if (ready && watched) handedOff.add(targetRegistryKey(target));
-      if (!ready) {
-        handedOff.delete(targetRegistryKey(target));
-        if (watched) extendKeepAlive({ config: config2 });
-      }
+    onReadyChanged: ({ target, ready, watched, mergeStuck, config: config2 }) => {
+      if (isHandedOff({ ready, watched, mergeStuck })) handedOff.add(targetRegistryKey(target));
+      else handedOff.delete(targetRegistryKey(target));
+      if (!ready && watched) extendKeepAlive({ config: config2 });
       refreshSessionState();
     },
     statusSuffix: ({ target }) => handedOff.has(targetRegistryKey(target)) ? ", handed off (ready)" : ""

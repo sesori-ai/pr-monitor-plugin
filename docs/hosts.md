@@ -52,7 +52,8 @@ inject them:
 While a PR is not yet ready, the `Stop` hook may hand the agent the exact `claude-codex/hooks/await-activity.mjs`
 command to run. That is the only waiting command the agent is allowed to use. Two settings control this fallback:
 `keepAliveMaxMinutes` caps how long it waits and `keepAlive: false` turns it off. Hosts with the socket ignore both.
-An idle reminder does not extend that cap. It is spooled only while the loop is still holding the session for any watched PR; otherwise
+A ready PR whose auto-merge attempt was rejected or came back unknown still counts as unfinished, so the loop keeps
+waiting for it within the same cap. An idle reminder does not extend that cap. It is spooled only while the loop is still holding the session for any watched PR; otherwise
 it is dropped, so stale reminders do not pile up for your next prompt.
 
 `desktopNotifications: true` is separate from the fallback and is not tied to the socket. It makes a best-effort
@@ -95,7 +96,8 @@ Codex's own documentation: [Review and trust hooks](https://learn.chatgpt.com/do
 ### How reports arrive
 
 Codex has no messaging socket. Reports are tied to your conversation's thread ID and delivered from a spool by the
-trusted hooks. The keep-alive waiter runs only until the ready handoff. After that, feedback or merge/close reports
+trusted hooks. The keep-alive waiter runs only until the ready handoff (a ready PR with a rejected or unknown auto-merge is not handed
+off). After that, feedback or merge/close reports
 wait in the queue until your next prompt or hook event. Desktop notifications can tell you something is waiting but
 cannot start a turn.
 

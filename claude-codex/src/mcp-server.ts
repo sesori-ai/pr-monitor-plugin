@@ -35,7 +35,7 @@ import {
   THREAD_PARAM_DESCRIPTION,
   MonitorAction,
 } from "../../runtime/tool"
-import { DeliveryRoute, planDelivery } from "./delivery"
+import { DeliveryRoute, isHandedOff, planDelivery } from "./delivery"
 import { messagingChannel, pushMessage } from "./push"
 import { writeSessionState } from "./session-state"
 import { claimSpool, collectDeadSpools, notifyDesktop, probeSpool, spoolReport, SPOOL_ROOT, startToken } from "./spool"
@@ -134,12 +134,10 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
       refreshSessionState()
     },
     onTickSettled: refreshSessionState,
-    onReadyChanged: ({ target, ready, watched, config }) => {
-      if (ready && watched) handedOff.add(targetRegistryKey(target))
-      if (!ready) {
-        handedOff.delete(targetRegistryKey(target))
-        if (watched) extendKeepAlive({ config })
-      }
+    onReadyChanged: ({ target, ready, watched, mergeStuck, config }) => {
+      if (isHandedOff({ ready, watched, mergeStuck })) handedOff.add(targetRegistryKey(target))
+      else handedOff.delete(targetRegistryKey(target))
+      if (!ready && watched) extendKeepAlive({ config })
       refreshSessionState()
     },
     statusSuffix: ({ target }) =>

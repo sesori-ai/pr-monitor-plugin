@@ -24,7 +24,8 @@ host loaders, authenticated GitHub state, and ready-label mutation.
 - With `idleReminderMinutes` above 0 (default 25), an OPEN PR with no activity, no buffered report, and no delivered
   report or manual ready action for that long gets one idle reminder per delay. A ready PR with auto-merge off gets
   none; one with auto-merge on does. On the Claude/Codex spool fallback, a reminder never extends
-  `keepAliveMaxMinutes` and is dropped unless the keep-alive loop holds the session.
+  `keepAliveMaxMinutes` and is dropped unless the keep-alive loop holds the session. A ready PR whose auto-merge was
+  rejected or came back unknown is not handed off, so it keeps that loop armed within the same cap.
 - With `flushOnCiFailure` enabled, a newly failing check is urgent and bypasses both debounce and the CI hold.
   Newly definite merge conflict, merge, and close are always urgent. Instant CI failure is limited to one delivery
   per head commit; the concluded suite can report later.

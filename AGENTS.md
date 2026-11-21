@@ -219,7 +219,10 @@ Hermes plugin version is part of the lockstep release check. Rebuild and commit 
   `claude-codex/hooks/await-activity.mjs`, which blocks until a report is spooled: one model round trip per real event.
   `session-state.ts` publishes liveness and the rolling `keepAliveMaxMinutes` idle deadline. The MCP server refreshes
   it on watch/handoff changes and every poll tick; a lapsed heartbeat tells hooks that the server died. Confirmed
-  automatic/manual readiness adds the normalized target to `handedOff`; confirmed withdrawal removes it. Report
+  automatic/manual readiness adds the normalized target to `handedOff`; confirmed withdrawal removes it. A ready PR whose
+  auto-merge attempt was rejected or came back unknown (`mergeStuck` from `PrWatch`, cleared by withdrawal or
+  turning auto-merge off) is not handed off (`isHandedOff`, `claude-codex/src/delivery.ts`), so the loop stays armed for
+  its idle reminder within the same cap. Report
   delivery alone does not change handoff, so resolution-only activity can report without reopening keep-alive.
   The waiter detects reports but never unlinks them; the PostToolUse drain owns exactly-once delivery.
   `drain-spool.mjs` counts blocks that produced no wait to bound tight Stop loops. `.waiter` resets that streak after

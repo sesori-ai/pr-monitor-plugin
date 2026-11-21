@@ -15,6 +15,22 @@ export type DeliveryPlan = {
   extendKeepAlive: boolean
 }
 
+// Whether a watched PR is handed off, which releases the hook-based keep-alive
+// loop. A ready PR whose auto-merge attempt was rejected or came back unknown
+// is still unmerged work, so it keeps the loop armed (still capped by
+// keepAliveMaxMinutes) and its idle reminder can reach the session.
+export function isHandedOff({
+  ready,
+  watched,
+  mergeStuck,
+}: {
+  ready: boolean
+  watched: boolean
+  mergeStuck: boolean
+}): boolean {
+  return ready && watched && !mergeStuck
+}
+
 export function planDelivery({
   kind,
   hasPushChannel,

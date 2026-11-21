@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { DeliveryRoute, planDelivery } from "../claude-codex/src/delivery"
+import { DeliveryRoute, isHandedOff, planDelivery } from "../claude-codex/src/delivery"
 import { ReportKind } from "../core/watch"
 
 const NOW = Date.parse("2026-11-20T12:00:00Z")
@@ -35,4 +35,12 @@ test("spooled idle reminders need the session's keep-alive loop holding and neve
   for (const notHeld of [{ ...held, keepAliveArmed: false }, { ...held, keepAliveUntilMs: NOW }]) {
     assert.deepEqual(plan(notHeld), { route: DeliveryRoute.drop, extendKeepAlive: false })
   }
+})
+
+test("only a watched ready PR without a stuck auto-merge is handed off", () => {
+  assert.equal(isHandedOff({ ready: true, watched: true, mergeStuck: false }), true)
+  // Rejected or unknown auto-merge: still unmerged work, so keep-alive stays armed.
+  assert.equal(isHandedOff({ ready: true, watched: true, mergeStuck: true }), false)
+  assert.equal(isHandedOff({ ready: false, watched: true, mergeStuck: false }), false)
+  assert.equal(isHandedOff({ ready: true, watched: false, mergeStuck: false }), false)
 })

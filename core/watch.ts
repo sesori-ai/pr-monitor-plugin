@@ -9,7 +9,7 @@
 import { detectActivity, hasNewCiFailure, hasNewMergeConflict } from "./activity"
 import type { WatchConfig } from "./config"
 import { ciPhase, PollError, type PrSnapshot } from "./github"
-import { autoMergeFailureText, type AutoMergePullRequest } from "./merge"
+import { AutoMergeHeadChangedError, autoMergeFailureText, type AutoMergePullRequest } from "./merge"
 import {
   assessAutomaticReadiness,
   hasReadinessInvalidation,
@@ -23,7 +23,9 @@ export type ReadinessDeps = {
   label: string
   replyPrefix: string
   change: (ready: boolean) => Promise<string>
-  onChanged: (ready: boolean) => void
+  // mergeStuck: ready, but its auto-merge attempt was rejected or came back
+  // unknown, so the PR is still unmerged work rather than a handoff.
+  onChanged: (ready: boolean, mergeStuck: boolean) => void
 }
 
 export type AutoMergeDeps = {
@@ -106,6 +108,9 @@ export class PrWatch {
   private autoMergeNotice: string | undefined
   // Mutable so set_auto_merge can toggle a running watch.
   private autoMerge: AutoMergeDeps | undefined
+  // The ready label is present but the last auto-merge attempt was rejected or
+  // its outcome is unknown. Cleared when readiness or auto-merge goes away.
+  private mergeStuck = false
   // Set when set_auto_merge removes the label from an eligible PR. Like the
   // startup reset, activity buffered before it must not restore readiness (and
   // merge) on its own; activity observed by a later poll or a manual ready
@@ -248,6 +253,11 @@ export class PrWatch {
       const snapshot = this.snapshot
       if (!enabled || readiness === undefined || snapshot === undefined || !hasReadyLabel(snapshot, readiness.label)) {
         this.autoMerge = autoMerge
+        // Without auto-merge a stuck ready PR is an ordinary handoff again.
+        if (!enabled && this.mergeStuck) {
+          this.mergeStuck = false
+          this.notifyReadyChanged(true)
+        }
         return `Auto-merge ${enabled ? "enabled" : "disabled"} for ${targetKey(this.target)}.`
       }
       return await this.trackReadinessMutation(async () => {
@@ -725,9 +735,16 @@ export class PrWatch {
       notice = await autoMerge.squashMerge({
         pullRequest: { title: snapshot.title, headSha: snapshot.headSha },
       })
+      this.mergeStuck = false
     } catch (error) {
       notice = autoMergeFailureText({ error })
       this.deps.log(`auto-merge failed for ${targetKey(this.target)}: ${error}`)
+      // A changed head is reassessed on the next poll; a rejection or unknown
+      // outcome leaves a ready, unmerged PR that is not retried on its own.
+      if (!(error instanceof AutoMergeHeadChangedError)) {
+        this.mergeStuck = true
+        this.notifyReadyChanged(true)
+      }
     }
     if (report) this.autoMergeNotice = notice
     return notice
@@ -741,8 +758,9 @@ export class PrWatch {
   }
 
   private notifyReadyChanged(ready: boolean): void {
+    if (!ready) this.mergeStuck = false
     try {
-      this.deps.readiness?.onChanged(ready)
+      this.deps.readiness?.onChanged(ready, ready && this.mergeStuck)
     } catch (error) {
       this.deps.log(`ready-state observer failed for ${targetKey(this.target)}: ${error}`)
     }

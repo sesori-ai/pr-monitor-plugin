@@ -107,7 +107,7 @@ Only the shared Claude Code and Codex adapter reads these:
 | Key | Default | What it does |
 |---|---:|---|
 | `desktopNotifications` | `false` | Show an OS notification when a report is delivered or queued. |
-| `keepAlive` | `true` | Keep the hook-based delivery loop running until the ready handoff. |
+| `keepAlive` | `true` | Keep the hook-based delivery loop running until the ready handoff. A ready PR whose auto-merge was rejected or came back unknown is not handed off. |
 | `keepAliveMaxMinutes` | `120` | Longest quiet stretch the hook-based loop will wait. |
 
 Claude Code sessions with a messaging socket ignore the keep-alive settings, because pushed reports already start

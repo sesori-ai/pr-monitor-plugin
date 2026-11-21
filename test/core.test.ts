@@ -108,6 +108,7 @@ function watchHarness(
   const persisted: string[] = []
   const readyChanges: boolean[] = []
   const readyObservations: boolean[] = []
+  const stuckObservations: boolean[] = []
   const autoMerges: Array<{ title: string; headSha: string }> = []
   const watch = new PrWatch({
     target,
@@ -142,7 +143,10 @@ function watchHarness(
               }
               return ready ? "ready added" : "ready removed"
             },
-            onChanged: (ready) => readyObservations.push(ready),
+            onChanged: (ready, mergeStuck) => {
+              readyObservations.push(ready)
+              stuckObservations.push(mergeStuck)
+            },
           }
         : undefined,
       autoMerge: opts.autoMerge
@@ -166,6 +170,7 @@ function watchHarness(
     persisted,
     readyChanges,
     readyObservations,
+    stuckObservations,
     autoMerges,
     get deliveryAttempts() {
       return deliveryAttempts
@@ -862,6 +867,25 @@ test("failed automatic merge keeps readiness and is not retried on later polls",
   assert.match(harness.reports[0]!, /Auto-merge failed after the ready label was added/)
   assert.match(harness.reports[0]!, /no automatic retry will occur/)
   assert.match(harness.reports[0]!, /Ready: YES/)
+})
+
+test("a rejected auto-merge reports the ready PR as stuck until auto-merge is turned off", async () => {
+  const initial = snapshot({ checks: [{ name: "tests", outcome: "pending" }] })
+  const passed = snapshot({ checks: [{ name: "tests", outcome: "success" }] })
+  const harness = watchHarness(initial, [passed], config({ announceOnStart: false }), {
+    readiness: true,
+    autoMerge: true,
+    autoMergeFailures: 1,
+  })
+  await harness.watch.tick()
+  harness.advance(2 * 60_000)
+  await harness.watch.tick()
+  assert.deepEqual(harness.readyObservations, [true, true])
+  assert.deepEqual(harness.stuckObservations, [false, true])
+
+  await harness.watch.setAutoMerge(undefined)
+  assert.deepEqual(harness.readyObservations, [true, true, true])
+  assert.deepEqual(harness.stuckObservations, [false, true, false])
 })
 
 test("manual readiness triggers auto-merge and returns its result", async () => {
