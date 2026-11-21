@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The OpenCode loader check accepts the plugin directory as the reported source path, which OpenCode 2.3.x reports
   instead of the resolved entrypoint; it now passes on both the 2.1.4 floor and the current 2.3.2.
 
+### Fixed
+
+- `test/hermes_adapter_test.py` isolates itself from the developer's global pr-monitor config and
+  `SESORI_PR_MONITOR_AUTO_MERGE`, so running it directly no longer fails when the global config enables autoMerge.
+
 ### Security
 
 - Development-only `hono` (4.13.19) and `@hono/node-server` (2.1.9), pulled in by the MCP SDK's unused HTTP

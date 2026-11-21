@@ -21,6 +21,17 @@ from hermes.bridge import Bridge  # noqa: E402 -- needs ROOT on sys.path first
 from hermes.desktop import DesktopRoute  # noqa: E402 -- needs ROOT on sys.path first
 
 
+def setUpModule():
+    # Bundled workers read ~/.config/pr-monitor/config.json and SESORI_PR_MONITOR_AUTO_MERGE. Point the config at an
+    # empty directory and drop the override so a developer's global settings (e.g. autoMerge) can't change results.
+    config_home = tempfile.TemporaryDirectory()
+    unittest.addModuleCleanup(config_home.cleanup)
+    environment = patch.dict(os.environ, {"XDG_CONFIG_HOME": config_home.name})
+    environment.start()
+    unittest.addModuleCleanup(environment.stop)
+    os.environ.pop("SESORI_PR_MONITOR_AUTO_MERGE", None)
+
+
 class DesktopTests(unittest.TestCase):
     def setUp(self):
         self.bound = contextvars.ContextVar("test_transport", default=None)
