@@ -1,0 +1,6 @@
+# Lints the Hermes Python adapter and its test. Hermes needs Python 3.11+.
+target-version = "py311"
+
+[lint]
+# Ruff's classic default set (pycodestyle errors + Pyflakes), pinned because newer releases widen the default.
+select = ["E4", "E7", "E9", "F"]

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `npm run lint` runs oxlint 1.94.0's default correctness rules over all TypeScript and JavaScript sources, scripts
+  and tests, with warnings treated as errors, then ruff 0.17.5 (`E4`/`E7`/`E9`/`F`, Python 3.11 target) over the
+  Hermes Python adapter and its test. It is part of `release:check` (and so `make check`) and fails PR CI. Without
+  ruff 0.17.5 on PATH or `uvx`, local runs print that Python lint was not run; CI fails instead.
+
 ### Changed
 
 - Development tooling: TypeScript 7.0.2 (was 5.9.3), esbuild 0.28.2, tsx 4.23.15 and `@types/node` 24.19.2;
