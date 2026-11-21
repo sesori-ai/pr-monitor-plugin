@@ -39539,7 +39539,7 @@ process4.on("SIGTERM", shutdown);
 process4.on("SIGINT", shutdown);
 claimSpool(claudePid);
 collectDeadSpools(claudePid);
-var server = new McpServer({ name: "pr-monitor", version: "0.9.0" });
+var server = new McpServer({ name: "pr-monitor", version: "0.10.0" });
 server.registerTool(
   "pr_monitor",
   {

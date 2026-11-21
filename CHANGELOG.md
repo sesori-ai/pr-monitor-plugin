@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0]
+
 ### Added
 
 - Idle reminders: when a watched open PR has had no activity and no report for `idleReminderMinutes` (default 25,
