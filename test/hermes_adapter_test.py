@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 import queue
-import shutil
 import sys
 import tempfile
 import threading
@@ -16,9 +15,9 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from hermes import register
-from hermes.bridge import Bridge
-from hermes.desktop import DesktopRoute
+from hermes import register  # noqa: E402 -- needs ROOT on sys.path first
+from hermes.bridge import Bridge  # noqa: E402 -- needs ROOT on sys.path first
+from hermes.desktop import DesktopRoute  # noqa: E402 -- needs ROOT on sys.path first
 
 
 class DesktopTests(unittest.TestCase):

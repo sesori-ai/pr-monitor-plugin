@@ -9,3 +9,4 @@ pi/skills/
 
 __pycache__/
 *.pyc
+.ruff_cache/

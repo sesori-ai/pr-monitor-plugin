@@ -22,7 +22,7 @@
     "host:check:omp": "npm run build:pi && node scripts/run-omp-loader-check.mjs",
     "version:check": "node scripts/check-versions.mjs",
     "release:check": "npm run lint && npm test && npm run typecheck && npm run build && npm run version:check && npm run pack:check && npm run host:check",
-    "lint": "oxlint --deny-warnings core runtime opencode pi claude-codex/src claude-codex/hooks hermes/src scripts test"
+    "lint": "oxlint --deny-warnings core runtime opencode pi claude-codex/src claude-codex/hooks hermes/src scripts test && node scripts/lint-python.mjs"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "1.4.0",
