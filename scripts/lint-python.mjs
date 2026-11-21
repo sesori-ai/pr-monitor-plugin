@@ -1,4 +1,4 @@
-// Lints the Hermes Python adapter with a pinned ruff (rules in ruff.toml).
+// Lints and format-checks the Hermes Python adapter with a pinned ruff (settings in ruff.toml).
 // Uses ruff from PATH when it is the pinned version, otherwise `uvx ruff@<pinned>`.
 // Without either it says so loudly; under CI that is a failure, locally it is not.
 import { spawnSync } from "node:child_process"
@@ -27,5 +27,10 @@ if (runner === undefined) {
 }
 
 const [command, prefix] = runner
-const result = spawnSync(command, [...prefix, "check", ...targets], { stdio: "inherit" })
-process.exit(result.status ?? 1)
+let failed = false
+for (const step of [["check"], ["format", "--check"]]) {
+  const result = spawnSync(command, [...prefix, ...step, ...targets], { stdio: "inherit" })
+  if (result.status !== 0) failed = true
+}
+if (failed) console.error("Python lint failed. Run `ruff format hermes test/hermes_adapter_test.py` to fix formatting.")
+process.exit(failed ? 1 : 0)

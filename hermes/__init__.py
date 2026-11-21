@@ -1,4 +1,5 @@
 """Desktop/TUI PR monitoring and host-independent label actions for Hermes."""
+
 from __future__ import annotations
 
 import atexit
@@ -12,6 +13,7 @@ from .desktop import DesktopRoute
 
 class ActionRoute:
     """Standalone label actions need lifecycle ownership, but no report route."""
+
     def __init__(self, session_id):
         self.session_id = session_id
 
@@ -36,15 +38,19 @@ def register(ctx):
     def capture(session_id):
         from gateway.session_context import get_session_env
         from agent.runtime_cwd import resolve_agent_cwd
+
         sid = get_session_env("HERMES_UI_SESSION_ID")
         route = DesktopRoute.capture(session_id, sid)
         if route is None:
-            raise RuntimeError("Background PR monitoring requires Hermes Desktop/TUI. CLI, messaging gateways and ACP do not provide conversation-bound report delivery; standalone mark_ready/unmark_ready/feedback/reply actions remain available.")
+            raise RuntimeError(
+                "Background PR monitoring requires Hermes Desktop/TUI. CLI, messaging gateways and ACP do not provide conversation-bound report delivery; standalone mark_ready/unmark_ready/feedback/reply actions remain available."
+            )
         return ("desktop", sid), route, str(resolve_agent_cwd().resolve())
 
     def capture_action(session_id):
         from agent.runtime_cwd import resolve_agent_cwd
         from gateway.session_context import get_session_env
+
         cwd = str(resolve_agent_cwd().resolve())
         sid = get_session_env("HERMES_UI_SESSION_ID")
         with lock:
@@ -66,6 +72,7 @@ def register(ctx):
             if not session_id and not is_ready_action:
                 raise RuntimeError("Hermes did not provide a conversation identity")
             from agent.delegation_context import is_delegated_child_context
+
             if is_delegated_child_context():
                 raise RuntimeError("Start PR Monitor in the owning conversation, not a delegated child")
             with lock:
@@ -81,7 +88,9 @@ def register(ctx):
                 if closed:
                     raise RuntimeError("PR Monitor plugin was unloaded")
                 if session_id in finalizing or admission.is_set() or (not is_ready_action and not route.alive()):
-                    raise RuntimeError("Hermes conversation changed during monitor admission; retry in a live conversation")
+                    raise RuntimeError(
+                        "Hermes conversation changed during monitor admission; retry in a live conversation"
+                    )
                 bridge = bridges.get(key)
                 if bridge is not None and (bridge._closed or not bridge.route.alive()):
                     bridges.pop(key)
@@ -126,7 +135,9 @@ def register(ctx):
             for admission in admissions.get(retired_id, ()):
                 admission.set()
             finalizing[retired_id] = finalizing.get(retired_id, 0) + 1
-            doomed = [key for key, bridge in bridges.items() if bridge.route.owns(retired_id) or not bridge.route.alive()]
+            doomed = [
+                key for key, bridge in bridges.items() if bridge.route.owns(retired_id) or not bridge.route.alive()
+            ]
             stopped = [bridges.pop(key) for key in doomed]
         try:
             for bridge in stopped:
@@ -146,12 +157,21 @@ def register(ctx):
         for bridge in stopped:
             bridge.close()
 
-    ctx.register_tool(name="pr_monitor", toolset="pr-monitor", schema=schema, handler=handle,
-                      description="Watch GitHub PRs and act on automatically delivered reports", emoji="🔎")
+    ctx.register_tool(
+        name="pr_monitor",
+        toolset="pr-monitor",
+        schema=schema,
+        handler=handle,
+        description="Watch GitHub PRs and act on automatically delivered reports",
+        emoji="🔎",
+    )
     ctx.register_hook("on_session_finalize", finalize)
     ctx.register_hook("on_session_reset", finalize)
     ctx.on_unload(close_all)
     atexit.register(close_all)
     ctx.on_unload(lambda: atexit.unregister(close_all))
     ctx.register_skill("monitor-pr", Path(__file__).parent / "skills" / "monitor-pr" / "SKILL.md")
-    ctx.register_system_prompt_section("pr-monitor.workflow", "Background monitoring requires Hermes Desktop/TUI; other hosts can use standalone mark_ready/unmark_ready/feedback/reply actions. In Desktop/TUI, after opening a GitHub PR, load pr-monitor:monitor-pr with skill_view and call pr_monitor(action='start', pr='owner/repo#123'). Act on every [PR Monitor] report. The monitor owns waiting; end your turn when nothing needs action.")
+    ctx.register_system_prompt_section(
+        "pr-monitor.workflow",
+        "Background monitoring requires Hermes Desktop/TUI; other hosts can use standalone mark_ready/unmark_ready/feedback/reply actions. In Desktop/TUI, after opening a GitHub PR, load pr-monitor:monitor-pr with skill_view and call pr_monitor(action='start', pr='owner/repo#123'). Act on every [PR Monitor] report. The monitor owns waiting; end your turn when nothing needs action.",
+    )

@@ -1,4 +1,5 @@
 """Synchronous Hermes tool calls and asynchronous, acknowledged report delivery."""
+
 from __future__ import annotations
 
 import contextvars
@@ -27,8 +28,13 @@ class Bridge:
         self._closed = False
         self._process = subprocess.Popen(
             ["node", str(Path(__file__).parent / "dist" / "worker.mjs")],
-            cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1,
+            cwd=cwd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
         )
         threading.Thread(target=self._read, daemon=True, name="pr-monitor-results").start()
         threading.Thread(target=self._logs, daemon=True, name="pr-monitor-logs").start()
@@ -47,10 +53,17 @@ class Bridge:
             result = queue.Queue(maxsize=1)
             self._pending[ident] = result
         try:
-            self._send({"type": "command", "id": ident, "action": args.get("action"), "cwd": cwd or self.cwd,
-                        **({"pr": args["pr"]} if "pr" in args else {}),
-                        **({"autoMerge": args["autoMerge"]} if args.get("autoMerge") is not None else {}),
-                        **{key: args[key] for key in ("thread", "body") if args.get(key) is not None}})
+            self._send(
+                {
+                    "type": "command",
+                    "id": ident,
+                    "action": args.get("action"),
+                    "cwd": cwd or self.cwd,
+                    **({"pr": args["pr"]} if "pr" in args else {}),
+                    **({"autoMerge": args["autoMerge"]} if args.get("autoMerge") is not None else {}),
+                    **{key: args[key] for key in ("thread", "body") if args.get(key) is not None},
+                }
+            )
             try:
                 response = result.get(timeout=120)
             except queue.Empty:

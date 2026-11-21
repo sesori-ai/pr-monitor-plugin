@@ -4,6 +4,7 @@ Use its background-turn entry point with explicit empty attachments. The user
 prompt RPC consumes staged attachments, so it is unsuitable for notifications.
 Never start a gateway or resume a closed conversation to deliver a report.
 """
+
 from __future__ import annotations
 
 import sys
@@ -40,18 +41,22 @@ class DesktopRoute:
 
     def alive(self) -> bool:
         with self.server._sessions_lock:
-            return (not self._cancel.is_set() and self.server._sessions.get(self.sid) is self.record
-                    and not self.record.get("_finalized") and not self.record.get("_closing"))
+            return (
+                not self._cancel.is_set()
+                and self.server._sessions.get(self.sid) is self.record
+                and not self.record.get("_finalized")
+                and not self.record.get("_closing")
+            )
 
     def owns(self, session_id: str) -> bool:
-        return session_id in (self.record.get("session_key"),
-                              getattr(self.record.get("agent"), "session_id", None))
+        return session_id in (self.record.get("session_key"), getattr(self.record.get("agent"), "session_id", None))
 
     def close(self):
         self._cancel.set()
 
     def deliver(self, report: str) -> None:
         from tui_gateway.transport import bind_transport, reset_transport
+
         claimed = False
         with self.server._sessions_lock:
             if not self.alive():
