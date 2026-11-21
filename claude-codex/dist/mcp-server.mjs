@@ -37213,6 +37213,194 @@ function detectActivity(prev, next, lastDefiniteMergeable) {
   return false;
 }
 
+// core/readiness.ts
+function latestComments(comments) {
+  let latestAt = Number.NEGATIVE_INFINITY;
+  let latest = [];
+  for (const comment of comments) {
+    const createdAt = Date.parse(comment.createdAt);
+    if (Number.isNaN(createdAt)) return comments;
+    if (createdAt > latestAt) {
+      latestAt = createdAt;
+      latest = [comment];
+    } else if (createdAt === latestAt) {
+      latest.push(comment);
+    }
+  }
+  return latest;
+}
+function channelIsAcknowledged(comments) {
+  return comments.length > 0 && latestComments(comments).every((comment) => comment.isAgentReply);
+}
+function feedbackChannels(snapshot) {
+  const channels = /* @__PURE__ */ new Map();
+  channels.set("unthreaded", [...snapshot.issueComments, ...snapshot.reviewSummaries]);
+  for (const thread of snapshot.reviewThreads) channels.set(`thread:${thread.id}`, thread.comments);
+  return channels;
+}
+function hasAcknowledgementRegression(prev, next) {
+  const before = feedbackChannels(prev);
+  return [...feedbackChannels(next)].some(([channel, comments]) => {
+    const previous = before.get(channel);
+    if (channel === "unthreaded") {
+      return comments.length > 0 && channelIsAcknowledged(previous ?? []) && !channelIsAcknowledged(comments);
+    }
+    return !channelIsAcknowledged(comments) && (previous === void 0 || channelIsAcknowledged(previous));
+  });
+}
+function ciIsReady(snapshot) {
+  const phase = ciPhase(snapshot);
+  return phase === "none" || phase === "concluded" && snapshot.checks.every((check2) => check2.outcome === "success");
+}
+function assessAutomaticReadiness(snapshot) {
+  const blockers = [];
+  if (snapshot.state !== "OPEN") blockers.push(`PR is ${snapshot.state.toLowerCase()}`);
+  if (!ciIsReady(snapshot)) {
+    blockers.push(ciPhase(snapshot) === "running" ? "CI is running" : "CI is failing");
+  }
+  if (snapshot.mergeable !== "MERGEABLE") {
+    blockers.push(
+      snapshot.mergeable === "CONFLICTING" ? "the PR has a merge conflict" : "mergeability is still unknown"
+    );
+  }
+  const awaitingThreadReplies = snapshot.reviewThreads.filter(
+    (thread) => !channelIsAcknowledged(thread.comments)
+  ).length;
+  if (awaitingThreadReplies > 0) {
+    blockers.push(
+      `${awaitingThreadReplies} review ${awaitingThreadReplies === 1 ? "thread awaits" : "threads await"} a prefixed reply from the local GitHub account`
+    );
+  }
+  const unthreaded = [...snapshot.issueComments, ...snapshot.reviewSummaries];
+  const awaitingUnthreadedReply = unthreaded.length > 0 && !channelIsAcknowledged(unthreaded);
+  if (awaitingUnthreadedReply) {
+    blockers.push("issue or review-summary feedback awaits a prefixed reply from the local GitHub account");
+  }
+  return {
+    eligible: blockers.length === 0,
+    blockers,
+    awaitingThreadReplies,
+    awaitingUnthreadedReply
+  };
+}
+function hasReadyLabel(snapshot, readyLabel) {
+  const normalized = readyLabel.toLowerCase();
+  return snapshot.labels.some((label) => label.toLowerCase() === normalized);
+}
+function withReadyLabel(snapshot, readyLabel, ready) {
+  const normalized = readyLabel.toLowerCase();
+  const withoutReady = snapshot.labels.filter((label) => label.toLowerCase() !== normalized);
+  return { ...snapshot, labels: ready ? [...withoutReady, readyLabel] : withoutReady };
+}
+function hasReadinessInvalidation(prev, next, lastDefiniteMergeable) {
+  if (next.state !== "OPEN") return false;
+  if (prev.headSha !== next.headSha) return true;
+  if (hasNewMergeConflict(lastDefiniteMergeable, next)) return true;
+  if (ciIsReady(prev) && !ciIsReady(next)) return true;
+  if (hasNewCiFailure(prev, next)) return true;
+  if (hasAcknowledgementRegression(prev, next)) return true;
+  if (reviewThreadsReceivedNewComments(prev.reviewThreads, next.reviewThreads)) return true;
+  if (hasAddedRelevantComment(prev.issueComments, next.issueComments)) return true;
+  if (hasAddedRelevantComment(prev.reviewSummaries, next.reviewSummaries)) return true;
+  return false;
+}
+
+// core/feedback.ts
+var MAX_BODY_CHARS = 4e3;
+function collectBodies(payload) {
+  const pr = payload?.data?.repository?.pullRequest;
+  const bodies = /* @__PURE__ */ new Map();
+  const add = (node2) => {
+    if (typeof node2?.id === "string" && typeof node2.body === "string") bodies.set(node2.id, node2.body);
+  };
+  for (const review of pr?.latestReviews?.nodes ?? []) add(review);
+  for (const thread of pr?.reviewThreads?.nodes ?? []) for (const comment of thread.comments?.nodes ?? []) add(comment);
+  for (const comment of pr?.comments?.nodes ?? []) add(comment);
+  return bodies;
+}
+function unanswered(comments) {
+  const replyTimes = comments.filter((comment) => comment.isAgentReply).map((comment) => Date.parse(comment.createdAt));
+  const lastReply = replyTimes.length === 0 ? Number.NEGATIVE_INFINITY : Math.max(...replyTimes);
+  return comments.filter((comment) => !comment.isAgentReply && !(Date.parse(comment.createdAt) < lastReply)).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+}
+function renderComment(comment, bodies) {
+  const raw = (bodies.get(comment.id) ?? "").replace(/<!--[\s\S]*?-->/g, "").trim();
+  const body = raw.length > MAX_BODY_CHARS ? `${raw.slice(0, MAX_BODY_CHARS)}
+[truncated]` : raw;
+  const kind = comment.isBot ? "bot" : comment.isLocal ? "local account, unprefixed: a human instruction" : "human";
+  const quoted = (body.length > 0 ? body : "(no text)").replace(/^/gm, "> ");
+  return `**${comment.author}** (${kind}, ${comment.createdAt}):
+${quoted}`;
+}
+async function fetchFeedback({
+  runGh: runGh2,
+  target,
+  ignoreTag,
+  selfLogin
+}) {
+  const payload = await fetchPrPayload({ runGh: runGh2, target });
+  const snapshot = normalizeSnapshot(payload, { ignoreTag, selfLogin });
+  const bodies = collectBodies(payload);
+  const sections = [];
+  for (const thread of snapshot.reviewThreads) {
+    if (channelIsAcknowledged(thread.comments)) continue;
+    const location = thread.path === void 0 ? "" : ` on ${thread.path}${thread.line === void 0 ? "" : `:${thread.line}`}`;
+    const state = thread.isResolved ? "resolved" : "unresolved";
+    const allBots = thread.comments.every((comment) => comment.isAgentReply || comment.isBot);
+    sections.push(
+      `### Thread \`${thread.id}\`${location} (${state}${allBots ? ", bot-only" : ""})
+
+` + unanswered(thread.comments).map((comment) => renderComment(comment, bodies)).join("\n\n")
+    );
+  }
+  const unthreaded = [...snapshot.issueComments, ...snapshot.reviewSummaries];
+  if (unthreaded.length > 0 && !channelIsAcknowledged(unthreaded)) {
+    sections.push(
+      "### PR comments and review summaries (reply without `thread`)\n\n" + unanswered(unthreaded).map((comment) => renderComment(comment, bodies)).join("\n\n")
+    );
+  }
+  const key = targetKey(target);
+  if (sections.length === 0) return `No feedback on ${key} is awaiting a reply.`;
+  return `Feedback on ${key} awaiting a reply (${sections.length} channel${sections.length === 1 ? "" : "s"}):
+
+` + sections.join("\n\n") + `
+
+Answer each channel with pr_monitor(action: "reply", pr: "${key}", thread: "<thread id>", body: "...") or omit thread for a PR comment; the reply prefix is added for you. A non-actionable bot acknowledgement needs no reply: use mark_ready instead.`;
+}
+async function postReply({
+  runGh: runGh2,
+  target,
+  thread,
+  body,
+  replyPrefix
+}) {
+  const text = body.startsWith(replyPrefix) ? body : `${replyPrefix} ${body}`;
+  if (thread === void 0) {
+    const url3 = await runGh2([
+      "api",
+      `repos/${target.owner}/${target.repo}/issues/${target.number}/comments`,
+      "-f",
+      `body=${text}`,
+      "--jq",
+      ".html_url"
+    ]);
+    return `Posted a PR comment on ${targetKey(target)}: ${url3.trim()}`;
+  }
+  const payload = parseGhPayload(await runGh2([
+    "api",
+    "graphql",
+    "-f",
+    "query=mutation($thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { url } } }",
+    "-f",
+    `thread=${thread}`,
+    "-f",
+    `body=${text}`
+  ]));
+  const url2 = payload?.data?.addPullRequestReviewThreadReply?.comment?.url;
+  if (typeof url2 !== "string") throw new Error(`GitHub did not confirm the reply to thread ${thread}.`);
+  return `Replied on thread ${thread}: ${url2}`;
+}
+
 // core/label.ts
 var READY_LABEL_COLOR = "0e8a16";
 var READY_LABEL_DESCRIPTION = "The agent finished its work on this PR";
@@ -37437,98 +37625,6 @@ async function squashMergePullRequest({
     throw new Error(detail);
   }
   return await successfulMergeText({ runGh: runGh2, target, pullRequest });
-}
-
-// core/readiness.ts
-function latestComments(comments) {
-  let latestAt = Number.NEGATIVE_INFINITY;
-  let latest = [];
-  for (const comment of comments) {
-    const createdAt = Date.parse(comment.createdAt);
-    if (Number.isNaN(createdAt)) return comments;
-    if (createdAt > latestAt) {
-      latestAt = createdAt;
-      latest = [comment];
-    } else if (createdAt === latestAt) {
-      latest.push(comment);
-    }
-  }
-  return latest;
-}
-function channelIsAcknowledged(comments) {
-  return comments.length > 0 && latestComments(comments).every((comment) => comment.isAgentReply);
-}
-function feedbackChannels(snapshot) {
-  const channels = /* @__PURE__ */ new Map();
-  channels.set("unthreaded", [...snapshot.issueComments, ...snapshot.reviewSummaries]);
-  for (const thread of snapshot.reviewThreads) channels.set(`thread:${thread.id}`, thread.comments);
-  return channels;
-}
-function hasAcknowledgementRegression(prev, next) {
-  const before = feedbackChannels(prev);
-  return [...feedbackChannels(next)].some(([channel, comments]) => {
-    const previous = before.get(channel);
-    if (channel === "unthreaded") {
-      return comments.length > 0 && channelIsAcknowledged(previous ?? []) && !channelIsAcknowledged(comments);
-    }
-    return !channelIsAcknowledged(comments) && (previous === void 0 || channelIsAcknowledged(previous));
-  });
-}
-function ciIsReady(snapshot) {
-  const phase = ciPhase(snapshot);
-  return phase === "none" || phase === "concluded" && snapshot.checks.every((check2) => check2.outcome === "success");
-}
-function assessAutomaticReadiness(snapshot) {
-  const blockers = [];
-  if (snapshot.state !== "OPEN") blockers.push(`PR is ${snapshot.state.toLowerCase()}`);
-  if (!ciIsReady(snapshot)) {
-    blockers.push(ciPhase(snapshot) === "running" ? "CI is running" : "CI is failing");
-  }
-  if (snapshot.mergeable !== "MERGEABLE") {
-    blockers.push(
-      snapshot.mergeable === "CONFLICTING" ? "the PR has a merge conflict" : "mergeability is still unknown"
-    );
-  }
-  const awaitingThreadReplies = snapshot.reviewThreads.filter(
-    (thread) => !channelIsAcknowledged(thread.comments)
-  ).length;
-  if (awaitingThreadReplies > 0) {
-    blockers.push(
-      `${awaitingThreadReplies} review ${awaitingThreadReplies === 1 ? "thread awaits" : "threads await"} a prefixed reply from the local GitHub account`
-    );
-  }
-  const unthreaded = [...snapshot.issueComments, ...snapshot.reviewSummaries];
-  const awaitingUnthreadedReply = unthreaded.length > 0 && !channelIsAcknowledged(unthreaded);
-  if (awaitingUnthreadedReply) {
-    blockers.push("issue or review-summary feedback awaits a prefixed reply from the local GitHub account");
-  }
-  return {
-    eligible: blockers.length === 0,
-    blockers,
-    awaitingThreadReplies,
-    awaitingUnthreadedReply
-  };
-}
-function hasReadyLabel(snapshot, readyLabel) {
-  const normalized = readyLabel.toLowerCase();
-  return snapshot.labels.some((label) => label.toLowerCase() === normalized);
-}
-function withReadyLabel(snapshot, readyLabel, ready) {
-  const normalized = readyLabel.toLowerCase();
-  const withoutReady = snapshot.labels.filter((label) => label.toLowerCase() !== normalized);
-  return { ...snapshot, labels: ready ? [...withoutReady, readyLabel] : withoutReady };
-}
-function hasReadinessInvalidation(prev, next, lastDefiniteMergeable) {
-  if (next.state !== "OPEN") return false;
-  if (prev.headSha !== next.headSha) return true;
-  if (hasNewMergeConflict(lastDefiniteMergeable, next)) return true;
-  if (ciIsReady(prev) && !ciIsReady(next)) return true;
-  if (hasNewCiFailure(prev, next)) return true;
-  if (hasAcknowledgementRegression(prev, next)) return true;
-  if (reviewThreadsReceivedNewComments(prev.reviewThreads, next.reviewThreads)) return true;
-  if (hasAddedRelevantComment(prev.issueComments, next.issueComments)) return true;
-  if (hasAddedRelevantComment(prev.reviewSummaries, next.reviewSummaries)) return true;
-  return false;
 }
 
 // core/report.ts
@@ -38413,102 +38509,6 @@ ${autoMerge}`;
   }
 };
 
-// core/feedback.ts
-var MAX_BODY_CHARS = 4e3;
-function collectBodies(payload) {
-  const pr = payload?.data?.repository?.pullRequest;
-  const bodies = /* @__PURE__ */ new Map();
-  const add = (node2) => {
-    if (typeof node2?.id === "string" && typeof node2.body === "string") bodies.set(node2.id, node2.body);
-  };
-  for (const review of pr?.latestReviews?.nodes ?? []) add(review);
-  for (const thread of pr?.reviewThreads?.nodes ?? []) for (const comment of thread.comments?.nodes ?? []) add(comment);
-  for (const comment of pr?.comments?.nodes ?? []) add(comment);
-  return bodies;
-}
-function unanswered(comments) {
-  const replyTimes = comments.filter((comment) => comment.isAgentReply).map((comment) => Date.parse(comment.createdAt));
-  const lastReply = replyTimes.length === 0 ? Number.NEGATIVE_INFINITY : Math.max(...replyTimes);
-  return comments.filter((comment) => !comment.isAgentReply && !(Date.parse(comment.createdAt) < lastReply)).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-}
-function renderComment(comment, bodies) {
-  const raw = (bodies.get(comment.id) ?? "").replace(/<!--[\s\S]*?-->/g, "").trim();
-  const body = raw.length > MAX_BODY_CHARS ? `${raw.slice(0, MAX_BODY_CHARS)}
-[truncated]` : raw;
-  const kind = comment.isBot ? "bot" : comment.isLocal ? "local account, unprefixed: a human instruction" : "human";
-  const quoted = (body.length > 0 ? body : "(no text)").replace(/^/gm, "> ");
-  return `**${comment.author}** (${kind}, ${comment.createdAt}):
-${quoted}`;
-}
-async function fetchFeedback({
-  runGh: runGh2,
-  target,
-  ignoreTag,
-  selfLogin
-}) {
-  const payload = await fetchPrPayload({ runGh: runGh2, target });
-  const snapshot = normalizeSnapshot(payload, { ignoreTag, selfLogin });
-  const bodies = collectBodies(payload);
-  const sections = [];
-  for (const thread of snapshot.reviewThreads) {
-    if (channelIsAcknowledged(thread.comments)) continue;
-    const location = thread.path === void 0 ? "" : ` on ${thread.path}${thread.line === void 0 ? "" : `:${thread.line}`}`;
-    const state = thread.isResolved ? "resolved" : "unresolved";
-    const allBots = thread.comments.every((comment) => comment.isAgentReply || comment.isBot);
-    sections.push(
-      `### Thread \`${thread.id}\`${location} (${state}${allBots ? ", bot-only" : ""})
-
-` + unanswered(thread.comments).map((comment) => renderComment(comment, bodies)).join("\n\n")
-    );
-  }
-  const unthreaded = [...snapshot.issueComments, ...snapshot.reviewSummaries];
-  if (unthreaded.length > 0 && !channelIsAcknowledged(unthreaded)) {
-    sections.push(
-      "### PR comments and review summaries (reply without `thread`)\n\n" + unanswered(unthreaded).map((comment) => renderComment(comment, bodies)).join("\n\n")
-    );
-  }
-  const key = targetKey(target);
-  if (sections.length === 0) return `No feedback on ${key} is awaiting a reply.`;
-  return `Feedback on ${key} awaiting a reply (${sections.length} channel${sections.length === 1 ? "" : "s"}):
-
-` + sections.join("\n\n") + `
-
-Answer each channel with pr_monitor(action: "reply", pr: "${key}", thread: "<thread id>", body: "...") or omit thread for a PR comment; the reply prefix is added for you. A non-actionable bot acknowledgement needs no reply: use mark_ready instead.`;
-}
-async function postReply({
-  runGh: runGh2,
-  target,
-  thread,
-  body,
-  replyPrefix
-}) {
-  const text = body.startsWith(replyPrefix) ? body : `${replyPrefix} ${body}`;
-  if (thread === void 0) {
-    const url3 = await runGh2([
-      "api",
-      `repos/${target.owner}/${target.repo}/issues/${target.number}/comments`,
-      "-f",
-      `body=${text}`,
-      "--jq",
-      ".html_url"
-    ]);
-    return `Posted a PR comment on ${targetKey(target)}: ${url3.trim()}`;
-  }
-  const payload = parseGhPayload(await runGh2([
-    "api",
-    "graphql",
-    "-f",
-    "query=mutation($thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { url } } }",
-    "-f",
-    `thread=${thread}`,
-    "-f",
-    `body=${text}`
-  ]));
-  const url2 = payload?.data?.addPullRequestReviewThreadReply?.comment?.url;
-  if (typeof url2 !== "string") throw new Error(`GitHub did not confirm the reply to thread ${thread}.`);
-  return `Replied on thread ${thread}: ${url2}`;
-}
-
 // runtime/tool.ts
 var MONITOR_ACTION_VALUES = [
   "start" /* start */,
@@ -39121,6 +39121,22 @@ function createNodeGhRunner() {
   });
 }
 
+// claude-codex/src/delivery.ts
+function planDelivery({
+  kind,
+  hasPushChannel,
+  keepAlive,
+  handedOff,
+  nowMs,
+  keepAliveUntilMs
+}) {
+  const reminder = kind === "idle_reminder" /* idleReminder */;
+  if (hasPushChannel) return { route: "push" /* push */, extendKeepAlive: !reminder };
+  if (!reminder) return { route: "spool" /* spool */, extendKeepAlive: true };
+  const held = keepAlive && !handedOff && nowMs < keepAliveUntilMs;
+  return { route: held ? "spool" /* spool */ : "drop" /* drop */, extendKeepAlive: false };
+}
+
 // claude-codex/src/push.ts
 import { connect } from "node:net";
 import process3 from "node:process";
@@ -39356,23 +39372,25 @@ var createAdapter = ({ sessionId, projectDir }) => {
     report,
     kind
   }) => {
-    const reminder = kind === "idle_reminder" /* idleReminder */;
+    const plan = planDelivery({
+      kind,
+      hasPushChannel: pushChannel !== void 0,
+      keepAlive: config2.keepAlive,
+      handedOff: handedOff.has(targetRegistryKey(target)),
+      nowMs: Date.now(),
+      keepAliveUntilMs
+    });
+    if (plan.route === "drop" /* drop */) return;
     if (pushChannel !== void 0) {
       await pushMessage({ channel: pushChannel, text: report });
-      if (!reminder) extendKeepAlive({ config: config2 });
-      refreshSessionState();
-      if (config2.desktopNotifications) {
-        notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report delivered to your ${hostName} session`);
-      }
-      return;
+    } else {
+      spoolReport(claudePid, report, sessionId);
     }
-    const held = config2.keepAlive && !handedOff.has(targetRegistryKey(target)) && Date.now() < keepAliveUntilMs;
-    if (reminder && !held) return;
-    spoolReport(claudePid, report, sessionId);
-    if (!reminder) extendKeepAlive({ config: config2 });
+    if (plan.extendKeepAlive) extendKeepAlive({ config: config2 });
     refreshSessionState();
     if (config2.desktopNotifications) {
-      notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report waiting in your ${hostName} session`);
+      const verb = pushChannel !== void 0 ? "delivered to" : "waiting in";
+      notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report ${verb} your ${hostName} session`);
     }
   };
   monitorSession = new MonitorSession({
