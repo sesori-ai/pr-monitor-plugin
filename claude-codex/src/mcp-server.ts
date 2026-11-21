@@ -17,6 +17,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 import { loadClaudeConfig, type ClaudeMonitorConfig } from "../../core/config"
 import { targetKey, targetRegistryKey, type Target } from "../../core/target"
+import type { ReportKind } from "../../core/watch"
 import {
   InitialAnnouncementMode,
   InitialAnnouncementState,
@@ -34,6 +35,7 @@ import {
   THREAD_PARAM_DESCRIPTION,
   MonitorAction,
 } from "../../runtime/tool"
+import { DeliveryRoute, isHandedOff, planDelivery } from "./delivery"
 import { messagingChannel, pushMessage } from "./push"
 import { writeSessionState } from "./session-state"
 import { claimSpool, collectDeadSpools, notifyDesktop, probeSpool, spoolReport, SPOOL_ROOT, startToken } from "./spool"
@@ -60,9 +62,13 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
 
   let monitorSession: MonitorSession<ClaudeMonitorConfig>
 
+  const activeWatches = () => monitorSession.list().filter(({ target }) => !handedOff.has(targetRegistryKey(target)))
+  // Whether the Stop hook holds the session open for the hook-based loop.
+  const keepAliveArmed = (): boolean => activeWatches().some(({ config }) => config.keepAlive)
+
   const refreshSessionState = (): void => {
     const watches = monitorSession.list()
-    const active = watches.filter(({ target }) => !handedOff.has(targetRegistryKey(target)))
+    const active = activeWatches()
     const pollMs = Math.max(...watches.map(({ config }) => config.pollIntervalSeconds * 1000), 0)
     writeSessionState(claudePid, {
       version: 1,
@@ -70,7 +76,7 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
       // wakes it by itself, so the Stop hook must not hold turn-end. A failed
       // push is retried by the watch at poll cadence (see deliver), never parked
       // behind hooks an idle session cannot fire.
-      keepAlive: pushChannel === undefined && active.some(({ config }) => config.keepAlive),
+      keepAlive: pushChannel === undefined && keepAliveArmed(),
       expiresAtMs: Date.now() + Math.max(pollMs * 3 + 60_000, STATE_LIVENESS_FLOOR_MS),
       keepAliveUntilMs,
       monitors: active.map(({ target }) => targetKey(target)),
@@ -85,11 +91,21 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
     target,
     config,
     report,
+    kind,
   }: {
     target: Target
     config: ClaudeMonitorConfig
     report: string
+    kind: ReportKind
   }): Promise<void> => {
+    const plan = planDelivery({
+      kind,
+      hasPushChannel: pushChannel !== undefined,
+      keepAliveArmed: keepAliveArmed(),
+      nowMs: Date.now(),
+      keepAliveUntilMs,
+    })
+    if (plan.route === DeliveryRoute.drop) return
     if (pushChannel !== undefined) {
       // Rejection is deliberate: the watch rolls back its baseline and retries
       // the push at poll cadence, which can wake an idle session the moment the
@@ -97,18 +113,14 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
       // hook events an idle session never fires; persistent push failure ends in
       // the watch's own stop-after-consecutive-failures notice.
       await pushMessage({ channel: pushChannel, text: report })
-      extendKeepAlive({ config })
-      refreshSessionState()
-      if (config.desktopNotifications) {
-        notifyDesktop(`PR Monitor — ${targetKey(target)}`, `New report delivered to your ${hostName} session`)
-      }
-      return
+    } else {
+      spoolReport(claudePid, report, sessionId)
     }
-    spoolReport(claudePid, report, sessionId)
-    extendKeepAlive({ config })
+    if (plan.extendKeepAlive) extendKeepAlive({ config })
     refreshSessionState()
-    if (config.desktopNotifications) {
-      notifyDesktop(`PR Monitor — ${targetKey(target)}`, `New report waiting in your ${hostName} session`)
+    if (config.desktopNotifications && plan.notifyDesktop) {
+      const verb = pushChannel !== undefined ? "delivered to" : "waiting in"
+      notifyDesktop(`PR Monitor — ${targetKey(target)}`, `New report ${verb} your ${hostName} session`)
     }
   }
 
@@ -122,12 +134,10 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
       refreshSessionState()
     },
     onTickSettled: refreshSessionState,
-    onReadyChanged: ({ target, ready, watched, config }) => {
-      if (ready && watched) handedOff.add(targetRegistryKey(target))
-      if (!ready) {
-        handedOff.delete(targetRegistryKey(target))
-        if (watched) extendKeepAlive({ config })
-      }
+    onReadyChanged: ({ target, ready, watched, mergeStuck, config }) => {
+      if (isHandedOff({ ready, watched, mergeStuck })) handedOff.add(targetRegistryKey(target))
+      else handedOff.delete(targetRegistryKey(target))
+      if (!ready && watched) extendKeepAlive({ config })
       refreshSessionState()
     },
     statusSuffix: ({ target }) =>
@@ -218,7 +228,7 @@ const createAdapter = ({ sessionId, projectDir }: { sessionId: string | undefine
               prepare: prepareStart,
               announcementMode: InitialAnnouncementMode.awaitDelivery,
               createChannel: ({ target, config }) => ({
-                deliver: ({ report }) => deliver({ target, config, report }),
+                deliver: ({ report, kind }) => deliver({ target, config, report, kind }),
                 persist: ({ report }) => {
                   spoolReport(claudePid, report, sessionId)
                   return Promise.resolve()

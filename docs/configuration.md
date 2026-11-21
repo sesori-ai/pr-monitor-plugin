@@ -60,6 +60,7 @@ Every key with its default value:
   "ignoreCommentTag": "<!-- pr-monitor:reply -->",
   "announceOnStart": true,
   "flushOnCiFailure": true,
+  "idleReminderMinutes": 25,
   "desktopNotifications": false,
   "readyLabel": "agent-ready",
   "autoMerge": false,
@@ -77,10 +78,15 @@ Every key with its default value:
 | `pollIntervalSeconds` | `60` | How often each PR is polled. Clamped between 30 seconds and 24 hours. |
 | `announceOnStart` | `true` | Send a full status report as soon as a monitor starts. |
 | `flushOnCiFailure` | `true` | Report a newly failing check right away instead of batching it. |
+| `idleReminderMinutes` | `25` | Remind the agent about an open PR after this many minutes with no activity and no report. `0` turns it off. |
 
 When `maxCiWaitMinutes` runs out, the report goes out anyway and names the checks still running. A check that newly
 fails is reported right away only once per commit. Later failures on the same commit ride along with the normal
 report instead of each sending their own.
+
+The idle reminder defaults to 25 minutes because the agent's prompt cache expires after about 30 minutes: waking the
+session any later makes its next request much more expensive, and 25 leaves a margin. See
+[idle reminders](behavior.md#idle-reminders) for when it fires.
 
 ### Feedback and readiness
 
@@ -100,8 +106,8 @@ Only the shared Claude Code and Codex adapter reads these:
 
 | Key | Default | What it does |
 |---|---:|---|
-| `desktopNotifications` | `false` | Show an OS notification when a report is delivered or queued. |
-| `keepAlive` | `true` | Keep the hook-based delivery loop running until the ready handoff. |
+| `desktopNotifications` | `false` | Show an OS notification when a report is delivered or queued. Idle reminders never show one. |
+| `keepAlive` | `true` | Keep the hook-based delivery loop running until the ready handoff. A ready PR whose auto-merge was rejected or came back unknown is not handed off. |
 | `keepAliveMaxMinutes` | `120` | Longest quiet stretch the hook-based loop will wait. |
 
 Claude Code sessions with a messaging socket ignore the keep-alive settings, because pushed reports already start

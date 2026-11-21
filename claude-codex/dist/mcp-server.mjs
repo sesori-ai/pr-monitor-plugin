@@ -36672,6 +36672,10 @@ var DEFAULT_MONITOR_CONFIG = {
   ignoreCommentTag: "<!-- pr-monitor:reply -->",
   announceOnStart: true,
   flushOnCiFailure: true,
+  // The agent's prompt cache expires after about 30 minutes, so waking the
+  // session any later makes its next request much more expensive. 25 minutes
+  // leaves a margin for poll granularity.
+  idleReminderMinutes: 25,
   readyLabel: "agent-ready",
   autoMerge: false
 };
@@ -36696,6 +36700,10 @@ function positiveNumber(record2, key) {
   const value = record2[key];
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : void 0;
 }
+function nonNegativeNumber(record2, key) {
+  const value = record2[key];
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
+}
 function environmentAutoMergeOverride(environment, log2) {
   const raw = environment[AUTO_MERGE_ENV];
   if (raw === void 0) return void 0;
@@ -36712,6 +36720,7 @@ function applyMonitorConfig(config2, raw) {
   config2.maxCiWaitMinutes = positiveNumber(record2, "maxCiWaitMinutes") ?? config2.maxCiWaitMinutes;
   const poll = positiveNumber(record2, "pollIntervalSeconds") ?? config2.pollIntervalSeconds;
   config2.pollIntervalSeconds = Math.min(Math.max(poll, MIN_POLL_INTERVAL_SECONDS), MAX_POLL_INTERVAL_SECONDS);
+  config2.idleReminderMinutes = nonNegativeNumber(record2, "idleReminderMinutes") ?? config2.idleReminderMinutes;
   const tag = record2["ignoreCommentTag"];
   config2.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : config2.ignoreCommentTag;
   const announce = record2["announceOnStart"];
@@ -37750,6 +37759,33 @@ function buildReadinessLines({
   }
   return lines;
 }
+function buildIdleReminder(target, snapshot, opts) {
+  const title = snapshot.title.replace(/\s+/g, " ").trim();
+  const readyLabel = opts.readyLabel ?? DEFAULT_READY_LABEL;
+  const unresolved = snapshot.reviewThreads.filter((thread) => !thread.isResolved).length;
+  const lines = [
+    `[PR Monitor] [${targetKey(target)}](${snapshot.url}) \u2014 "${title}" \u2014 idle reminder`,
+    `- Idle: no PR activity and no report for ${opts.idleMinutes}m. Pick this PR back up now: re-check the current head's checks, expected reviews, and feedback instead of waiting for another report.`,
+    ciLine(snapshot, void 0),
+    `- Mergeable: ${snapshot.mergeable}`,
+    reviewLine(snapshot),
+    `- [comment:inline] ${countLabel(unresolved, "unresolved thread")}`,
+    ...buildReadinessLines({
+      target,
+      snapshot,
+      readyLabel,
+      replyPrefix: opts.replyPrefix ?? DEFAULT_REPLY_PREFIX,
+      readinessError: opts.readinessError,
+      autoMergeEnabled: opts.autoMergeEnabled
+    })
+  ];
+  if (opts.autoMergeEnabled === true && hasReadyLabel(snapshot, readyLabel)) {
+    lines.push(
+      `- Required next step: the PR is ready with auto-merge on but is still open, so the merge did not go through. Find out why (checks, required reviews, branch protection, conflicts), fix what you can and call ${inlineCode(`pr_monitor(action: "mark_ready", pr: "${targetKey(target)}")`)} to retry the merge, or tell the user what blocks it.`
+    );
+  }
+  return lines.join("\n");
+}
 function buildReport(target, snapshot, opts) {
   const stateSuffix = snapshot.state !== "OPEN" ? ` \u2014 ${snapshot.state}` : "";
   const title = snapshot.title.replace(/\s+/g, " ").trim();
@@ -37795,6 +37831,9 @@ var PrWatch = class {
   lastDefiniteMergeable;
   dirty = false;
   lastActivityAt = 0;
+  // Last report or agent action that reached the session; with lastActivityAt
+  // it starts the idle-reminder timer.
+  lastReportAt;
   lastFlushAt;
   lastFlushedSnapshot;
   // True until the configured startup report is successfully delivered or a
@@ -37829,6 +37868,9 @@ var PrWatch = class {
   autoMergeNotice;
   // Mutable so set_auto_merge can toggle a running watch.
   autoMerge;
+  // The ready label is present but the last auto-merge attempt was rejected or
+  // its outcome is unknown. Cleared when readiness or auto-merge goes away.
+  mergeStuck = false;
   // Set when set_auto_merge removes the label from an eligible PR. Like the
   // startup reset, activity buffered before it must not restore readiness (and
   // merge) on its own; activity observed by a later poll or a manual ready
@@ -37848,6 +37890,7 @@ var PrWatch = class {
     this.deps = input2.deps;
     this.startedAt = input2.deps.now();
     this.lastFlushAt = this.startedAt;
+    this.lastReportAt = this.startedAt;
     this.snapshot = input2.initial;
     this.lastFlushedSnapshot = input2.initial;
     this.initialAnnouncementPending = input2.config.announceOnStart;
@@ -37912,6 +37955,7 @@ var PrWatch = class {
       if (readiness === void 0 || snapshot === void 0) {
         throw new Error("this watch does not have a readiness channel");
       }
+      this.lastReportAt = this.deps.now();
       this.autoMergeNotice = void 0;
       this.readinessResetPending = false;
       return await this.trackReadinessMutation(async () => {
@@ -37944,6 +37988,7 @@ ${autoMerge}`;
     if (this.stopped) throw new Error("the monitor stopped before the auto-merge change could run");
     return await this.runExclusive(async () => {
       if (this.stopped) throw new Error("the monitor stopped before the auto-merge change could run");
+      this.lastReportAt = this.deps.now();
       const enabled = autoMerge !== void 0;
       if (enabled === (this.autoMerge !== void 0)) {
         return `Auto-merge is already ${enabled ? "enabled" : "disabled"} for ${targetKey(this.target)}.`;
@@ -37952,6 +37997,10 @@ ${autoMerge}`;
       const snapshot = this.snapshot;
       if (!enabled || readiness === void 0 || snapshot === void 0 || !hasReadyLabel(snapshot, readiness.label)) {
         this.autoMerge = autoMerge;
+        if (!enabled && this.mergeStuck) {
+          this.mergeStuck = false;
+          this.notifyReadyChanged(true);
+        }
         return `Auto-merge ${enabled ? "enabled" : "disabled"} for ${targetKey(this.target)}.`;
       }
       return await this.trackReadinessMutation(async () => {
@@ -37995,6 +38044,7 @@ ${autoMerge}`;
     if (this.stopped) return;
     this.rememberDefiniteMergeable(next);
     await this.maybeAutoFlush();
+    await this.maybeRemindIdle();
   }
   async applySnapshot(next) {
     const previous = this.snapshot;
@@ -38247,7 +38297,7 @@ ${autoMerge}`;
     const previousUrgent = this.urgent;
     const report = this.flush(forcedHoldMinutes);
     try {
-      await this.deps.deliver(report);
+      await this.deps.deliver(report, "update" /* update */);
       this.deliveryFailures = 0;
       this.afterReportDelivered();
       this.stopIfTerminal();
@@ -38258,27 +38308,61 @@ ${autoMerge}`;
       this.dirty = true;
       this.holdStartedAt = previousHoldStartedAt;
       this.urgent = previousUrgent;
-      this.deliveryFailures += 1;
+      await this.recordDeliveryFailure(error62);
+    }
+  }
+  /**
+   * Nudge the session when an open PR has had no activity and no report for
+   * idleReminderMinutes, so a PR the agent stopped waiting on is not forgotten.
+   * Buffered activity already has a report coming. A ready PR without
+   * auto-merge is handed off to a human, so it gets no reminder; with
+   * auto-merge on, a ready PR that is still open means the merge got stuck.
+   */
+  async maybeRemindIdle() {
+    const snapshot = this.snapshot;
+    const delayMinutes = this.config.idleReminderMinutes;
+    if (delayMinutes <= 0 || this.stopped || this.dirty || snapshot === void 0 || snapshot.state !== "OPEN") return;
+    const readiness = this.deps.readiness;
+    if (readiness !== void 0 && this.autoMerge === void 0 && hasReadyLabel(snapshot, readiness.label)) return;
+    const now = this.deps.now();
+    const idleMs = now - Math.max(this.lastActivityAt, this.lastReportAt);
+    if (idleMs < delayMinutes * 6e4) return;
+    const reminder = buildIdleReminder(this.target, snapshot, {
+      idleMinutes: Math.round(idleMs / 6e4),
+      readyLabel: readiness?.label,
+      replyPrefix: readiness?.replyPrefix,
+      readinessError: this.readinessError,
+      autoMergeEnabled: this.autoMerge !== void 0
+    });
+    try {
+      await this.deps.deliver(reminder, "idle_reminder" /* idleReminder */);
+      this.deliveryFailures = 0;
+      this.lastReportAt = now;
+    } catch (error62) {
+      await this.recordDeliveryFailure(error62);
+    }
+  }
+  async recordDeliveryFailure(error62) {
+    this.deliveryFailures += 1;
+    this.deps.log(
+      `report delivery failed for ${targetKey(this.target)} (${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error62}`
+    );
+    if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
       this.deps.log(
-        `report delivery failed for ${targetKey(this.target)} (${this.deliveryFailures}/${MAX_CONSECUTIVE_FAILURES}), will retry: ${error62}`
+        `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`
       );
-      if (this.deliveryFailures >= MAX_CONSECUTIVE_FAILURES) {
-        this.deps.log(
-          `monitor stopped for ${targetKey(this.target)}: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures`
-        );
-        if (!this.stopped && this.deps.persist !== void 0) {
-          try {
-            await this.deps.persist(
-              this.stopNotice(
-                `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures. Last error: ${error62 instanceof Error ? error62.message : String(error62)}`
-              )
-            );
-          } catch (persistError) {
-            this.deps.log(`terminal stop notice could not be persisted for ${targetKey(this.target)}: ${persistError}`);
-          }
+      if (!this.stopped && this.deps.persist !== void 0) {
+        try {
+          await this.deps.persist(
+            this.stopNotice(
+              `Monitor stopped: ${MAX_CONSECUTIVE_FAILURES} consecutive delivery failures. Last error: ${error62 instanceof Error ? error62.message : String(error62)}`
+            )
+          );
+        } catch (persistError) {
+          this.deps.log(`terminal stop notice could not be persisted for ${targetKey(this.target)}: ${persistError}`);
         }
-        this.stop();
       }
+      this.stop();
     }
   }
   async prepareAutomaticReady() {
@@ -38333,9 +38417,14 @@ ${autoMerge}`;
       notice = await autoMerge.squashMerge({
         pullRequest: { title: snapshot.title, headSha: snapshot.headSha }
       });
+      this.mergeStuck = false;
     } catch (error62) {
       notice = autoMergeFailureText({ error: error62 });
       this.deps.log(`auto-merge failed for ${targetKey(this.target)}: ${error62}`);
+      if (!(error62 instanceof AutoMergeHeadChangedError)) {
+        this.mergeStuck = true;
+        this.notifyReadyChanged(true);
+      }
     }
     if (report) this.autoMergeNotice = notice;
     return notice;
@@ -38347,13 +38436,15 @@ ${autoMerge}`;
     this.reportedReadinessError = void 0;
   }
   notifyReadyChanged(ready) {
+    if (!ready) this.mergeStuck = false;
     try {
-      this.deps.readiness?.onChanged(ready);
+      this.deps.readiness?.onChanged(ready, ready && this.mergeStuck);
     } catch (error62) {
       this.deps.log(`ready-state observer failed for ${targetKey(this.target)}: ${error62}`);
     }
   }
   afterReportDelivered() {
+    this.lastReportAt = this.deps.now();
     this.reportedReadinessError = this.readinessError;
     this.autoMergeNotice = void 0;
     if (!this.autoReadyAfterInvalidation) return;
@@ -38383,7 +38474,7 @@ ${autoMerge}`;
   }
   async deliverOrLog(message) {
     try {
-      await this.deps.deliver(message);
+      await this.deps.deliver(message, "update" /* update */);
       return true;
     } catch (error62) {
       this.deps.log(`report delivery failed for ${targetKey(this.target)}: ${error62}`);
@@ -38636,7 +38727,7 @@ var MonitorSession = class {
         const report = entry.watch.stopNotice(notice);
         const send = channel === "persistent" /* persistent */ ? entry.channel.persist ?? entry.channel.deliver : entry.channel.deliver;
         try {
-          await send({ report });
+          await send({ report, kind: "update" /* update */ });
         } catch (error62) {
           this.deps.log(`stop notice delivery failed for ${targetKey(entry.watch.target)}: ${error62}`);
         }
@@ -38762,7 +38853,7 @@ ${resetRace.watch.statusLine()}` };
       deps: {
         now: this.deps.now,
         fetchSnapshot: () => this.fetchSnapshot({ target, config: config2 }),
-        deliver: (report) => reportChannel.deliver({ report }),
+        deliver: (report, kind) => reportChannel.deliver({ report, kind }),
         persist: reportChannel.persist === void 0 ? void 0 : (report) => reportChannel.persist?.({ report }) ?? Promise.resolve(),
         log: this.deps.log,
         onStopped: () => {
@@ -38777,7 +38868,7 @@ ${resetRace.watch.statusLine()}` };
           label: config2.readyLabel,
           replyPrefix: config2.ignoreCommentTag ?? "<!-- pr-monitor:reply -->",
           change: (ready) => ready ? addReadyLabel(this.deps.runGh, target, config2.readyLabel) : removeReadyLabel(this.deps.runGh, target, config2.readyLabel),
-          onChanged: (ready) => this.notifyReadyChanged({ target, ready, watched: true, config: config2 })
+          onChanged: (ready, mergeStuck) => this.notifyReadyChanged({ target, ready, watched: true, mergeStuck, config: config2 })
         },
         autoMerge: this.autoMergeDeps({ target, enabled: config2.autoMerge }),
         startupNotice
@@ -38975,7 +39066,7 @@ ${failure2}`;
         }
       }
     }
-    this.notifyReadyChanged({ target, ready: effectiveReady, watched: false, config: config2 });
+    this.notifyReadyChanged({ target, ready: effectiveReady, watched: false, mergeStuck: false, config: config2 });
     return { text, ready: { target, ready: effectiveReady, watched: false } };
   }
   async withdrawUnsafeStandaloneReadiness({
@@ -39041,6 +39132,28 @@ function createNodeGhRunner() {
       resolve(stdout);
     });
   });
+}
+
+// claude-codex/src/delivery.ts
+function isHandedOff({
+  ready,
+  watched,
+  mergeStuck
+}) {
+  return ready && watched && !mergeStuck;
+}
+function planDelivery({
+  kind,
+  hasPushChannel,
+  keepAliveArmed,
+  nowMs,
+  keepAliveUntilMs
+}) {
+  const reminder = kind === "idle_reminder" /* idleReminder */;
+  if (hasPushChannel) return { route: "push" /* push */, extendKeepAlive: !reminder, notifyDesktop: !reminder };
+  if (!reminder) return { route: "spool" /* spool */, extendKeepAlive: true, notifyDesktop: true };
+  const held = keepAliveArmed && nowMs < keepAliveUntilMs;
+  return { route: held ? "spool" /* spool */ : "drop" /* drop */, extendKeepAlive: false, notifyDesktop: false };
 }
 
 // claude-codex/src/push.ts
@@ -39253,9 +39366,11 @@ var createAdapter = ({ sessionId, projectDir }) => {
   let keepAliveUntilMs = 0;
   const STATE_LIVENESS_FLOOR_MS = 5 * 6e4;
   let monitorSession;
+  const activeWatches = () => monitorSession.list().filter(({ target }) => !handedOff.has(targetRegistryKey(target)));
+  const keepAliveArmed = () => activeWatches().some(({ config: config2 }) => config2.keepAlive);
   const refreshSessionState = () => {
     const watches = monitorSession.list();
-    const active = watches.filter(({ target }) => !handedOff.has(targetRegistryKey(target)));
+    const active = activeWatches();
     const pollMs = Math.max(...watches.map(({ config: config2 }) => config2.pollIntervalSeconds * 1e3), 0);
     writeSessionState(claudePid, {
       version: 1,
@@ -39263,7 +39378,7 @@ var createAdapter = ({ sessionId, projectDir }) => {
       // wakes it by itself, so the Stop hook must not hold turn-end. A failed
       // push is retried by the watch at poll cadence (see deliver), never parked
       // behind hooks an idle session cannot fire.
-      keepAlive: pushChannel === void 0 && active.some(({ config: config2 }) => config2.keepAlive),
+      keepAlive: pushChannel === void 0 && keepAliveArmed(),
       expiresAtMs: Date.now() + Math.max(pollMs * 3 + 6e4, STATE_LIVENESS_FLOOR_MS),
       keepAliveUntilMs,
       monitors: active.map(({ target }) => targetKey(target))
@@ -39275,22 +39390,27 @@ var createAdapter = ({ sessionId, projectDir }) => {
   const deliver = async ({
     target,
     config: config2,
-    report
+    report,
+    kind
   }) => {
+    const plan = planDelivery({
+      kind,
+      hasPushChannel: pushChannel !== void 0,
+      keepAliveArmed: keepAliveArmed(),
+      nowMs: Date.now(),
+      keepAliveUntilMs
+    });
+    if (plan.route === "drop" /* drop */) return;
     if (pushChannel !== void 0) {
       await pushMessage({ channel: pushChannel, text: report });
-      extendKeepAlive({ config: config2 });
-      refreshSessionState();
-      if (config2.desktopNotifications) {
-        notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report delivered to your ${hostName} session`);
-      }
-      return;
+    } else {
+      spoolReport(claudePid, report, sessionId);
     }
-    spoolReport(claudePid, report, sessionId);
-    extendKeepAlive({ config: config2 });
+    if (plan.extendKeepAlive) extendKeepAlive({ config: config2 });
     refreshSessionState();
-    if (config2.desktopNotifications) {
-      notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report waiting in your ${hostName} session`);
+    if (config2.desktopNotifications && plan.notifyDesktop) {
+      const verb = pushChannel !== void 0 ? "delivered to" : "waiting in";
+      notifyDesktop(`PR Monitor \u2014 ${targetKey(target)}`, `New report ${verb} your ${hostName} session`);
     }
   };
   monitorSession = new MonitorSession({
@@ -39303,12 +39423,10 @@ var createAdapter = ({ sessionId, projectDir }) => {
       refreshSessionState();
     },
     onTickSettled: refreshSessionState,
-    onReadyChanged: ({ target, ready, watched, config: config2 }) => {
-      if (ready && watched) handedOff.add(targetRegistryKey(target));
-      if (!ready) {
-        handedOff.delete(targetRegistryKey(target));
-        if (watched) extendKeepAlive({ config: config2 });
-      }
+    onReadyChanged: ({ target, ready, watched, mergeStuck, config: config2 }) => {
+      if (isHandedOff({ ready, watched, mergeStuck })) handedOff.add(targetRegistryKey(target));
+      else handedOff.delete(targetRegistryKey(target));
+      if (!ready && watched) extendKeepAlive({ config: config2 });
       refreshSessionState();
     },
     statusSuffix: ({ target }) => handedOff.has(targetRegistryKey(target)) ? ", handed off (ready)" : ""
@@ -39352,7 +39470,7 @@ Still monitoring it, but it no longer holds this session open; new activity re-o
         prepare: prepareStart,
         announcementMode: "await_delivery" /* awaitDelivery */,
         createChannel: ({ target, config: config2 }) => ({
-          deliver: ({ report }) => deliver({ target, config: config2, report }),
+          deliver: ({ report, kind }) => deliver({ target, config: config2, report, kind }),
           persist: ({ report }) => {
             spoolReport(claudePid, report, sessionId);
             return Promise.resolve();

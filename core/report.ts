@@ -200,6 +200,50 @@ export function buildReadinessLines({
   return lines
 }
 
+// Short nudge for an open PR that has had no activity and no report for the
+// configured idle delay: current state only, nothing "new since".
+export function buildIdleReminder(
+  target: Target,
+  snapshot: PrSnapshot,
+  opts: {
+    idleMinutes: number
+    readyLabel?: string
+    replyPrefix?: string
+    readinessError?: string
+    autoMergeEnabled?: boolean
+  },
+): string {
+  const title = snapshot.title.replace(/\s+/g, " ").trim()
+  const readyLabel = opts.readyLabel ?? DEFAULT_READY_LABEL
+  const unresolved = snapshot.reviewThreads.filter((thread) => !thread.isResolved).length
+  const lines = [
+    `[PR Monitor] [${targetKey(target)}](${snapshot.url}) — "${title}" — idle reminder`,
+    `- Idle: no PR activity and no report for ${opts.idleMinutes}m. Pick this PR back up now: re-check the ` +
+      "current head's checks, expected reviews, and feedback instead of waiting for another report.",
+    ciLine(snapshot, undefined),
+    `- Mergeable: ${snapshot.mergeable}`,
+    reviewLine(snapshot),
+    `- [comment:inline] ${countLabel(unresolved, "unresolved thread")}`,
+    ...buildReadinessLines({
+      target,
+      snapshot,
+      readyLabel,
+      replyPrefix: opts.replyPrefix ?? DEFAULT_REPLY_PREFIX,
+      readinessError: opts.readinessError,
+      autoMergeEnabled: opts.autoMergeEnabled,
+    }),
+  ]
+  if (opts.autoMergeEnabled === true && hasReadyLabel(snapshot, readyLabel)) {
+    lines.push(
+      "- Required next step: the PR is ready with auto-merge on but is still open, so the merge did not go " +
+        "through. Find out why (checks, required reviews, branch protection, conflicts), fix what you can and call " +
+        `${inlineCode(`pr_monitor(action: "mark_ready", pr: "${targetKey(target)}")`)} to retry the merge, or tell ` +
+        "the user what blocks it.",
+    )
+  }
+  return lines.join("\n")
+}
+
 export function buildReport(
   target: Target,
   snapshot: PrSnapshot,

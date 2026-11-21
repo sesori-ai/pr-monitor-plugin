@@ -48,6 +48,7 @@ test("Claude plugin root contains the exact tracked release payload", () => {
     "hooks/drain-spool.mjs",
     "hooks/hooks.json",
     "skills/monitor-pr/SKILL.md",
+    "src/delivery.ts",
     "src/mcp-server.ts",
     "src/push.ts",
     "src/session-state.ts",
@@ -58,7 +59,7 @@ test("Claude plugin root contains the exact tracked release payload", () => {
 test("Claude handoff follows readiness transitions rather than report delivery", async () => {
   const source = await readFile("claude-codex/src/mcp-server.ts", "utf8")
 
-  assert.match(source, /onReadyChanged:.*if \(!ready\).*extendKeepAlive\(\{ config \}\)/s)
+  assert.match(source, /onReadyChanged:.*if \(!ready && watched\) extendKeepAlive\(\{ config \}\)/s)
   // \r?\n: Windows checkouts read the source with CRLF endings.
   const deliverBody = /const deliver = async \(\{[\s\S]*?\r?\n  \}\r?\n/.exec(source)?.[0] ?? ""
   assert.ok(deliverBody.length > 0, "deliver body not found")

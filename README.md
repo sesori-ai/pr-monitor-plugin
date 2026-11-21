@@ -170,6 +170,7 @@ yourself or `.pr-monitor.json` in a repository. The settings people change most:
 ```json
 {
   "debounceMinutes": 2,
+  "idleReminderMinutes": 25,
   "readyLabel": "agent-ready",
   "autoMerge": false
 }

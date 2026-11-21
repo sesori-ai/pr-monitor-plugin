@@ -16,7 +16,7 @@ import {
 import { hasReadyLabel, withReadyLabel } from "../core/readiness"
 import { AUTO_MERGE_GUIDANCE, DEFAULT_REPLY_PREFIX } from "../core/report"
 import { parseTarget, targetKey, targetRegistryKey, type Target } from "../core/target"
-import { type AutoMergeDeps, PrWatch } from "../core/watch"
+import { type AutoMergeDeps, PrWatch, ReportKind } from "../core/watch"
 import { MonitorAction } from "./tool"
 
 export enum InitialAnnouncementMode {
@@ -42,7 +42,8 @@ export enum WatchChangeType {
 }
 
 export type ReportChannel = {
-  deliver: (input: { report: string }) => Promise<void>
+  // `kind` lets a shell tell an idle reminder from a report it must count as activity.
+  deliver: (input: { report: string; kind: ReportKind }) => Promise<void>
   persist?: (input: { report: string }) => Promise<void>
 }
 
@@ -86,7 +87,14 @@ type MonitorSessionDeps<TConfig extends MonitorConfig> = {
   cancel?: (input: { timer: unknown }) => void
   onWatchChanged?: (event: { type: WatchChangeType; target: Target; config: TConfig }) => void
   onTickSettled?: (event: { target: Target; config: TConfig }) => void
-  onReadyChanged?: (event: { target: Target; ready: boolean; watched: boolean; config: TConfig }) => void
+  onReadyChanged?: (event: {
+    target: Target
+    ready: boolean
+    watched: boolean
+    // Ready, but the auto-merge attempt was rejected or came back unknown.
+    mergeStuck: boolean
+    config: TConfig
+  }) => void
   statusSuffix?: (input: { target: Target; config: TConfig }) => string
 }
 
@@ -313,7 +321,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
             ? (entry.channel.persist ?? entry.channel.deliver)
             : entry.channel.deliver
         try {
-          await send({ report })
+          await send({ report, kind: ReportKind.update })
         } catch (error) {
           this.deps.log(`stop notice delivery failed for ${targetKey(entry.watch.target)}: ${error}`)
         }
@@ -467,7 +475,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
       deps: {
         now: this.deps.now,
         fetchSnapshot: () => this.fetchSnapshot({ target, config }),
-        deliver: (report) => reportChannel.deliver({ report }),
+        deliver: (report, kind) => reportChannel.deliver({ report, kind }),
         persist:
           reportChannel.persist === undefined
             ? undefined
@@ -488,7 +496,8 @@ export class MonitorSession<TConfig extends MonitorConfig> {
             ready
               ? addReadyLabel(this.deps.runGh, target, config.readyLabel)
               : removeReadyLabel(this.deps.runGh, target, config.readyLabel),
-          onChanged: (ready) => this.notifyReadyChanged({ target, ready, watched: true, config }),
+          onChanged: (ready, mergeStuck) =>
+            this.notifyReadyChanged({ target, ready, watched: true, mergeStuck, config }),
         },
         autoMerge: this.autoMergeDeps({ target, enabled: config.autoMerge }),
         startupNotice,
@@ -716,7 +725,7 @@ export class MonitorSession<TConfig extends MonitorConfig> {
         }
       }
     }
-    this.notifyReadyChanged({ target, ready: effectiveReady, watched: false, config })
+    this.notifyReadyChanged({ target, ready: effectiveReady, watched: false, mergeStuck: false, config })
     return { text, ready: { target, ready: effectiveReady, watched: false } }
   }
 
@@ -769,7 +778,13 @@ export class MonitorSession<TConfig extends MonitorConfig> {
     }
   }
 
-  private notifyReadyChanged(event: { target: Target; ready: boolean; watched: boolean; config: TConfig }): void {
+  private notifyReadyChanged(event: {
+    target: Target
+    ready: boolean
+    watched: boolean
+    mergeStuck: boolean
+    config: TConfig
+  }): void {
     try {
       this.deps.onReadyChanged?.(event)
     } catch (error) {

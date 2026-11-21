@@ -15,6 +15,9 @@ export type WatchConfig = {
   announceOnStart: boolean
   // Deliver immediately when a check goes red, skipping debounce and CI hold.
   flushOnCiFailure: boolean
+  // Remind the session about an open PR after this many minutes with no new
+  // activity and no report; 0 turns the reminder off.
+  idleReminderMinutes: number
 }
 
 export type MonitorConfig = WatchConfig & {
@@ -42,6 +45,10 @@ const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
   ignoreCommentTag: "<!-- pr-monitor:reply -->",
   announceOnStart: true,
   flushOnCiFailure: true,
+  // The agent's prompt cache expires after about 30 minutes, so waking the
+  // session any later makes its next request much more expensive. 25 minutes
+  // leaves a margin for poll granularity.
+  idleReminderMinutes: 25,
   readyLabel: "agent-ready",
   autoMerge: false,
 }
@@ -97,6 +104,12 @@ function positiveNumber(record: Record<string, unknown>, key: string): number | 
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
 }
 
+// Like positiveNumber, but 0 is a valid "off" value.
+function nonNegativeNumber(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key]
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
 function environmentAutoMergeOverride(
   environment: MonitorEnvironment,
   log: (message: string) => void,
@@ -118,6 +131,7 @@ function applyMonitorConfig(config: MonitorConfig, raw: unknown): void {
   config.maxCiWaitMinutes = positiveNumber(record, "maxCiWaitMinutes") ?? config.maxCiWaitMinutes
   const poll = positiveNumber(record, "pollIntervalSeconds") ?? config.pollIntervalSeconds
   config.pollIntervalSeconds = Math.min(Math.max(poll, MIN_POLL_INTERVAL_SECONDS), MAX_POLL_INTERVAL_SECONDS)
+  config.idleReminderMinutes = nonNegativeNumber(record, "idleReminderMinutes") ?? config.idleReminderMinutes
 
   const tag = record["ignoreCommentTag"]
   config.ignoreCommentTag = typeof tag === "string" && tag.length > 0 ? tag : config.ignoreCommentTag

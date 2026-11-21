@@ -59,6 +59,7 @@ claude-codex/         # Claude Code + Codex shell. THIS DIRECTORY IS THE PLUGIN 
                      # a relative cwd resolves against the plugin root; a contained ./ command resolves against that cwd.
   src/               # Bundled; never executed from source.
     mcp-server.ts# MCP stdio adapter: MonitorSession wiring, push-first delivery with spool fallback, handoff, shutdown notices.
+    delivery.ts  # planDelivery: push/spool/drop route and keep-alive extension per report kind (pure, tested).
     push.ts      # active delivery: injects reports as user messages over the session's uds-messaging socket (env CLAUDE_CODE_MESSAGING_SOCKET/TOKEN).
     spool.ts     # spool write/GC/ownership: ~/.claude/pr-monitor/spool/<claude pid>/<ts>-<server pid>-<seq>.md (tmp+rename).
     session-state.ts # keep-alive state published to the hooks: <spool dir>/session.json.
@@ -147,6 +148,14 @@ Hermes plugin version is part of the lockstep release check. Rebuild and commit 
   transitions into "running" and non-failing per-check progress do **NOT** count unless a new head caused them.
   Mergeability is compared against the last *definite* value so transient `UNKNOWN` churn stays quiet while a real
   `MERGEABLE -> UNKNOWN -> CONFLICTING` settle is caught and flushed immediately.
+- **Idle reminder** (`maybeRemindIdle`, `core/watch.ts`): after each poll, an OPEN, non-dirty watch whose PR has had
+  no activity (`lastActivityAt`) and no delivered report or manual ready/auto-merge action (`lastReportAt`) for
+  `idleReminderMinutes` (default 25, under the ~30-minute prompt cache; `0` off) delivers `buildIdleReminder` with
+  `ReportKind.idleReminder`, then restarts its timer. It is skipped when the ready label is present and auto-merge is
+  off (handed off); with auto-merge on a ready open PR means the merge got stuck. Failure counts toward the
+  delivery-failure stop and retries next poll. The Claude adapter's `planDelivery` (`claude-codex/src/delivery.ts`) never
+  extends the keep-alive cap for a reminder and drops it in spool mode unless the session-wide keep-alive loop is holding
+  the session (armed by any watch not yet handed off, and before the cap).
 - **Failure handling** — notFound → stop with notice; 10 consecutive poll failures → stop; 10 consecutive delivery failures → stop. Delivery failures roll back the baseline so the same activity is retried. A failed initial announcement keeps its zero baseline, marks the watch urgent, and retries the complete startup report at the next poll.
 - **Reentrancy guard** — `runExclusive` (per-watch promise queue) serializes `tick()` and `manualFlush()` so overlapping fetches can't apply out of order; ticks skip while an op is pending, manual flushes queue. Auto-flush delivery is **awaited inside** that op, not fire-and-forget: its failure path rolls back exactly the state a later flush advances (`lastFlushAt`, `lastFlushedSnapshot`, `dirty`, `holdStartedAt`, `urgent`), so a late rejection from an overlapping delivery would otherwise rewind a newer report's baseline and re-fire it immediately. Comment "new since" comparisons use IDs from `lastFlushedSnapshot`, avoiding GitHub's second-granularity timestamp race. Ticks skipping while a report is in flight is the intended consequence. `tick` also re-checks `stopped` after its awaited fetch so a concurrent `stop()` prevents any late apply/deliver.
 - **Stop/mutation fencing** — a stopped watch rejects queued flush/ready actions and remains registered until an
@@ -210,7 +219,10 @@ Hermes plugin version is part of the lockstep release check. Rebuild and commit 
   `claude-codex/hooks/await-activity.mjs`, which blocks until a report is spooled: one model round trip per real event.
   `session-state.ts` publishes liveness and the rolling `keepAliveMaxMinutes` idle deadline. The MCP server refreshes
   it on watch/handoff changes and every poll tick; a lapsed heartbeat tells hooks that the server died. Confirmed
-  automatic/manual readiness adds the normalized target to `handedOff`; confirmed withdrawal removes it. Report
+  automatic/manual readiness adds the normalized target to `handedOff`; confirmed withdrawal removes it. A ready PR whose
+  auto-merge attempt was rejected or came back unknown (`mergeStuck` from `PrWatch`, cleared by withdrawal or
+  turning auto-merge off) is not handed off (`isHandedOff`, `claude-codex/src/delivery.ts`), so the loop stays armed for
+  its idle reminder within the same cap. Report
   delivery alone does not change handoff, so resolution-only activity can report without reopening keep-alive.
   The waiter detects reports but never unlinks them; the PostToolUse drain owns exactly-once delivery.
   `drain-spool.mjs` counts blocks that produced no wait to bound tight Stop loops. `.waiter` resets that streak after

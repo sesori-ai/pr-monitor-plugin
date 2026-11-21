@@ -108,6 +108,9 @@ Address everything in one batch:
   monitor does not retry unchanged readiness. A changed head instead cancels
   standalone readiness. Inspect the result, address any blocker, then use
   `mark_ready` only when an explicit new merge attempt is warranted.
+- **Idle reminder:** the PR has had no activity and no report for the
+  configured delay. Re-check the current head's checks, expected reviews, and
+  feedback now; act on what is left, or call `mark_ready` when nothing is.
 - **Merged/closed:** monitoring stopped; no further action.
 
 After the fix is pushed, reply on GitHub with the configured prefix. It is the
