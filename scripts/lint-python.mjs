@@ -4,7 +4,7 @@
 import { spawnSync } from "node:child_process"
 
 // Keep in sync with the `pip install ruff==` step in .github/workflows/ci.yml.
-const RUFF_VERSION = "0.17.5"
+const RUFF_VERSION = "0.17.6"
 const targets = ["hermes", "test/hermes_adapter_test.py"]
 
 function probe(command, args) {

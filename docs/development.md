@@ -34,7 +34,7 @@ instructions—needs a concise entry under `[Unreleased]` in [`CHANGELOG.md`](..
 
 ```sh
 npm ci
-npm run lint         # oxlint (TS/JS) + ruff 0.17.5 check and format --check (Hermes Python, via PATH or uvx)
+npm run lint         # oxlint (TS/JS) + ruff 0.17.6 check and format --check (Hermes Python, via PATH or uvx)
 npm test             # core, runtime, and adapter regression tests
 npm run typecheck    # core + runtime + all TypeScript adapters
 npm run build        # all host artifacts

@@ -34,7 +34,7 @@ jobs:
           python-version: "3.11"
       - run: npm ci
       # Keep in sync with RUFF_VERSION in scripts/lint-python.mjs.
-      - run: python -m pip install ruff==0.17.5
+      - run: python -m pip install ruff==0.17.6
       - run: npm run lint
       - run: npm test
       - run: npm run typecheck
