@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Development tooling: the `undici` override moves to 8.13.1 (was 8.12.3), `npm run lint` and CI use ruff 0.17.6
+  (was 0.17.5), and the lockfile picks up in-range transitive updates. Committed Claude/Codex and Hermes bundles
+  rebuild byte-identical.
+
 ## [0.10.0]
 
 ### Added
